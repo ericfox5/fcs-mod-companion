@@ -1,0 +1,1305 @@
+{
+ "note": "Logo keys under R2 logos/. Teams keyed by normalized display name (TEAM.TDNA); conferences by normalized CONF.CNAM. Team PNGs are ESPN CDN team logos by ESPN team id; conf/ovc.svg and conf/uac.png are public-domain files from Wikimedia Commons.",
+ "generatedAt": "2026-10-29T20:03:14.174Z",
+ "teams": {
+  "abilenechristian": {
+   "key": "teams/2000.png",
+   "espn": "Abilene Christian Wildcats"
+  },
+  "alabamaaandm": {
+   "key": "teams/2010.png",
+   "espn": "Alabama A&M Bulldogs"
+  },
+  "alabamastate": {
+   "key": "teams/2011.png",
+   "espn": "Alabama State Hornets"
+  },
+  "alcornstate": {
+   "key": "teams/2016.png",
+   "espn": "Alcorn State Braves"
+  },
+  "austinpeay": {
+   "key": "teams/2046.png",
+   "espn": "Austin Peay Governors"
+  },
+  "bethunecookman": {
+   "key": "teams/2065.png",
+   "espn": "Bethune-Cookman Wildcats"
+  },
+  "brown": {
+   "key": "teams/225.png",
+   "espn": "Brown Bears"
+  },
+  "bryant": {
+   "key": "teams/2803.png",
+   "espn": "Bryant Bulldogs"
+  },
+  "bucknell": {
+   "key": "teams/2083.png",
+   "espn": "Bucknell Bison"
+  },
+  "butler": {
+   "key": "teams/2086.png",
+   "espn": "Butler Bulldogs"
+  },
+  "calpoly": {
+   "key": "teams/13.png",
+   "espn": "Cal Poly Mustangs"
+  },
+  "campbell": {
+   "key": "teams/2097.png",
+   "espn": "Campbell Fighting Camels"
+  },
+  "centralarkansas": {
+   "key": "teams/2110.png",
+   "espn": "Central Arkansas Bears"
+  },
+  "centralconnecticut": {
+   "key": "teams/2115.png",
+   "espn": "Central Connecticut Blue Devils"
+  },
+  "charlestonsouthern": {
+   "key": "teams/2127.png",
+   "espn": "Charleston Southern Buccaneers"
+  },
+  "chattanooga": {
+   "key": "teams/236.png",
+   "espn": "Chattanooga Mocs"
+  },
+  "colgate": {
+   "key": "teams/2142.png",
+   "espn": "Colgate Raiders"
+  },
+  "columbia": {
+   "key": "teams/171.png",
+   "espn": "Columbia Lions"
+  },
+  "cornell": {
+   "key": "teams/172.png",
+   "espn": "Cornell Big Red"
+  },
+  "dartmouth": {
+   "key": "teams/159.png",
+   "espn": "Dartmouth Big Green"
+  },
+  "davidson": {
+   "key": "teams/2166.png",
+   "espn": "Davidson Wildcats"
+  },
+  "dayton": {
+   "key": "teams/2168.png",
+   "espn": "Dayton Flyers"
+  },
+  "delawarestate": {
+   "key": "teams/2169.png",
+   "espn": "Delaware State Hornets"
+  },
+  "drake": {
+   "key": "teams/2181.png",
+   "espn": "Drake Bulldogs"
+  },
+  "duquesne": {
+   "key": "teams/2184.png",
+   "espn": "Duquesne Dukes"
+  },
+  "easttennesseestate": {
+   "key": "teams/2193.png",
+   "espn": "East Tennessee State Buccaneers"
+  },
+  "easternillinois": {
+   "key": "teams/2197.png",
+   "espn": "Eastern Illinois Panthers"
+  },
+  "easternkentucky": {
+   "key": "teams/2198.png",
+   "espn": "Eastern Kentucky Colonels"
+  },
+  "easternwashington": {
+   "key": "teams/331.png",
+   "espn": "Eastern Washington Eagles"
+  },
+  "elon": {
+   "key": "teams/2210.png",
+   "espn": "Elon Phoenix"
+  },
+  "floridaaandm": {
+   "key": "teams/50.png",
+   "espn": "Florida A&M Rattlers"
+  },
+  "fordham": {
+   "key": "teams/2230.png",
+   "espn": "Fordham Rams"
+  },
+  "furman": {
+   "key": "teams/231.png",
+   "espn": "Furman Paladins"
+  },
+  "gardnerwebb": {
+   "key": "teams/2241.png",
+   "espn": "Gardner-Webb Runnin' Bulldogs"
+  },
+  "georgetown": {
+   "key": "teams/46.png",
+   "espn": "Georgetown Hoyas"
+  },
+  "hampton": {
+   "key": "teams/2261.png",
+   "espn": "Hampton Pirates"
+  },
+  "harvard": {
+   "key": "teams/108.png",
+   "espn": "Harvard Crimson"
+  },
+  "holycross": {
+   "key": "teams/107.png",
+   "espn": "Holy Cross Crusaders"
+  },
+  "houstonchristian": {
+   "key": "teams/2277.png",
+   "espn": "Houston Christian Huskies"
+  },
+  "howard": {
+   "key": "teams/47.png",
+   "espn": "Howard Bison"
+  },
+  "idaho": {
+   "key": "teams/70.png",
+   "espn": "Idaho Vandals"
+  },
+  "idahostate": {
+   "key": "teams/304.png",
+   "espn": "Idaho State Bengals"
+  },
+  "illinoisstate": {
+   "key": "teams/2287.png",
+   "espn": "Illinois State Redbirds"
+  },
+  "incarnateword": {
+   "key": "teams/2916.png",
+   "espn": "Incarnate Word Cardinals"
+  },
+  "indianastate": {
+   "key": "teams/282.png",
+   "espn": "Indiana State Sycamores"
+  },
+  "jacksonstate": {
+   "key": "teams/2296.png",
+   "espn": "Jackson State Tigers"
+  },
+  "lafayette": {
+   "key": "teams/322.png",
+   "espn": "Lafayette Leopards"
+  },
+  "lamar": {
+   "key": "teams/2320.png",
+   "espn": "Lamar Cardinals"
+  },
+  "lehigh": {
+   "key": "teams/2329.png",
+   "espn": "Lehigh Mountain Hawks"
+  },
+  "lindenwood": {
+   "key": "teams/2815.png",
+   "espn": "Lindenwood Lions"
+  },
+  "longisland": {
+   "key": "teams/2341.png",
+   "espn": "Long Island University Sharks"
+  },
+  "maine": {
+   "key": "teams/311.png",
+   "espn": "Maine Black Bears"
+  },
+  "marist": {
+   "key": "teams/2368.png",
+   "espn": "Marist Red Foxes"
+  },
+  "mcneesestate": {
+   "key": "teams/2377.png",
+   "espn": "McNeese Cowboys"
+  },
+  "mercer": {
+   "key": "teams/2382.png",
+   "espn": "Mercer Bears"
+  },
+  "merrimack": {
+   "key": "teams/2771.png",
+   "espn": "Merrimack Warriors"
+  },
+  "missvalleystate": {
+   "key": "teams/2400.png",
+   "espn": "Mississippi Valley State Delta Devils"
+  },
+  "monmouth": {
+   "key": "teams/2405.png",
+   "espn": "Monmouth Hawks"
+  },
+  "montana": {
+   "key": "teams/149.png",
+   "espn": "Montana Grizzlies"
+  },
+  "montanastate": {
+   "key": "teams/147.png",
+   "espn": "Montana State Bobcats"
+  },
+  "moreheadstate": {
+   "key": "teams/2413.png",
+   "espn": "Morehead State Eagles"
+  },
+  "morganstate": {
+   "key": "teams/2415.png",
+   "espn": "Morgan State Bears"
+  },
+  "murraystate": {
+   "key": "teams/93.png",
+   "espn": "Murray State Racers"
+  },
+  "newhampshire": {
+   "key": "teams/160.png",
+   "espn": "New Hampshire Wildcats"
+  },
+  "nicholls": {
+   "key": "teams/2447.png",
+   "espn": "Nicholls Colonels"
+  },
+  "norfolkstate": {
+   "key": "teams/2450.png",
+   "espn": "Norfolk State Spartans"
+  },
+  "northalabama": {
+   "key": "teams/2453.png",
+   "espn": "North Alabama Lions"
+  },
+  "northcarolinaaandt": {
+   "key": "teams/2448.png",
+   "espn": "North Carolina A&T Aggies"
+  },
+  "northcarolinacentral": {
+   "key": "teams/2428.png",
+   "espn": "North Carolina Central Eagles"
+  },
+  "northdakota": {
+   "key": "teams/155.png",
+   "espn": "North Dakota Fighting Hawks"
+  },
+  "northernarizona": {
+   "key": "teams/2464.png",
+   "espn": "Northern Arizona Lumberjacks"
+  },
+  "northerncolorado": {
+   "key": "teams/2458.png",
+   "espn": "Northern Colorado Bears"
+  },
+  "northerniowa": {
+   "key": "teams/2460.png",
+   "espn": "Northern Iowa Panthers"
+  },
+  "northwesternstate": {
+   "key": "teams/2466.png",
+   "espn": "Northwestern State Demons"
+  },
+  "penn": {
+   "key": "teams/219.png",
+   "espn": "Pennsylvania Quakers"
+  },
+  "portlandstate": {
+   "key": "teams/2502.png",
+   "espn": "Portland State Vikings"
+  },
+  "prarieviewaandm": {
+   "key": "teams/2504.png",
+   "espn": "Prairie View A&M Panthers"
+  },
+  "presbyterian": {
+   "key": "teams/2506.png",
+   "espn": "Presbyterian Blue Hose"
+  },
+  "princeton": {
+   "key": "teams/163.png",
+   "espn": "Princeton Tigers"
+  },
+  "rhodeisland": {
+   "key": "teams/227.png",
+   "espn": "Rhode Island Rams"
+  },
+  "richmond": {
+   "key": "teams/257.png",
+   "espn": "Richmond Spiders"
+  },
+  "robertmorris": {
+   "key": "teams/2523.png",
+   "espn": "Robert Morris Colonials"
+  },
+  "sacredheart": {
+   "key": "teams/2529.png",
+   "espn": "Sacred Heart Pioneers"
+  },
+  "samford": {
+   "key": "teams/2535.png",
+   "espn": "Samford Bulldogs"
+  },
+  "sandiego": {
+   "key": "teams/301.png",
+   "espn": "San Diego Toreros"
+  },
+  "southcarolinastate": {
+   "key": "teams/2569.png",
+   "espn": "South Carolina State Bulldogs"
+  },
+  "southdakota": {
+   "key": "teams/233.png",
+   "espn": "South Dakota Coyotes"
+  },
+  "southdakotastate": {
+   "key": "teams/2571.png",
+   "espn": "South Dakota State Jackrabbits"
+  },
+  "southeastmissourist": {
+   "key": "teams/2546.png",
+   "espn": "Southeast Missouri State Redhawks"
+  },
+  "southern": {
+   "key": "teams/2582.png",
+   "espn": "Southern Jaguars"
+  },
+  "southernillinois": {
+   "key": "teams/79.png",
+   "espn": "Southern Illinois Salukis"
+  },
+  "southernutah": {
+   "key": "teams/253.png",
+   "espn": "Southern Utah Thunderbirds"
+  },
+  "stephenfaustin": {
+   "key": "teams/2617.png",
+   "espn": "Stephen F. Austin Lumberjacks"
+  },
+  "stetson": {
+   "key": "teams/56.png",
+   "espn": "Stetson Hatters"
+  },
+  "stonehill": {
+   "key": "teams/284.png",
+   "espn": "Stonehill Skyhawks"
+  },
+  "stonybrook": {
+   "key": "teams/2619.png",
+   "espn": "Stony Brook Seawolves"
+  },
+  "tarletonstate": {
+   "key": "teams/2627.png",
+   "espn": "Tarleton State Texans"
+  },
+  "tennesseestate": {
+   "key": "teams/2634.png",
+   "espn": "Tennessee State Tigers"
+  },
+  "tennesseetech": {
+   "key": "teams/2635.png",
+   "espn": "Tennessee Tech Golden Eagles"
+  },
+  "texassouthern": {
+   "key": "teams/2640.png",
+   "espn": "Texas Southern Tigers"
+  },
+  "thecitadel": {
+   "key": "teams/2643.png",
+   "espn": "The Citadel Bulldogs"
+  },
+  "towson": {
+   "key": "teams/119.png",
+   "espn": "Towson Tigers"
+  },
+  "ualbany": {
+   "key": "teams/399.png",
+   "espn": "UAlbany Great Danes"
+  },
+  "ucdavis": {
+   "key": "teams/302.png",
+   "espn": "UC Davis Aggies"
+  },
+  "utmartin": {
+   "key": "teams/2630.png",
+   "espn": "UT Martin Skyhawks"
+  },
+  "utahtech": {
+   "key": "teams/3101.png",
+   "espn": "Utah Tech Trailblazers"
+  },
+  "villanova": {
+   "key": "teams/222.png",
+   "espn": "Villanova Wildcats"
+  },
+  "vmi": {
+   "key": "teams/2678.png",
+   "espn": "VMI Keydets"
+  },
+  "weberstate": {
+   "key": "teams/2692.png",
+   "espn": "Weber State Wildcats"
+  },
+  "westgeorgia": {
+   "key": "teams/2698.png",
+   "espn": "West Georgia Wolves"
+  },
+  "westerncarolina": {
+   "key": "teams/2717.png",
+   "espn": "Western Carolina Catamounts"
+  },
+  "westernillinois": {
+   "key": "teams/2710.png",
+   "espn": "Western Illinois Leathernecks"
+  },
+  "williamandmary": {
+   "key": "teams/2729.png",
+   "espn": "William & Mary Tribe"
+  },
+  "wofford": {
+   "key": "teams/2747.png",
+   "espn": "Wofford Terriers"
+  },
+  "yale": {
+   "key": "teams/43.png",
+   "espn": "Yale Bulldogs"
+  },
+  "youngstownstate": {
+   "key": "teams/2754.png",
+   "espn": "Youngstown State Penguins"
+  },
+  "mercyhurst": {
+   "key": "teams/2385.png",
+   "espn": "Mercyhurst Lakers"
+  },
+  "westflorida": {
+   "key": "teams/110242.png",
+   "espn": "West Florida Argonauts"
+  },
+  "wagner": {
+   "key": "teams/2681.png",
+   "espn": "Wagner Seahawks"
+  },
+  "gramblingstate": {
+   "key": "teams/2755.png",
+   "espn": "Grambling Tigers"
+  },
+  "northdakotastate": {
+   "key": "teams/2449.png",
+   "espn": "North Dakota State Bison"
+  },
+  "sacramentostate": {
+   "key": "teams/16.png",
+   "espn": "Sacramento State Hornets"
+  },
+  "saintfrancispa": {
+   "key": "teams/2598.png",
+   "espn": "Saint Francis Red Flash"
+  },
+  "southeasternlouisiana": {
+   "key": "teams/2545.png",
+   "espn": "SE Louisiana Lions"
+  },
+  "stthomasmn": {
+   "key": "teams/2900.png",
+   "espn": "St. Thomas Tommies"
+  },
+  "texasaandmcommerce": {
+   "key": "teams/2837.png",
+   "espn": "East Texas A&M Lions"
+  },
+  "uapb": {
+   "key": "teams/2029.png",
+   "espn": "Arkansas-Pine Bluff Golden Lions"
+  },
+  "utrgv": {
+   "key": "teams/292.png",
+   "espn": "UT Rio Grande Valley Vaqueros"
+  },
+  "valporaiso": {
+   "key": "teams/2674.png",
+   "espn": "Valparaiso Beacons"
+  },
+  "deltastate": {
+   "key": "teams/2170.png",
+   "espn": "Delta State Statesmen"
+  },
+  "montanastatebobcats": {
+   "key": "teams/147.png",
+   "espn": "Montana State Bobcats"
+  },
+  "montanast": {
+   "key": "teams/147.png",
+   "espn": "Montana State Bobcats"
+  },
+  "northernarizonalumberjacks": {
+   "key": "teams/2464.png",
+   "espn": "Northern Arizona Lumberjacks"
+  },
+  "narizona": {
+   "key": "teams/2464.png",
+   "espn": "Northern Arizona Lumberjacks"
+  },
+  "montanagrizzlies": {
+   "key": "teams/149.png",
+   "espn": "Montana Grizzlies"
+  },
+  "ucdavisaggies": {
+   "key": "teams/302.png",
+   "espn": "UC Davis Aggies"
+  },
+  "idahostatebengals": {
+   "key": "teams/304.png",
+   "espn": "Idaho State Bengals"
+  },
+  "idahost": {
+   "key": "teams/304.png",
+   "espn": "Idaho State Bengals"
+  },
+  "weberstatewildcats": {
+   "key": "teams/2692.png",
+   "espn": "Weber State Wildcats"
+  },
+  "weberst": {
+   "key": "teams/2692.png",
+   "espn": "Weber State Wildcats"
+  },
+  "calpolymustangs": {
+   "key": "teams/13.png",
+   "espn": "Cal Poly Mustangs"
+  },
+  "idahovandals": {
+   "key": "teams/70.png",
+   "espn": "Idaho Vandals"
+  },
+  "southernutahthunderbirds": {
+   "key": "teams/253.png",
+   "espn": "Southern Utah Thunderbirds"
+  },
+  "northerncoloradobears": {
+   "key": "teams/2458.png",
+   "espn": "Northern Colorado Bears"
+  },
+  "ncolorado": {
+   "key": "teams/2458.png",
+   "espn": "Northern Colorado Bears"
+  },
+  "portlandstatevikings": {
+   "key": "teams/2502.png",
+   "espn": "Portland State Vikings"
+  },
+  "portlandst": {
+   "key": "teams/2502.png",
+   "espn": "Portland State Vikings"
+  },
+  "easternwashingtoneagles": {
+   "key": "teams/331.png",
+   "espn": "Eastern Washington Eagles"
+  },
+  "ewashington": {
+   "key": "teams/331.png",
+   "espn": "Eastern Washington Eagles"
+  },
+  "utahtechtrailblazers": {
+   "key": "teams/3101.png",
+   "espn": "Utah Tech Trailblazers"
+  },
+  "campbellfightingcamels": {
+   "key": "teams/2097.png",
+   "espn": "Campbell Fighting Camels"
+  },
+  "monmouthhawks": {
+   "key": "teams/2405.png",
+   "espn": "Monmouth Hawks"
+  },
+  "ualbanygreatdanes": {
+   "key": "teams/399.png",
+   "espn": "UAlbany Great Danes"
+  },
+  "stonybrookseawolves": {
+   "key": "teams/2619.png",
+   "espn": "Stony Brook Seawolves"
+  },
+  "bryantbulldogs": {
+   "key": "teams/2803.png",
+   "espn": "Bryant Bulldogs"
+  },
+  "elonphoenix": {
+   "key": "teams/2210.png",
+   "espn": "Elon Phoenix"
+  },
+  "rhodeislandrams": {
+   "key": "teams/227.png",
+   "espn": "Rhode Island Rams"
+  },
+  "sacredheartpioneers": {
+   "key": "teams/2529.png",
+   "espn": "Sacred Heart Pioneers"
+  },
+  "northcarolinaaandtaggies": {
+   "key": "teams/2448.png",
+   "espn": "North Carolina A&T Aggies"
+  },
+  "ncaandt": {
+   "key": "teams/2448.png",
+   "espn": "North Carolina A&T Aggies"
+  },
+  "newhampshirewildcats": {
+   "key": "teams/160.png",
+   "espn": "New Hampshire Wildcats"
+  },
+  "maineblackbears": {
+   "key": "teams/311.png",
+   "espn": "Maine Black Bears"
+  },
+  "hamptonpirates": {
+   "key": "teams/2261.png",
+   "espn": "Hampton Pirates"
+  },
+  "towsontigers": {
+   "key": "teams/119.png",
+   "espn": "Towson Tigers"
+  },
+  "merrimackwarriors": {
+   "key": "teams/2771.png",
+   "espn": "Merrimack Warriors"
+  },
+  "chicagostate": {
+   "key": "teams/2130.png",
+   "espn": "Chicago State Cougars"
+  },
+  "chicagostatecougars": {
+   "key": "teams/2130.png",
+   "espn": "Chicago State Cougars"
+  },
+  "chicagost": {
+   "key": "teams/2130.png",
+   "espn": "Chicago State Cougars"
+  },
+  "harvardcrimson": {
+   "key": "teams/108.png",
+   "espn": "Harvard Crimson"
+  },
+  "princetontigers": {
+   "key": "teams/163.png",
+   "espn": "Princeton Tigers"
+  },
+  "columbialions": {
+   "key": "teams/171.png",
+   "espn": "Columbia Lions"
+  },
+  "dartmouthbiggreen": {
+   "key": "teams/159.png",
+   "espn": "Dartmouth Big Green"
+  },
+  "brownbears": {
+   "key": "teams/225.png",
+   "espn": "Brown Bears"
+  },
+  "cornellbigred": {
+   "key": "teams/172.png",
+   "espn": "Cornell Big Red"
+  },
+  "pennsylvania": {
+   "key": "teams/219.png",
+   "espn": "Pennsylvania Quakers"
+  },
+  "pennsylvaniaquakers": {
+   "key": "teams/219.png",
+   "espn": "Pennsylvania Quakers"
+  },
+  "yalebulldogs": {
+   "key": "teams/43.png",
+   "espn": "Yale Bulldogs"
+  },
+  "southcarolinastatebulldogs": {
+   "key": "teams/2569.png",
+   "espn": "South Carolina State Bulldogs"
+  },
+  "scstate": {
+   "key": "teams/2569.png",
+   "espn": "South Carolina State Bulldogs"
+  },
+  "morganstatebears": {
+   "key": "teams/2415.png",
+   "espn": "Morgan State Bears"
+  },
+  "morganst": {
+   "key": "teams/2415.png",
+   "espn": "Morgan State Bears"
+  },
+  "howardbison": {
+   "key": "teams/47.png",
+   "espn": "Howard Bison"
+  },
+  "delawarestatehornets": {
+   "key": "teams/2169.png",
+   "espn": "Delaware State Hornets"
+  },
+  "delawarest": {
+   "key": "teams/2169.png",
+   "espn": "Delaware State Hornets"
+  },
+  "norfolkstatespartans": {
+   "key": "teams/2450.png",
+   "espn": "Norfolk State Spartans"
+  },
+  "norfolkst": {
+   "key": "teams/2450.png",
+   "espn": "Norfolk State Spartans"
+  },
+  "northcarolinacentraleagles": {
+   "key": "teams/2428.png",
+   "espn": "North Carolina Central Eagles"
+  },
+  "nccentral": {
+   "key": "teams/2428.png",
+   "espn": "North Carolina Central Eagles"
+  },
+  "southdakotacoyotes": {
+   "key": "teams/233.png",
+   "espn": "South Dakota Coyotes"
+  },
+  "youngstownstatepenguins": {
+   "key": "teams/2754.png",
+   "espn": "Youngstown State Penguins"
+  },
+  "youngstownst": {
+   "key": "teams/2754.png",
+   "espn": "Youngstown State Penguins"
+  },
+  "southdakotastatejackrabbits": {
+   "key": "teams/2571.png",
+   "espn": "South Dakota State Jackrabbits"
+  },
+  "sdakotast": {
+   "key": "teams/2571.png",
+   "espn": "South Dakota State Jackrabbits"
+  },
+  "illinoisstateredbirds": {
+   "key": "teams/2287.png",
+   "espn": "Illinois State Redbirds"
+  },
+  "illinoisst": {
+   "key": "teams/2287.png",
+   "espn": "Illinois State Redbirds"
+  },
+  "northdakotafightinghawks": {
+   "key": "teams/155.png",
+   "espn": "North Dakota Fighting Hawks"
+  },
+  "southernillinoissalukis": {
+   "key": "teams/79.png",
+   "espn": "Southern Illinois Salukis"
+  },
+  "sillinois": {
+   "key": "teams/79.png",
+   "espn": "Southern Illinois Salukis"
+  },
+  "northerniowapanthers": {
+   "key": "teams/2460.png",
+   "espn": "Northern Iowa Panthers"
+  },
+  "indianastatesycamores": {
+   "key": "teams/282.png",
+   "espn": "Indiana State Sycamores"
+  },
+  "indianast": {
+   "key": "teams/282.png",
+   "espn": "Indiana State Sycamores"
+  },
+  "murraystateracers": {
+   "key": "teams/93.png",
+   "espn": "Murray State Racers"
+  },
+  "murrayst": {
+   "key": "teams/93.png",
+   "espn": "Murray State Racers"
+  },
+  "centralconnecticutbluedevils": {
+   "key": "teams/2115.png",
+   "espn": "Central Connecticut Blue Devils"
+  },
+  "cconnecticut": {
+   "key": "teams/2115.png",
+   "espn": "Central Connecticut Blue Devils"
+  },
+  "robertmorriscolonials": {
+   "key": "teams/2523.png",
+   "espn": "Robert Morris Colonials"
+  },
+  "duquesnedukes": {
+   "key": "teams/2184.png",
+   "espn": "Duquesne Dukes"
+  },
+  "stonehillskyhawks": {
+   "key": "teams/284.png",
+   "espn": "Stonehill Skyhawks"
+  },
+  "longislanduniversity": {
+   "key": "teams/2341.png",
+   "espn": "Long Island University Sharks"
+  },
+  "longislanduniversitysharks": {
+   "key": "teams/2341.png",
+   "espn": "Long Island University Sharks"
+  },
+  "newhaven": {
+   "key": "teams/2441.png",
+   "espn": "New Haven Chargers"
+  },
+  "newhavenchargers": {
+   "key": "teams/2441.png",
+   "espn": "New Haven Chargers"
+  },
+  "mercyhurstlakers": {
+   "key": "teams/2385.png",
+   "espn": "Mercyhurst Lakers"
+  },
+  "wagnerseahawks": {
+   "key": "teams/2681.png",
+   "espn": "Wagner Seahawks"
+  },
+  "southeastmissouristate": {
+   "key": "teams/2546.png",
+   "espn": "Southeast Missouri State Redhawks"
+  },
+  "southeastmissouristateredhawks": {
+   "key": "teams/2546.png",
+   "espn": "Southeast Missouri State Redhawks"
+  },
+  "semissouri": {
+   "key": "teams/2546.png",
+   "espn": "Southeast Missouri State Redhawks"
+  },
+  "westernillinoisleathernecks": {
+   "key": "teams/2710.png",
+   "espn": "Western Illinois Leathernecks"
+  },
+  "willinois": {
+   "key": "teams/2710.png",
+   "espn": "Western Illinois Leathernecks"
+  },
+  "charlestonsouthernbuccaneers": {
+   "key": "teams/2127.png",
+   "espn": "Charleston Southern Buccaneers"
+  },
+  "charlestonso": {
+   "key": "teams/2127.png",
+   "espn": "Charleston Southern Buccaneers"
+  },
+  "lindenwoodlions": {
+   "key": "teams/2815.png",
+   "espn": "Lindenwood Lions"
+  },
+  "utmartinskyhawks": {
+   "key": "teams/2630.png",
+   "espn": "UT Martin Skyhawks"
+  },
+  "easternillinoispanthers": {
+   "key": "teams/2197.png",
+   "espn": "Eastern Illinois Panthers"
+  },
+  "eillinois": {
+   "key": "teams/2197.png",
+   "espn": "Eastern Illinois Panthers"
+  },
+  "gardnerwebbrunninbulldogs": {
+   "key": "teams/2241.png",
+   "espn": "Gardner-Webb Runnin' Bulldogs"
+  },
+  "tennesseestatetigers": {
+   "key": "teams/2634.png",
+   "espn": "Tennessee State Tigers"
+  },
+  "tennesseest": {
+   "key": "teams/2634.png",
+   "espn": "Tennessee State Tigers"
+  },
+  "lehighmountainhawks": {
+   "key": "teams/2329.png",
+   "espn": "Lehigh Mountain Hawks"
+  },
+  "richmondspiders": {
+   "key": "teams/257.png",
+   "espn": "Richmond Spiders"
+  },
+  "colgateraiders": {
+   "key": "teams/2142.png",
+   "espn": "Colgate Raiders"
+  },
+  "villanovawildcats": {
+   "key": "teams/222.png",
+   "espn": "Villanova Wildcats"
+  },
+  "georgetownhoyas": {
+   "key": "teams/46.png",
+   "espn": "Georgetown Hoyas"
+  },
+  "lafayetteleopards": {
+   "key": "teams/322.png",
+   "espn": "Lafayette Leopards"
+  },
+  "holycrosscrusaders": {
+   "key": "teams/107.png",
+   "espn": "Holy Cross Crusaders"
+  },
+  "williamandmarytribe": {
+   "key": "teams/2729.png",
+   "espn": "William & Mary Tribe"
+  },
+  "fordhamrams": {
+   "key": "teams/2230.png",
+   "espn": "Fordham Rams"
+  },
+  "bucknellbison": {
+   "key": "teams/2083.png",
+   "espn": "Bucknell Bison"
+  },
+  "daytonflyers": {
+   "key": "teams/2168.png",
+   "espn": "Dayton Flyers"
+  },
+  "stthomas": {
+   "key": "teams/2900.png",
+   "espn": "St. Thomas Tommies"
+  },
+  "stthomastommies": {
+   "key": "teams/2900.png",
+   "espn": "St. Thomas Tommies"
+  },
+  "butlerbulldogs": {
+   "key": "teams/2086.png",
+   "espn": "Butler Bulldogs"
+  },
+  "maristredfoxes": {
+   "key": "teams/2368.png",
+   "espn": "Marist Red Foxes"
+  },
+  "valparaiso": {
+   "key": "teams/2674.png",
+   "espn": "Valparaiso Beacons"
+  },
+  "valparaisobeacons": {
+   "key": "teams/2674.png",
+   "espn": "Valparaiso Beacons"
+  },
+  "presbyterianbluehose": {
+   "key": "teams/2506.png",
+   "espn": "Presbyterian Blue Hose"
+  },
+  "sandiegotoreros": {
+   "key": "teams/301.png",
+   "espn": "San Diego Toreros"
+  },
+  "davidsonwildcats": {
+   "key": "teams/2166.png",
+   "espn": "Davidson Wildcats"
+  },
+  "drakebulldogs": {
+   "key": "teams/2181.png",
+   "espn": "Drake Bulldogs"
+  },
+  "moreheadstateeagles": {
+   "key": "teams/2413.png",
+   "espn": "Morehead State Eagles"
+  },
+  "moreheadst": {
+   "key": "teams/2413.png",
+   "espn": "Morehead State Eagles"
+  },
+  "stetsonhatters": {
+   "key": "teams/56.png",
+   "espn": "Stetson Hatters"
+  },
+  "tennesseetechgoldeneagles": {
+   "key": "teams/2635.png",
+   "espn": "Tennessee Tech Golden Eagles"
+  },
+  "easttennesseestatebuccaneers": {
+   "key": "teams/2193.png",
+   "espn": "East Tennessee State Buccaneers"
+  },
+  "etsu": {
+   "key": "teams/2193.png",
+   "espn": "East Tennessee State Buccaneers"
+  },
+  "mercerbears": {
+   "key": "teams/2382.png",
+   "espn": "Mercer Bears"
+  },
+  "chattanoogamocs": {
+   "key": "teams/236.png",
+   "espn": "Chattanooga Mocs"
+  },
+  "woffordterriers": {
+   "key": "teams/2747.png",
+   "espn": "Wofford Terriers"
+  },
+  "westerncarolinacatamounts": {
+   "key": "teams/2717.png",
+   "espn": "Western Carolina Catamounts"
+  },
+  "wcarolina": {
+   "key": "teams/2717.png",
+   "espn": "Western Carolina Catamounts"
+  },
+  "samfordbulldogs": {
+   "key": "teams/2535.png",
+   "espn": "Samford Bulldogs"
+  },
+  "furmanpaladins": {
+   "key": "teams/231.png",
+   "espn": "Furman Paladins"
+  },
+  "thecitadelbulldogs": {
+   "key": "teams/2643.png",
+   "espn": "The Citadel Bulldogs"
+  },
+  "vmikeydets": {
+   "key": "teams/2678.png",
+   "espn": "VMI Keydets"
+  },
+  "stephenfaustinlumberjacks": {
+   "key": "teams/2617.png",
+   "espn": "Stephen F. Austin Lumberjacks"
+  },
+  "sfaustin": {
+   "key": "teams/2617.png",
+   "espn": "Stephen F. Austin Lumberjacks"
+  },
+  "lamarcardinals": {
+   "key": "teams/2320.png",
+   "espn": "Lamar Cardinals"
+  },
+  "incarnatewordcardinals": {
+   "key": "teams/2916.png",
+   "espn": "Incarnate Word Cardinals"
+  },
+  "houstonchristianhuskies": {
+   "key": "teams/2277.png",
+   "espn": "Houston Christian Huskies"
+  },
+  "houchristian": {
+   "key": "teams/2277.png",
+   "espn": "Houston Christian Huskies"
+  },
+  "utriograndevalley": {
+   "key": "teams/292.png",
+   "espn": "UT Rio Grande Valley Vaqueros"
+  },
+  "utriograndevalleyvaqueros": {
+   "key": "teams/292.png",
+   "espn": "UT Rio Grande Valley Vaqueros"
+  },
+  "utriogrande": {
+   "key": "teams/292.png",
+   "espn": "UT Rio Grande Valley Vaqueros"
+  },
+  "selouisiana": {
+   "key": "teams/2545.png",
+   "espn": "SE Louisiana Lions"
+  },
+  "selouisianalions": {
+   "key": "teams/2545.png",
+   "espn": "SE Louisiana Lions"
+  },
+  "mcneese": {
+   "key": "teams/2377.png",
+   "espn": "McNeese Cowboys"
+  },
+  "mcneesecowboys": {
+   "key": "teams/2377.png",
+   "espn": "McNeese Cowboys"
+  },
+  "nichollscolonels": {
+   "key": "teams/2447.png",
+   "espn": "Nicholls Colonels"
+  },
+  "easttexasaandm": {
+   "key": "teams/2837.png",
+   "espn": "East Texas A&M Lions"
+  },
+  "easttexasaandmlions": {
+   "key": "teams/2837.png",
+   "espn": "East Texas A&M Lions"
+  },
+  "northwesternstatedemons": {
+   "key": "teams/2466.png",
+   "espn": "Northwestern State Demons"
+  },
+  "nwesternst": {
+   "key": "teams/2466.png",
+   "espn": "Northwestern State Demons"
+  },
+  "alabamaaandmbulldogs": {
+   "key": "teams/2010.png",
+   "espn": "Alabama A&M Bulldogs"
+  },
+  "jacksonstatetigers": {
+   "key": "teams/2296.png",
+   "espn": "Jackson State Tigers"
+  },
+  "jacksonst": {
+   "key": "teams/2296.png",
+   "espn": "Jackson State Tigers"
+  },
+  "bethunecookmanwildcats": {
+   "key": "teams/2065.png",
+   "espn": "Bethune-Cookman Wildcats"
+  },
+  "bethune": {
+   "key": "teams/2065.png",
+   "espn": "Bethune-Cookman Wildcats"
+  },
+  "alabamastatehornets": {
+   "key": "teams/2011.png",
+   "espn": "Alabama State Hornets"
+  },
+  "alabamast": {
+   "key": "teams/2011.png",
+   "espn": "Alabama State Hornets"
+  },
+  "mississippivalleystate": {
+   "key": "teams/2400.png",
+   "espn": "Mississippi Valley State Delta Devils"
+  },
+  "mississippivalleystatedeltadevils": {
+   "key": "teams/2400.png",
+   "espn": "Mississippi Valley State Delta Devils"
+  },
+  "missvalleyst": {
+   "key": "teams/2400.png",
+   "espn": "Mississippi Valley State Delta Devils"
+  },
+  "floridaaandmrattlers": {
+   "key": "teams/50.png",
+   "espn": "Florida A&M Rattlers"
+  },
+  "grambling": {
+   "key": "teams/2755.png",
+   "espn": "Grambling Tigers"
+  },
+  "gramblingtigers": {
+   "key": "teams/2755.png",
+   "espn": "Grambling Tigers"
+  },
+  "arkansaspinebluff": {
+   "key": "teams/2029.png",
+   "espn": "Arkansas-Pine Bluff Golden Lions"
+  },
+  "arkansaspinebluffgoldenlions": {
+   "key": "teams/2029.png",
+   "espn": "Arkansas-Pine Bluff Golden Lions"
+  },
+  "arpinebluff": {
+   "key": "teams/2029.png",
+   "espn": "Arkansas-Pine Bluff Golden Lions"
+  },
+  "alcornstatebraves": {
+   "key": "teams/2016.png",
+   "espn": "Alcorn State Braves"
+  },
+  "alcornst": {
+   "key": "teams/2016.png",
+   "espn": "Alcorn State Braves"
+  },
+  "prairieviewaandm": {
+   "key": "teams/2504.png",
+   "espn": "Prairie View A&M Panthers"
+  },
+  "prairieviewaandmpanthers": {
+   "key": "teams/2504.png",
+   "espn": "Prairie View A&M Panthers"
+  },
+  "prairieview": {
+   "key": "teams/2504.png",
+   "espn": "Prairie View A&M Panthers"
+  },
+  "southernjaguars": {
+   "key": "teams/2582.png",
+   "espn": "Southern Jaguars"
+  },
+  "texassoutherntigers": {
+   "key": "teams/2640.png",
+   "espn": "Texas Southern Tigers"
+  },
+  "tarletonstatetexans": {
+   "key": "teams/2627.png",
+   "espn": "Tarleton State Texans"
+  },
+  "tarletonst": {
+   "key": "teams/2627.png",
+   "espn": "Tarleton State Texans"
+  },
+  "austinpeaygovernors": {
+   "key": "teams/2046.png",
+   "espn": "Austin Peay Governors"
+  },
+  "westfloridaargonauts": {
+   "key": "teams/110242.png",
+   "espn": "West Florida Argonauts"
+  },
+  "abilenechristianwildcats": {
+   "key": "teams/2000.png",
+   "espn": "Abilene Christian Wildcats"
+  },
+  "abilenechrstn": {
+   "key": "teams/2000.png",
+   "espn": "Abilene Christian Wildcats"
+  },
+  "northalabamalions": {
+   "key": "teams/2453.png",
+   "espn": "North Alabama Lions"
+  },
+  "easternkentuckycolonels": {
+   "key": "teams/2198.png",
+   "espn": "Eastern Kentucky Colonels"
+  },
+  "ekentucky": {
+   "key": "teams/2198.png",
+   "espn": "Eastern Kentucky Colonels"
+  },
+  "centralarkansasbears": {
+   "key": "teams/2110.png",
+   "espn": "Central Arkansas Bears"
+  },
+  "carkansas": {
+   "key": "teams/2110.png",
+   "espn": "Central Arkansas Bears"
+  },
+  "westgeorgiawolves": {
+   "key": "teams/2698.png",
+   "espn": "West Georgia Wolves"
+  },
+  "tuskegee": {
+   "key": "teams/2657.png",
+   "espn": "Tuskegee Golden Tigers"
+  }
+ },
+ "conferences": {
+  "caa": "conf/48.png",
+  "coastalathleticassociation": "conf/48.png",
+  "bsovc": "conf/ovc.svg",
+  "ovc": "conf/ovc.svg",
+  "bigsouthovc": "conf/ovc.svg",
+  "ohiovalleyconference": "conf/ovc.svg",
+  "mvfc": "conf/21.png",
+  "missourivalley": "conf/21.png",
+  "uac": "conf/uac.png",
+  "unitedathleticconference": "conf/uac.png",
+  "socon": "conf/29.png",
+  "southernconference": "conf/29.png",
+  "independents": "conf/32.png",
+  "ivyleague": "conf/22.png",
+  "ivy": "conf/22.png",
+  "patriot": "conf/27.png",
+  "patriotleague": "conf/27.png",
+  "bigsky": "conf/20.png",
+  "swac": "conf/31.png",
+  "southland": "conf/30.png",
+  "meac": "conf/24.png",
+  "nec": "conf/25.png",
+  "northeastconference": "conf/25.png",
+  "pioneer": "conf/28.png",
+  "pfl": "conf/28.png"
+ }
+}

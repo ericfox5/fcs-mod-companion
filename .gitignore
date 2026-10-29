@@ -1,0 +1,32 @@
+node_modules/
+dist/
+coverage/
+.wrangler/
+.env
+.env.*
+!.env.example
+# Wayback mirror is reference material only (EA copyright); never commit or deploy it
+archive/wayback/
+# real save files and anything derived from the game binary stay local
+fixtures/real/
+spike/blaze/private/
+*.elf
+*.pfx
+*.pem
+*.key
+
+# third-party reference clones (GPL/MIT, not ours)
+spike/blaze/third_party/
+archive/ref/
+worker/.dev.vars
+.wrangler/
+# third-party team/conference logos (ESPN CDN, Wikimedia); fetched by hand, uploaded to R2 by `ncaa-bridge logos upload`
+archive/logos/
+# forged redirector certificate chain for the local emulator (regenerate with spike/blaze/server/gen-cert.mjs)
+spike/blaze/server/certs/
+# the NCAA Division I FCS mark in the header is a fair-use file from Wikipedia; add your own copy locally
+worker/public/img/fcs-logo.svg
+# stray local images at the repo root
+/*.jpg
+/*.jpeg
+/*.png

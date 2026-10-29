@@ -1,0 +1,9 @@
+{
+  "name": "@ncaa/bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CLI that runs beside RPCS3: inspects, verifies and syncs NCAA 14 dynasty saves with the companion site",
+  "bin": { "ncaa-bridge": "./src/cli.ts" },
+  "dependencies": { "@ncaa/tdb": "*", "@ncaa/ncaa14": "*" }
+}

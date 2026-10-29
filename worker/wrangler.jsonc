@@ -1,0 +1,29 @@
+{
+  // NCAA Online Dynasty 14 revival — companion site + bridge API (fan project, not affiliated with EA)
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ncaa-online",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": true,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "not_found_handling": "none",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "ncaa-online", "database_id": "b8320f33-beec-491b-bc76-84d9ceb44a98", "migrations_dir": "migrations" }
+  ],
+  "r2_buckets": [
+    { "binding": "SAVES", "bucket_name": "ncaa-online-saves" }
+  ],
+  "vars": {
+    "SITE_NAME": "NCAA Online Dynasty FCS",
+    "BASE_YEAR": "2013"
+    // Secret (never in this file): BRIDGE_TOKEN -> wrangler secret put BRIDGE_TOKEN
+  },
+  "observability": { "enabled": true }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "ncaa-online-dynasty",
+  "private": true,
+  "version": "0.1.0",
+  "description": "NCAA Online Dynasty 14 revival: Cloudflare Worker companion site + RPCS3 save bridge (fan project, not affiliated with EA)",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "worker",
+    "bridge"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b",
+    "archive:fetch": "node tools/archive-fetch.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

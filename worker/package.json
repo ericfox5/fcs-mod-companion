@@ -1,0 +1,14 @@
+{
+  "name": "@ncaa/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate:local": "wrangler d1 migrations apply ncaa-online --local",
+    "migrate:remote": "wrangler d1 migrations apply ncaa-online --remote"
+  },
+  "dependencies": { "@ncaa/ncaa14": "*", "@ncaa/tdb": "*" },
+  "devDependencies": { "@cloudflare/workers-types": "^4.20250101.0", "wrangler": "^4.131.0" }
+}

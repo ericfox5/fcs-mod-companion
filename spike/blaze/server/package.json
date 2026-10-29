@@ -1,0 +1,11 @@
+{
+  "name": "ncaa14-blaze-spike",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "cert": "node gen-cert.mjs",
+    "peek": "node redirector.mjs --peek",
+    "redirector": "node redirector.mjs",
+    "blaze": "node blaze.mjs"
+  }
+}
