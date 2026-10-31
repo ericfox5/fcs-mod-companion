@@ -97,3 +97,32 @@
     var c = tools.querySelector('.ft-count'); if (c) c.textContent = filters.length ? shown + ' of ' + total : '';
   });
 })();
+
+// mobile header menu toggle
+(function () {
+  var t = document.querySelector('.gnav-toggle'); if (!t) return;
+  var gh = t.closest('.gh');
+  t.addEventListener('click', function () { var open = gh.classList.toggle('menu-open'); t.setAttribute('aria-expanded', open ? 'true' : 'false'); });
+  document.addEventListener('click', function (e) { if (gh.classList.contains('menu-open') && !e.target.closest('.gh')) { gh.classList.remove('menu-open'); t.setAttribute('aria-expanded', 'false'); } });
+})();
+
+// sortable tables (Rosters): click a heading to sort by that column, click again to flip the direction
+(function () {
+  document.addEventListener('click', function (e) {
+    var th = e.target.closest('table.sortable th[data-sort]');
+    if (!th) return;
+    var table = th.closest('table'); var key = th.getAttribute('data-sort');
+    var dir = th.classList.contains('asc') ? 'desc' : 'asc';
+    table.querySelectorAll('th[data-sort]').forEach(function (x) { x.classList.remove('asc', 'desc'); x.removeAttribute('aria-sort'); });
+    th.classList.add(dir); th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
+    var body = table.tBodies[0] || table;
+    var rows = Array.prototype.slice.call(body.querySelectorAll('tr')).filter(function (r) { return r.hasAttribute('data-' + key) || r.querySelector('td'); });
+    rows.sort(function (a, b) {
+      var va = a.getAttribute('data-' + key) || '', vb = b.getAttribute('data-' + key) || '';
+      var na = parseFloat(va), nb = parseFloat(vb);
+      var c = (!isNaN(na) && !isNaN(nb)) ? na - nb : va.localeCompare(vb, undefined, { sensitivity: 'base' });
+      return dir === 'asc' ? c : -c;
+    });
+    rows.forEach(function (r) { body.appendChild(r); });
+  });
+})();

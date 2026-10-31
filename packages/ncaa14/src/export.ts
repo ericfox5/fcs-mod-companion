@@ -8,7 +8,7 @@ import { decodeStories, type Story } from './decode/stories.js';
 import { decodeHeisman, decodeAllAmericans, type HeismanCandidate, type AllAmerican } from './decode/awards.js';
 import { decodeTeamSeasonStats, decodeTeamHistory, decodePlayerSeasonStats, decodeGameLogs, type Row } from './decode/stats.js';
 import { decodeDepthChart, type DepthChartEntry } from './decode/depth.js';
-import { decodeRecruits, decodeRecruitInterest, decodeRecruitingBoard, type Recruit, type RecruitInterest, type BoardEntry } from './decode/recruiting.js';
+import { decodeRecruits, decodeRecruitInterest, decodeRecruitingBoard, decodeRecruitVisits, type Recruit, type RecruitInterest, type BoardEntry, type RecruitVisit } from './decode/recruiting.js';
 
 export interface DynastyExport {
   format: 1;
@@ -33,6 +33,7 @@ export interface DynastyExport {
   recruits: Recruit[];
   recruitInterest: RecruitInterest[];
   recruitingBoard: BoardEntry[];
+  recruitVisits: RecruitVisit[];
 }
 
 // Conference records: played games between two teams of the same conference (the TEAM table has no such field).
@@ -75,5 +76,6 @@ export function exportDynasty(file: TdbFile): DynastyExport {
     recruits: decodeRecruits(file),
     recruitInterest: decodeRecruitInterest(file),
     recruitingBoard: decodeRecruitingBoard(file),
+    recruitVisits: decodeRecruitVisits(file),
   };
 }

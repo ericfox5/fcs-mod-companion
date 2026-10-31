@@ -40,6 +40,7 @@ export const IMPORT_TABLES: Record<string, TableSpec> = {
   teamSeasonStats: { table: 'team_season_stats', seasonScoped: true, columns: ['season_year', 'tgid', 'stats_json'], values: (r, c) => [c.seasonYear, r.TGID, j(r)] },
   teamHistory: { table: 'team_history', columns: ['tgid', 'season_year', 'wins', 'losses'], values: (r) => [r.TGID, 2013 + r.SEYR, r.WINS, r.LOSE] },
   playerSeasonStats: { table: 'player_season_stats', seasonScoped: true, columns: ['season_year', 'kind', 'pgid', 'stats_json'], values: (r, c) => [c.seasonYear, r.kind, r.PGID, j(r)] },
+  recruitVisits: { table: 'recruit_visits', columns: ['tgid', 'prsi', 'week', 'value', 'mvp', 'nfgz', 'nfgm'], values: (r) => [r.tgid, r.prsi, r.week, r.value, r.mvp, r.nfgz, r.nfgm] },
   gameLogs: {
     table: 'game_logs', seasonScoped: true,
     columns: ['season_year', 'kind', 'week', 'game_no', 'pgid', 'tgid', 'stats_json'],

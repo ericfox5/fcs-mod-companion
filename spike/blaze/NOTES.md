@@ -516,3 +516,127 @@ until the client sends them.
   and matches it (points + order per prospect), and a player edit when the PLYZ push is newer and carries the edited
   values. Week-based acks remain as the fallback. Site copy changed from "at the next advance" to "when the dynasty next
   loads"; the experimental labels came off.
+
+## 2026-10-29 (late) — visits, captures, and the photo format closed out
+
+- Photo format, final: `Pic-*` payload = 16-byte blocks `[0000 0000][c0 c1 565 LE][4 index bytes LE][ffff 0000]`
+  (DXT1 colour block with an opaque alpha block split around it), laid out as a 1024-pixel-wide texture (256 blocks
+  per row) starting 96 blocks (1536 bytes) into the payload, main level 1024x576 followed by its mip chain. BUT both
+  photos from the session carry byte-identical payloads showing a stale "player card" texture (a Lafayette LB), so
+  under RPCS3 the game never gets the replay frame into that buffer. Decoder kept in the notes only; the News Wire
+  capture path uses RPCS3's own screenshots (F12 -> <rpcs3>/screenshots), converted to JPEG by bridge/scripts/to-jpeg.ps1
+  and captioned from the game's highlight XML (one <AP: Type="Photo"> block per in-game photo: local time, teams, score,
+  quarter/clock, play text) when an entry is within 5 minutes of the screenshot.
+- Visits: RECV = {VMVP, TGID, PRSI, OFGP | RCWK, NFGZ, NFGM}; RCWK = week of the home game, OFGP = expected value set at
+  scheduling (350/450 typical), VMVP/NFGZ/NFGM filled after the visit (500-1000 / 3-4 / 2-4 on the completed week-5
+  visits). The site schedules visits per prospect on remaining home-game weeks; delivered as REVZ (RECV layout) and
+  acked when a newer RECV push lists the same prospect/week pairs. First real test pending (W4).
+- Captures: `PUT /api/bridge/captures` stores stories/<dyn>/cap-<name>.jpg (served by the story image route) + a
+  `captures` row; `od watch` scans the screenshot folder every sixth tick; the story form offers the last 24 captures as
+  a picker and copies the object into the story.
+- Accounts shipped (migration 0008): invite codes, PBKDF2 passwords, HttpOnly sessions; the first invite comes from the
+  bridge (`od invite`), later ones from a signed-in commissioner on /members. Until the commissioner joins, the dynasty
+  stays in persona-cookie mode. `od captures` added to the CLI; `od watch` runs it every sixth tick.
+
+## 2026-10-29 (night) — Supersim integrated
+
+- Package: FCS-Supersim-Claude-Handoff-v2 (engine 1.1.0, 25 tests pass). Integrated as worker/src/supersim (routes,
+  access, engine, result), worker/public/js/supersim + css/supersim.css, migration 0010 (supersim_games ledger + the
+  supersim_schedule / supersim_game_logs views that overlay official results; getGames/getGame/getGameLogs read the
+  views). Identity: the site's own session (acting member) instead of the package's HMAC cookie. Quarter length from
+  the dynasty's QTR setting (8 min -> 480 s). Routes: GET /d/<slug>/supersim (page), GET/POST /d/<slug>/supersim/data
+  (start = server-seeded simulation, one durable result per game, retry returns the same run), bridge outbox
+  GET /api/bridge/supersim?od=N + POST .../<run>/receipt.
+- Console side: spike/blaze/server/supersim.mjs runs inside blaze.mjs (reads workerUrl+token from ~/.ncaa-bridge/
+  config.json), polls the outbox every 5 s, validates (week, ownership, schedule row still unplayed, no console
+  result) and registers the GameResultsData-shaped result in d.games[week] (CRCT 0, STCT 0) -> receipt accepted;
+  synced once the console's SCHD push shows the final with the same score; conflict if the console uploads its own.
+  dod.mjs case 24 flags a console override of a Supersim result. Unproven: whether the console treats a results-store
+  entry with CRCT 0 as a played game at load/advance and how season stats are credited (the package deliberately did
+  not fabricate the stat-table merge). First real test = the user's next Brown game.
+- Local dry run on the dev DB: Brown 35-7 at Duquesne, 80 plays, 0.3 s; retry idempotent; game page shows the box score
+  via the views; adapter accepted the envelope on a copy of the real store and rejected a stale week.
+
+## 2026-10-29 (late) — Supersim revamped into coaching mode
+
+- Playbooks: decoded the BGFA 1.05 `.ast` container and the playbook EA DBs (qkl_misc #7 master, qkl_boot #356 PLAB
+  list, #360 shared base). `tools/playbooks-extract.mts` writes one JSON per book to worker/public/data/playbooks
+  (143 books, 16 MB, gitignored). TEAM.TOPB/TDPB are PLAB indexes (Brown: Pro Style / 4-2-5). Details: docs/playbooks.md.
+- Engine v2 (`worker/src/supersim/coach/`): one snap per request, server-authoritative, RNG at call time; CPU
+  play-caller from the AI usage tables; animation script from play art; result/envelope shape unchanged (supersim_games
+  outbox, stub poller untouched). supersim_live (migration 0011) holds the game with a version guard; two-member games
+  wait for both calls. Offline harness: `npx tsx tools/supersim-sim.mts 12` (≈24 pts, 55% completions, 4.5 yds/carry).
+- Old v1 client (app.js/presentation.js/stadium.js/palette.js/forecast-worker.js, engine.js) removed; access.js kept.
+
+## 2026-10-30 — first Supersim result on the console: TIDL fix
+
+- Run 1 (capture-2026-10-30T15-53-21-939Z): the poller accepted run 314235b2 (week 6, Brown 24 at Duquesne 21) and the
+  console fetched it (RetrieveGameResults week 6: 1 result) at load, but the game still showed as unplayed.
+- Cause: RetrieveGameResults' GRLI and TIDL are parallel lists. The response handler 0x2fa48c walks both; for GRLI[i] it
+  calls 0x3301c8, which (if the week matches) runs `update 'PWMT' set OGID, GHTG, THOA, GASC, GHSC, GSTA, GFOT, DSGE=1,
+  CRCC=CRCT, ODSC=STCT where TGID = TIDL[i]` (query @0x173c5b4; TMWP = per-member-team weekly row; GSTA here is 2 when
+  home score <= away score, 3 when home wins, 0x3ff when either score is 0). The stub sent TIDL = the game's two team ids,
+  so the away team's result went to the home team's row (Duquesne, no row). Console-played home games worked by luck.
+  dod.mjs now sends one GRLI/TIDL pair per member team in each game.
+- CRCT is only stored (TMWP.CRCC) and compared between the two rows of a head-to-head game (0x330858 -> 0x33012c, sets
+  XCSD on mismatch); single-human games do not check it. Brute force over the four console samples (crc32 variants,
+  FNV, adler over field permutations) found no formula, so it likely covers the uploaded stat tables. Supersim sends 0.
+- Run 2 (capture-2026-10-30T16-01-04-433Z): with the TIDL fix the hub showed 24-21, but the advance simulated the game
+  anyway (Brown lost 31-41) and the uploaded file kept our numbers only in TMWP. RetrieveGameResults/TMWP is display only.
+
+## 2026-10-30 — game data for web-played games (how the advance keeps a result)
+
+- DynastyStatus.GAME is list<DynastyFileInfo {DFID, TMID}>, not GameResultsData: 0x2f6bc8 copies it with 0x2f6b18 (the
+  TEAM copier) into status+0x6c (count +0xcc); 0x313264 looks a team up there. On event 0x19 the load (0x335200..) stores
+  TEAM -> 0x174 ("Checking for team data") and GAME -> 0x178 ("Checking for game data", 0x334d78); the advance loop
+  0x33b2a8 walks every GAME pair ("Downloading Game Data for <team>"). Both are gated by 0x471008(team) == 1 (the team's
+  game is still to be played).
+- The game data is not a locker file: dbmgr ([[0x1c7fb68]+0x1fc], vtable 0x18a0160, slot 0x14 = 0x2effb0 = the
+  GetTableUpdate job) fetches 14 table descriptors (0x3138c4..0x31401c: CASG, CACG, CSGM, SCOS, UWQS->WQSC, PGNG, TSGA,
+  GINF, PGKI, PGKP, PGDE, PGOL, PGOF, IGAM; the console's own post-game UPDT-2 upload set) with GetTableUpdate {TABL,
+  FILT {COLM 0x47483458 'GH4X' (0x2ed194 picks it for game tables), VALU = GAME.DFID}, UPDA}. Rows go into ODGM.
+- 0x43fd8c(ODGM) merges per table: "use DYND delete from T" then "use ODGM insert into DYND.T * select * from T" (DYNI
+  skipped, WQSC appended without the delete). 0x46cd14 -> 0x46c9e0 then needs GINF.GQTR == 6, reads GINF {SGNM, GHTG,
+  GATG, GHSC, GASC, GFSI, GFOT} and SEAI {SEYR, SEWN, SEWT}, sets GSTA (3 home win, 2 away win, 4 tie unless GFSI 2/3),
+  GUTE (a CFUC coach on either team) and runs "update SCHD set SEYR, GHSC, GASC, GSTA, GFOT, GUTE where SEWN and SGNM"
+  (@0x176c0d4); 0x46c550 then credits the stats and clears SPGA/DCGA/PLGA. A game final in SCHD is not simulated.
+- Stub: supersim.mjs builds the 14 tables from the Supersim envelope (v3 `detail`: per-player PStat + snaps + starter,
+  team totals, quarters) on accept (gamedata.mjs, private/game-data/<did>/<id>.json, ids from 900001), lists
+  {DFID id, TMID team} in DynastyStatus.GAME for that week, and answers the GH4X GetTableUpdate with the console's own
+  upload column layouts (FLTY 2, GHID id, RTID team). SCOS, IGAM, PGOL and the coach tables go out empty. Offline e2e
+  (CPU game in Brown's week-7 slot -> accept -> status + table replies decoded) passes; first console run pending.
+- Pre-test backup: %LOCALAPPDATA%\ncaa-bridge\backups\2026-10-30-pre-gamedata (BLUS31159-OD-EFOXOD1 + private store).
+- Known gap: rows the console uploads with UPDT 2 are stored without their GHID, so the stub cannot yet serve another
+  member's console-played game the same way (multi-member leagues).
+- CONFIRMED 2026-10-30 (capture-2026-10-30T16-38-29-519Z): Supersim week 7, Harvard 13 at Brown 9. At load the console
+  fetched all 14 game tables (GetTableUpdate GH4X 900001: PGOF 14, PGDE 19, PGKP 2, PGKI 3, GINF 1, TSGA 2, PGNG 76,
+  UWQS 5, rest 0), the advance did not re-sim the game, the uploaded dynasty (file 49) has SCHD wk7 GSTA 2 9-13 GUTE 1,
+  Brown 5-2, and season PSOF moved by exactly the Supersim lines (PGID 2866 +12 att +114 yds, 5052 +15 att +148 yds);
+  receipt synced. Still empty: SCOS (scoring summary), IGAM, PGOL, coach tables (CSGM/CACG/CASG).
+
+## 2026-10-30 — full game data: detail stats, scoring summary, line stats, coach XP
+
+- Column names: Xan's NCAA 14 Dynasty Config.xml labels the season tables; per-game PG* codes are the same with g for s
+  (gcyc YAC, guyh yards after contact, gubt broken tackles, gu2y 20+ runs, gcdr drops, gasa sacked; gdht assisted /
+  gdta solo tackles, glff/glfr forced/recovered fumbles, glsa safeties, glbl blocked kicks, gslR long INT return;
+  gkab..gkae / gkmb..gkme FG att/made 17-29, 30-39, 40-49, 50+, gknk kickoffs, gktb KO touchbacks, gppt inside 20, gptb
+  punt touchbacks, gpny net punting, gplN long punt, gpbl punts blocked, gkeb/gkfb XP/FG blocked; grkL/grpL long returns;
+  gosa/gopa line sacks allowed/pancakes; TSGA tsrt/tsPt rush/pass TDs, tsoz/tsot/tsof red zone att/TD/FG (tsdr/tsdt/tsdf
+  defense), tsga/tsta give/take-aways, tsDi def INTs, tsfr fumble rec, tssk def sacks, tsty ST yards, ts2a/ts2c 2-pt).
+- SCOS (scoring summary), from the 4 uploaded games + CPU-simmed rows + the format strings at 0x173xxxx: SSOR order,
+  GQTR, GTIM seconds left, TGID, SSTY 0 pass TD / 1 run / 2 fumble return / 3 fumble recovered in end zone / 4 INT return /
+  5 FG / 6 KO return / 7 punt return, SSPY yards, SSPT 14 XP good / 11 XP missed / 15 2-pt good / 12 2-pt failed / 16 none,
+  SSTI scorer, SSFI passer, SSPI kicker or 2-pt player, SSPF 2-pt passer, SSSC drive start (negative = own side), SSDE
+  drive seconds, SSDP drive plays. Writer 0x4e3ebc (CPU sim) / 0x4e3b50 (played). No type for safeties (left out).
+- Coach XP: kickoff copies CSKL -> CSGM and CACP -> CACG for the 6 coaches (0x176c164, 0x176c1ec); goals completed in the
+  game add CASG {CCID, GOID, CTIE = tiers gained}; in-game XP = sum CAPX.CAXP x tiers (exact for all 4 games: 830, 725,
+  430, 1130; only the head coach earns in-game). Level = floor(sqrt(CEXP / 160)) for every coach seen; level-ups add CSKU.
+  Goals identified: 2458418 +1 tier per TD (25), 14160977 win (50), 6845616 wins (100), per game 9764714 10 first downs,
+  2520713 4 third-down conversions, 7575895 100 rush yds, 3760712 350 total yds, 16616478 250 pass yds, 12287251 50%
+  completions (counter = pct), 7344421 30 points (counter = points), 12973307 starter QB 4 pass TDs (200); season
+  counters 3235631 rush yds, 6108278 total yds, 13954122 pass yds, 12531902 TDs, 15141/852174 starter QB pass TDs,
+  11124162/15329580 starter QB pass yds. The model reproduces 780/830, 405/725, 380/430, 630/1130 with no wrong goal;
+  the rest are streak/situational goals (2359213, 8076757, 7461051, 9361158, 8074054, 11740286, 15235101, 7199112, ...).
+- Stub: tdb-read.mjs reads the dynasty file (locker/<fileId>.bin) for CSKL/CACP/CAPX/COCH; gamedata.mjs sends the head
+  coach's CSGM row (CEXP + XP, level/CSKU), all 195 CACG rows with updated counters/tiers and CASG; SCOS from the engine's
+  scoring rows; PGOL from line stats. Engine: two-point tries no longer count as touchdowns/yards in the box score.

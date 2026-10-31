@@ -14,6 +14,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { T } from './tdf.mjs';
 import { log } from './log.mjs';
+import { noteConsoleOverride } from './supersim.mjs';
+import { GAME_FILTER, LAYOUTS as GAME_LAYOUTS, loadGameData, gameTableRows } from './gamedata.mjs';
 
 export const DOD = 2148;
 export const DOD_COMMANDS = {
@@ -73,12 +75,12 @@ const loadWebEdits = (did, table) => { try { return JSON.parse(fs.readFileSync(p
 export const pack4 = (name) => Buffer.from(String(name).padEnd(4).slice(0, 4).split('').reverse().join(''), 'latin1').readUInt32BE(0);
 // DodTableUpdate with rows (tags in order): BINC DYID FILT FLTY GHID INTC PACK ROWS RTID SINT STRC TABL TINT TYPE; each row
 // struct carries only its non-empty lists (BINY, INTV, SINT, STRV, TINT), as the console itself sends them.
-function tableUpdate(w, did, body, edits, rows) {
+function tableUpdate(w, did, body, edits, rows, { ghid = 0, rtid = 0 } = {}) {
   const cols = edits?.columns ?? {};
   const L = { SINT: cols.SINT ?? [], TINT: cols.TINT ?? [], INTC: cols.INTC ?? [], STRC: cols.STRC ?? [], BINC: cols.BINC ?? [] };
   w.intList('BINC', L.BINC.map(pack4)); w.int('DYID', did);
   w.struct('FILT', (x) => { x.int('COLM', num(body.FILT?.COLM)); x.int('VALU', num(body.FILT?.VALU)); });
-  w.int('FLTY', num(edits?.meta?.flty)); w.int('GHID', 0); w.intList('INTC', L.INTC.map(pack4)); w.int('PACK', 0);
+  w.int('FLTY', num(edits?.meta?.flty)); w.int('GHID', ghid); w.intList('INTC', L.INTC.map(pack4)); w.int('PACK', 0);
   w.list('ROWS', T.STRUCT, rows, (x, r) => {
     if (L.BINC.length) x.list('BINY', T.BLOB, L.BINC.map((c) => Buffer.from(str(r[c]), 'hex')), (y, b) => { y.varint(b.length); y.raw(b); });
     if (L.INTC.length) x.intList('INTV', L.INTC.map((c) => num(r[c])));
@@ -87,7 +89,7 @@ function tableUpdate(w, did, body, edits, rows) {
     if (L.TINT.length) x.intList('TINT', L.TINT.map((c) => num(r[c])));
     x.push(0);
   });
-  w.int('RTID', 0); w.intList('SINT', L.SINT.map(pack4)); w.intList('STRC', L.STRC.map(pack4)); w.int('TABL', num(body.TABL)); w.intList('TINT', L.TINT.map(pack4)); w.int('TYPE', num(edits?.meta?.type));
+  w.int('RTID', rtid); w.intList('SINT', L.SINT.map(pack4)); w.intList('STRC', L.STRC.map(pack4)); w.int('TABL', num(body.TABL)); w.intList('TINT', L.TINT.map(pack4)); w.int('TYPE', num(edits?.meta?.type));
 }
 const teamCache = new Map(); // did -> TEAM rows (refreshed when the console pushes TEAM again)
 const teamRow = (did, tgid) => { if (!teamCache.has(did)) teamCache.set(did, loadTable(did, 'TEAM')?.rows ?? []); return teamCache.get(did).find((r) => r.TGID === tgid) ?? null; };
@@ -178,7 +180,7 @@ function continueDynastyInfo(w, d, m) {
   w.struct('OREC', teamRecord(or)); w.int('OTRK', 0); w.int('RSTA', 0); w.str('SEAS', `Year ${(d.year ?? 0) + 1}`); w.int('TCAV', 0); w.int('UIHT', 0);
   w.struct('UREC', teamRecord(tr)); w.int('UTRK', 0);
 }
-// Blaze::DynastyOnDemand::DynastyStatus {B2N map, CFID, DFID, GAME list<GameResultsData>, T2B map, TEAM list<DynastyFileInfo{DFID, TMID}>}
+// Blaze::DynastyOnDemand::DynastyStatus {B2N map, CFID, DFID, GAME list<DynastyFileInfo{DFID, TMID}>, T2B map, TEAM list<DynastyFileInfo{DFID, TMID}>}
 // The response handler at 0x2f6bc8 copies DFID then CFID into the version manager, the TEAM and GAME lists, and the T2B
 // map as {team u16, blazeId u64} pairs read from pairs of {u64 key, u16 value}: T2B is keyed by BLAZE ID with the team as
 // value (C2B/T2B in Dynasty likewise). The restart check (event 0x19 at 0x33d1c4) compares DFID with the dynasty file the
@@ -206,7 +208,9 @@ function dynastyStatus(w, d, me, allTeams) {
   // Run 32: with TEAM empty the advance step still fetched the own team file, taken from CFID, and crashed opening it as
   // the ODCN package. So CFID is the own change package during an advance (none -> 0) and the own team file otherwise.
   w.intMap('B2N', withTeams.map((m) => [m.blazeId, m.ncId ?? 0])); w.int('CFID', d.advancing ? 0 : (me?.teamFileId ?? 0)); w.int('DFID', d.fileId ?? 0);
-  w.list('GAME', T.STRUCT, d.games?.[String(d.week ?? 0)] ?? [], (x, g) => { gameResultsData(x, g); x.push(0); });
+  // GAME is list<DynastyFileInfo {DFID, TMID}> (0x2f6b18 copies it like TEAM): a member team whose game this week was played
+  // away from the console (Supersim), DFID = the game-data id the console then fetches table by table (gamedata.mjs).
+  w.list('GAME', T.STRUCT, d.gameData?.[String(d.week ?? 0)] ?? [], (x, g) => { x.int('DFID', g.id); x.int('TMID', g.team); x.push(0); });
   w.intMap('T2B', withTeams.map((m) => [m.blazeId, m.team]));
   w.list('TEAM', T.STRUCT, withFiles, (x, m) => { x.int('DFID', m.teamFileId); x.int('TMID', m.team); x.push(0); });
 }
@@ -271,6 +275,14 @@ export function handleDod({ p, body, session, reply }) {
       {
         // Web edits (site -> console): rows of private/web-edits/<did>/<TABLE>.json that pass the request's filter.
         const table = name4(num(body.TABL));
+        if (num(body.FILT?.COLM) === GAME_FILTER) { // game data of a web-played game (DynastyStatus.GAME id in FILT.VALU)
+          const id = num(body.FILT.VALU);
+          const entry = Object.values(d?.gameData ?? {}).flat().find((g) => g.id === id);
+          const data = entry ? loadGameData(did, id) : null;
+          const rows = data ? gameTableRows(data, table) : [];
+          const layout = GAME_LAYOUTS[table] ?? {};
+          return reply(undefined, (w) => tableUpdate(w, did, body, { columns: layout, meta: { type: 0, flty: 2 } }, rows, { ghid: id, rtid: entry?.team ?? 0 }), note(`: ${table} game data ${id}: ${rows.length} rows${data ? '' : ' (unknown game id)'}${GAME_LAYOUTS[table] ? '' : ' (unknown table)'}`));
+        }
         const edits = loadWebEdits(did, table);
         const filtCol = body.FILT && num(body.FILT.COLM) ? name4(num(body.FILT.COLM)) : null;
         const rows = edits ? edits.rows.filter((r) => !filtCol || r[filtCol] === undefined || r[filtCol] === num(body.FILT.VALU)) : [];
@@ -280,12 +292,19 @@ export function handleDod({ p, body, session, reply }) {
     case 14: return reply(undefined, (w) => w.int('DEST', 0), note()); // RemoveMemberResponse
     case 24: { // UploadGameResults {AOTS, AQ1S..AQ4S, ATID, ATSC, CRCT, DYID, FLID, GMWK, HOTS, HQ1S..HQ4S, HTID, HTSC, OTFL, STCT, TMID} -> {DYID, SFFG}
       if (d) { const g = Object.fromEntries(Object.entries(body).filter(([k]) => k !== 'DYID').map(([k, v]) => [k, num(v)])); g.by = user.blazeId; g.at = now();
-        const wk = String(num(body.GMWK)); (d.games ??= {})[wk] ??= []; const list = d.games[wk].filter((x) => !(x.HTID === g.HTID && x.ATID === g.ATID)); list.push(g); d.games[wk] = list; save(); }
+        const wk = String(num(body.GMWK)); (d.games ??= {})[wk] ??= []; const ours = d.games[wk].find((x) => x.HTID === g.HTID && x.ATID === g.ATID && x.supersimRunId); if (ours) noteConsoleOverride(store, d, g, ours); const list = d.games[wk].filter((x) => !(x.HTID === g.HTID && x.ATID === g.ATID)); list.push(g); d.games[wk] = list; save(); }
       return reply(undefined, (w) => { w.int('DYID', did); w.int('SFFG', 0); }, note(`: week ${body.GMWK} ${body.ATID}@${body.HTID} ${body.ATSC}-${body.HTSC}`));
     }
-    case 25: { // RetrieveGameResults {DYID, WKID} -> {DYID, GRLI list<GameResultsData>, TIDL list<team ids with a result>}
+    case 25: { // RetrieveGameResults {DYID, WKID} -> {DYID, GRLI list<GameResultsData>, TIDL list<team id per result>}
+      // GRLI and TIDL are parallel lists: the response handler (0x2fa48c) walks both and, for GRLI[i], runs
+      // "update 'PWMT' ... where TGID = TIDL[i]" (0x3301c8, query @0x173c5b4), i.e. TIDL[i] names the member team whose
+      // per-week row (TMWP: opponent, scores, status, CRCC = CRCT, ODSC = STCT) takes the result. Sending the game's two
+      // team ids instead credited a Brown away game to the home team's row, which does not exist (Supersim run 1, week 6).
+      // One entry per member team in the game, so both sides of a head-to-head game get their row.
       const list = d?.games?.[String(num(body.WKID))] ?? [];
-      return reply(undefined, (w) => { w.int('DYID', did); w.list('GRLI', T.STRUCT, list, (x, g) => { gameResultsData(x, g); x.push(0); }); w.intList('TIDL', [...new Set(list.flatMap((g) => [g.HTID, g.ATID]))]); }, note(`: week ${body.WKID}: ${list.length} result(s)`));
+      const humans = new Set((d?.members ?? []).map((m) => m.team).filter((t) => t && t !== 1023));
+      const rows = list.flatMap((g) => { const own = [g.HTID, g.ATID].filter((t) => humans.has(t)); return (own.length ? own : [g.TMID ?? g.HTID]).map((t) => [g, t]); });
+      return reply(undefined, (w) => { w.int('DYID', did); w.list('GRLI', T.STRUCT, rows, (x, [g]) => { gameResultsData(x, g); x.push(0); }); w.intList('TIDL', rows.map(([, t]) => t)); }, note(`: week ${body.WKID}: ${list.length} result(s) for team(s) ${rows.map(([, t]) => t).join(',') || '-'}`));
     }
     case 46: return reply(undefined, (w) => { w.int('DYID', did); w.int('SUCC', 1); }, note()); // UploadTransientSettingsResponse
     case 47: return reply(undefined, (w) => { w.int('DYID', did); w.intMap('TBID', []); w.map('TSID', T.INT, T.STRING, [], () => {}, () => {}); w.intMap('TTID', []); }, note()); // DownloadTransientSettingsResponse (TSID assumed id -> string)
@@ -322,3 +341,6 @@ export function handleDod({ p, body, session, reply }) {
       return reply(undefined, ok, note(': generic ENUM 0'));
   }
 }
+
+// The Supersim adapter (supersim.mjs) runs inside this process and needs the store, the saver and the pushed tables.
+export { store, save, loadTable };

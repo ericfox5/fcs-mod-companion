@@ -59,3 +59,65 @@ Dynasty Wire stories and comments live on the site (D1); the console's own story
   by head id (PGHE, 239 images); then a silhouette. Served from R2 under `/img/players/` and `/img/faces/`.
 - Team logos: not in the archive (EA's FBS logos only). Needs the league's FCS logo pack (PNG per team) or an
   extraction from the mod's `.ast` texture archives.
+
+## Member accounts (migration 0008)
+
+The console decides who is in the league (`od_members`, mirrored by the bridge); the site only adds a login to each
+persona. Tables: `accounts` (one per member per dynasty: username unique per dynasty, PBKDF2-SHA256 100k-iteration
+hash + 16-byte salt), `invites` (code per member, `used_at` once an account was made from it), `sessions` (SHA-256 of
+the cookie token, 30-day sliding expiry, renewed when under 7 days remain). Cookie `od_session` is HttpOnly, Secure,
+SameSite=Lax, Path=/.
+
+- **Lock.** A dynasty with no accounts behaves as before: the `od_member` persona cookie picks who you are and a
+  single-member dynasty auto-selects. As soon as it has one account it is *locked*: the persona cookie is ignored,
+  visitors without a session are nobody (`member = null`), and only signed-in members edit boards, players and stories.
+- **Bootstrap.** The first invite comes from the league server (`ncaa-bridge od invite --did N --persona NAME`, which
+  calls `POST /api/bridge/invites` with the bridge token), so making the first account proves control of the server.
+  After that a signed-in commissioner creates and revokes invites on `/d/<slug>/members`.
+- **Routes** under `/d/<slug>`: `login` (GET form, POST username + password; generic failure message with a 400 ms
+  pause), `logout` (POST), `join?code=...` (GET shows the persona the code is for, POST creates the account, marks the
+  invite used and signs in), `members` (everyone: persona, team, commissioner tag, account; commissioner: invite
+  controls), `members/invite` and `members/invite/<code>/revoke` (POST, commissioner only). Usernames are 3-24
+  characters `[A-Za-z0-9_.-]`, passwords at least 8. Bridge API: `POST /api/bridge/invites {od, blazeId, note?}` and
+  `GET /api/bridge/invites?od=N`.
+- **Code**: `worker/src/session.ts` (hashing, sessions, `currentMember` returning `member/members/account/locked`),
+  `worker/src/pages/{login,join,members}.ts`, `worker/src/api/auth.ts`, `bridge/src/commands/invite.ts`.
+- Not done yet: password reset / re-invite for a member who already has an account, rate limiting beyond the pause.
+
+## Supersim coaching mode (2026-10-29 revamp)
+
+The NCAA 12 SuperSim screenshot shows the member choosing plays; the first web version simulated the whole game
+in one request, which felt predetermined. The revamp (`worker/src/supersim/coach/`, `worker/public/js/supersim/coach.js`)
+is a chess match: the member picks a play from their team's real NCAA 14 playbook (formation → set → play, the data
+comes from the game's own `.ast` archives, see `docs/playbooks.md`), the server picks the CPU's counter (or waits for
+the other member when both teams are human), rolls the snap with fresh randomness at that moment, updates the live
+game (`supersim_live`, migration 0011, optimistic `version`) and returns the result with an animation script: every
+player's path built from the play art, the ball, and the tackle point. Kickoffs, PATs (kick or two-point play),
+punts, field goals, kneels, spikes, timeouts, tempo, penalties, overtime (NCAA alternating possessions from the 25)
+are all live. "Sim" lets the CPU call the member's plays for a stretch (each snap still rolled on request). At the
+final the result goes into `supersim_games` exactly as before, so the league server poller and the console path are
+unchanged. The page requires a signed-in member who owns one of the two teams; a game can be abandoned (deleted)
+by its starter or a commissioner until it is final.
+
+### 2026-10-30 additions
+
+- Supersim: coached games start at a coin toss (the away team calls; the winner receives, kicks off or defers; a CPU
+  winner defers 75% of the time; Sim settles the toss with a human winner deferring). Quarters are 12 minutes
+  (`SUPERSIM_QUARTER_SECONDS` overrides). A 40-second play clock: with the game clock running, the offense snaps with
+  8-16 (normal), 24-30 (hurry) or 0-3 (chew) seconds left; each play detail carries `clk0`, `snap`, `pc`, `pq` and the
+  client runs the game clock and play clock through the runoff and the play. Teams change ends every quarter (`flip` on
+  the detail; end zones and end labels follow). Substitutions (`action: 'sub' {pos, depth, pgid}`, `subreset`) live in
+  the live state (`subs`) for the rest of the game and never touch the console depth chart.
+- Teams is now an automated power ranking (win %, capped margin, strength of schedule, last-three form, scoring and
+  defense percentiles, quality wins / bad losses, streak, poll); Standings keeps the conference tables.
+- Awards: Heisman Watch with three key season stats per player by position, then the game's all-conference first and
+  second teams (AAPL rows are per conference: `cgid`, `team_type` 0/1) with a conference picker.
+- Recruiting: prospects who committed are read-only on the board (green with a check when they committed to you, grey
+  with only Remove when they went elsewhere); the save handler drops their points and visits.
+- Home: the sidebar Scores box uses compact two-line tiles (`miniScores`).
+- Supersim kicks: yellow goalposts on both end lines (uprights 18'6" apart, crossbar 10 ft, 30 ft tall; far set behind
+  the players, near set in front). The engine gives every FG / PAT a flight (`anim.kick`: result good / wide / short /
+  post / blocked, lateral offset and height at the end line, + = the kicker's right) with matching text ("wide left",
+  "short", "hits the right upright and bounces out"); the client flies the ball on that arc with a shadow and an air
+  trace, flashes the posts on a make, shakes them on a doink, and eases a kick camera in on the hold and the posts.
+  PAT block odds are now ~0.5% (2% against a block call), FG 1.2% (5%).

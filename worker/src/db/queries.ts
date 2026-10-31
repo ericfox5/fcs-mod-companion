@@ -35,7 +35,7 @@ export const getConferences = (db: D1Database, d: number) => all<ConfRow>(db.pre
 export const getDivisions = (db: D1Database, d: number) => all<DivRow>(db.prepare('SELECT dgid, cgid, name, short_name FROM divisions WHERE dynasty_id = ? ORDER BY dgid').bind(d));
 
 export function getGames(db: D1Database, d: number, year: number, opts: { week?: number; tgid?: number; playedOnly?: boolean } = {}) {
-  let sql = 'SELECT * FROM games WHERE dynasty_id = ? AND season_year = ?';
+  let sql = 'SELECT * FROM supersim_schedule WHERE dynasty_id = ? AND season_year = ?'; // games overlaid with official Supersim results
   const params: unknown[] = [d, year];
   if (opts.week !== undefined) { sql += ' AND week = ?'; params.push(opts.week); }
   if (opts.tgid !== undefined) { sql += ' AND (home_tgid = ? OR away_tgid = ?)'; params.push(opts.tgid, opts.tgid); }
@@ -47,6 +47,15 @@ export function getGames(db: D1Database, d: number, year: number, opts: { week?:
 export const getWeeks = (db: D1Database, d: number, year: number) => all<{ week: number }>(db.prepare('SELECT DISTINCT week FROM games WHERE dynasty_id = ? AND season_year = ? ORDER BY week').bind(d, year));
 export const getPlayers = (db: D1Database, d: number, tgid: number) => all<PlayerRow>(db.prepare('SELECT * FROM players WHERE dynasty_id = ? AND tgid = ? ORDER BY pos, overall DESC').bind(d, tgid));
 export const getPlayer = (db: D1Database, d: number, pgid: number) => db.prepare('SELECT * FROM players WHERE dynasty_id = ? AND pgid = ?').bind(d, pgid).first<PlayerRow>();
+// Season stat lines (all kinds) for a set of players, in chunks of 90 ids (D1 allows 100 bound parameters).
+export async function getSeasonStatsFor(db: D1Database, d: number, year: number, ids: number[]): Promise<{ kind: string; pgid: number; stats_json: string }[]> {
+  const out: { kind: string; pgid: number; stats_json: string }[] = [];
+  for (let i = 0; i < ids.length; i += 90) {
+    const slice = ids.slice(i, i + 90);
+    out.push(...await all<{ kind: string; pgid: number; stats_json: string }>(db.prepare(`SELECT kind, pgid, stats_json FROM player_season_stats WHERE dynasty_id = ? AND season_year = ? AND pgid IN (${slice.map(() => '?').join(',')})`).bind(d, year, ...slice)));
+  }
+  return out;
+}
 export async function getPlayersByIds(db: D1Database, d: number, ids: number[]): Promise<PlayerRow[]> {
   const out: PlayerRow[] = [];
   for (let i = 0; i < ids.length; i += 90) { // D1 allows at most 100 bound parameters per statement
@@ -76,8 +85,8 @@ export const getAllAmericans = (db: D1Database, d: number, year: number) => all<
 const STAT_SELECT = 'SELECT s.pgid, s.stats_json, p.first_name, p.last_name, p.pos, p.tgid, p.year, p.redshirt, p.photo_key, p.head_id FROM player_season_stats s JOIN players p ON p.dynasty_id = s.dynasty_id AND p.pgid = s.pgid WHERE s.dynasty_id = ? AND s.season_year = ? AND s.kind = ?';
 export const getPlayerSeasonStats = (db: D1Database, d: number, year: number, kind: string) => all<StatRow>(db.prepare(STAT_SELECT).bind(d, year, kind));
 export const getTeamPlayerSeasonStats = (db: D1Database, d: number, year: number, kind: string, tgid: number) => all<StatRow>(db.prepare(STAT_SELECT + ' AND p.tgid = ?').bind(d, year, kind, tgid));
-export const getGame = (db: D1Database, d: number, year: number, week: number, gameNo: number) => db.prepare('SELECT * FROM games WHERE dynasty_id = ? AND season_year = ? AND week = ? AND game_no = ?').bind(d, year, week, gameNo).first<GameRow>();
-export const getGameLogs = (db: D1Database, d: number, year: number, week: number, gameNo: number) => all<GameLogRow>(db.prepare('SELECT kind, week, game_no, pgid, tgid, stats_json FROM game_logs WHERE dynasty_id = ? AND season_year = ? AND week = ? AND game_no = ?').bind(d, year, week, gameNo));
+export const getGame = (db: D1Database, d: number, year: number, week: number, gameNo: number) => db.prepare('SELECT * FROM supersim_schedule WHERE dynasty_id = ? AND season_year = ? AND week = ? AND game_no = ?').bind(d, year, week, gameNo).first<GameRow>();
+export const getGameLogs = (db: D1Database, d: number, year: number, week: number, gameNo: number) => all<GameLogRow>(db.prepare('SELECT kind, week, game_no, pgid, tgid, stats_json FROM supersim_game_logs WHERE dynasty_id = ? AND season_year = ? AND week = ? AND game_no = ?').bind(d, year, week, gameNo));
 export const getTeamSeasonStats = (db: D1Database, d: number, year: number) => all<{ tgid: number; stats_json: string }>(db.prepare('SELECT tgid, stats_json FROM team_season_stats WHERE dynasty_id = ? AND season_year = ?').bind(d, year));
 
 export function getRecruits(db: D1Database, d: number, opts: { limit?: number; pos?: number; stars?: number } = {}) {
@@ -88,6 +97,12 @@ export function getRecruits(db: D1Database, d: number, opts: { limit?: number; p
   sql += ' ORDER BY r.rank LIMIT ?';
   params.push(opts.limit ?? 100);
   return all<RecruitRow>(db.prepare(sql).bind(...params));
+}
+// Prospects (of a board) that have committed anywhere.
+export async function getCommittedPrsis(db: D1Database, d: number, prsis: number[]): Promise<Set<number>> {
+  if (!prsis.length) return new Set();
+  const rows = await all<{ prsi: number }>(db.prepare(`SELECT prsi FROM recruits WHERE dynasty_id = ? AND committed = 1 AND prsi IN (${prsis.map(() => '?').join(',')})`).bind(d, ...prsis.slice(0, 90)));
+  return new Set(rows.map((r) => r.prsi));
 }
 export const getBoard = (db: D1Database, d: number, tgid: number) =>
   all<BoardRow>(db.prepare('SELECT b.points_this_week, b.points_last_week, b.board_order, b.playing_time, r.*, i.committed_tgid, i.points_to_commit, i.teams_json FROM recruiting_board b JOIN recruits r ON r.dynasty_id = b.dynasty_id AND r.prsi = b.prsi LEFT JOIN recruit_interest i ON i.dynasty_id = r.dynasty_id AND i.prsi = r.prsi WHERE b.dynasty_id = ? AND b.tgid = ? ORDER BY b.board_order').bind(d, tgid));
@@ -127,3 +142,45 @@ export const updateWebStory = (db: D1Database, d: number, id: number, s: WebStor
   db.prepare("UPDATE web_stories SET title = ?, body = ?, tgid = ?, game_week = ?, game_no = ?, updated_at = datetime('now') WHERE dynasty_id = ? AND id = ?").bind(s.title, s.body, s.tgid, s.game_week, s.game_no, d, id).run();
 export const setWebStoryImage = (db: D1Database, d: number, id: number, key: string | null) => db.prepare('UPDATE web_stories SET image_key = ? WHERE dynasty_id = ? AND id = ?').bind(key, d, id).run();
 export const deleteWebStory = (db: D1Database, d: number, id: number) => db.prepare('DELETE FROM web_stories WHERE dynasty_id = ? AND id = ?').bind(d, id).run();
+
+// Member accounts, invite codes and login sessions (migration 0008). One account per member (blaze_id) per dynasty;
+// usernames are unique per dynasty, case-insensitively. Password hashing and session tokens live in session.ts.
+export interface MemberRow { team_name?: string | null; team_abbr?: string | null } // filled by getMembersWithTeams for the top bar
+export interface AccountRow { id: number; dynasty_id: number; blaze_id: number; username: string; pass_hash: string; salt: string; created_at: string }
+export interface AccountSummary { id: number; blaze_id: number; username: string; created_at: string }
+export interface InviteRow { code: string; dynasty_id: number; blaze_id: number; created_by_account_id: number | null; note: string | null; created_at: string; used_at: string | null; used_by_account_id: number | null }
+export interface SessionRow { token_hash: string; account_id: number; dynasty_id: number; created_at: string; expires_at: string; blaze_id: number; username: string }
+export const getMembersWithTeams = (db: D1Database, d: number) =>
+  all<MemberRow>(db.prepare('SELECT m.*, t.name AS team_name, t.abbr AS team_abbr FROM od_members m LEFT JOIN teams t ON t.dynasty_id = m.dynasty_id AND t.tgid = m.tgid WHERE m.dynasty_id = ? ORDER BY m.commissioner DESC, m.persona').bind(d));
+export const countAccounts = async (db: D1Database, d: number): Promise<number> => Number((await db.prepare('SELECT COUNT(*) AS n FROM accounts WHERE dynasty_id = ?').bind(d).first<{ n: number }>())?.n ?? 0);
+export const listAccounts = (db: D1Database, d: number) => all<AccountSummary>(db.prepare('SELECT id, blaze_id, username, created_at FROM accounts WHERE dynasty_id = ? ORDER BY username').bind(d));
+export const getAccountByUsername = (db: D1Database, d: number, username: string) => db.prepare('SELECT * FROM accounts WHERE dynasty_id = ? AND username = ?').bind(d, username).first<AccountRow>();
+export const getAccountForMember = (db: D1Database, d: number, blazeId: number) => db.prepare('SELECT id, blaze_id, username, created_at FROM accounts WHERE dynasty_id = ? AND blaze_id = ?').bind(d, blazeId).first<AccountSummary>();
+export const deleteAccount = (db: D1Database, id: number) => db.prepare('DELETE FROM accounts WHERE id = ?').bind(id).run();
+// Creates the account and claims the invite in one transaction; returns the account id, or null when the invite was
+// already used (a concurrent join). Unique-constraint violations (username or member taken) throw.
+export async function createAccountFromInvite(db: D1Database, d: number, blazeId: number, username: string, passHash: string, salt: string, code: string): Promise<number | null> {
+  const [ins, upd] = await db.batch([
+    db.prepare('INSERT INTO accounts (dynasty_id, blaze_id, username, pass_hash, salt) VALUES (?,?,?,?,?)').bind(d, blazeId, username, passHash, salt),
+    db.prepare("UPDATE invites SET used_at = datetime('now'), used_by_account_id = last_insert_rowid() WHERE code = ? AND dynasty_id = ? AND used_at IS NULL").bind(code, d),
+  ]);
+  const id = Number(ins?.meta.last_row_id);
+  if (!upd?.meta.changes) { await deleteAccount(db, id); return null; }
+  return id;
+}
+export const getInvite = (db: D1Database, code: string) => db.prepare('SELECT * FROM invites WHERE code = ?').bind(code).first<InviteRow>();
+export const listOpenInvites = (db: D1Database, d: number) => all<InviteRow>(db.prepare('SELECT * FROM invites WHERE dynasty_id = ? AND used_at IS NULL ORDER BY created_at DESC').bind(d));
+export const insertInvite = (db: D1Database, code: string, d: number, blazeId: number, createdBy: number | null, note: string | null) =>
+  db.prepare('INSERT INTO invites (code, dynasty_id, blaze_id, created_by_account_id, note) VALUES (?,?,?,?,?)').bind(code, d, blazeId, createdBy, note).run();
+export const deleteOpenInvite = async (db: D1Database, d: number, code: string): Promise<boolean> => !!(await db.prepare('DELETE FROM invites WHERE dynasty_id = ? AND code = ? AND used_at IS NULL').bind(d, code).run()).meta.changes;
+export const insertSession = (db: D1Database, tokenHash: string, accountId: number, d: number, expiresAt: string) =>
+  db.prepare('INSERT INTO sessions (token_hash, account_id, dynasty_id, expires_at) VALUES (?,?,?,?)').bind(tokenHash, accountId, d, expiresAt).run();
+export const getSession = (db: D1Database, tokenHash: string) =>
+  db.prepare("SELECT s.*, a.blaze_id, a.username FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token_hash = ? AND s.expires_at > datetime('now')").bind(tokenHash).first<SessionRow>();
+export const touchSession = (db: D1Database, tokenHash: string, expiresAt: string) => db.prepare('UPDATE sessions SET expires_at = ? WHERE token_hash = ?').bind(expiresAt, tokenHash).run();
+export const deleteSession = (db: D1Database, tokenHash: string) => db.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(tokenHash).run();
+export const purgeExpiredSessions = (db: D1Database) => db.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();
+// The viewer's sign-in state rides along on the member rows: pages hand `member`/`members` to layout() unchanged, so the
+// top bar can show Sign in / Sign out without every page learning about accounts. Stamped by session.ts currentMember.
+export interface MemberAuth { locked: boolean; account: { id: number; username: string } | null }
+export interface MemberRow { auth?: MemberAuth }

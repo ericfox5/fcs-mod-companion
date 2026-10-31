@@ -48,6 +48,12 @@ export function scoreLine(slug: string, g: GameRow, teams: Map<number, TeamRow>)
   </tr>`;
 }
 
+// Compact scoreboard for the 320px sidebar: one two-line tile per game (logo, rank, abbreviation, score), two per row.
+export const miniScores = (slug: string, games: GameRow[], teams: Map<number, TeamRow>, empty = 'No games.') => {
+  const row = (t: TeamRow | undefined, score: number, won: boolean, played: boolean) => html`<div class="ms-row ${won ? 'won' : ''}">${teamLogo(t, 'xs')}<span class="ms-abbr">${t && rankOf(t) > 0 && rankOf(t) <= 25 ? html`<span class="ms-rk">${rankOf(t)}</span>` : ''}${t?.abbr ?? '?'}</span><span class="ms-score">${played ? score : ''}</span></div>`;
+  return games.length ? html`<div class="mini-scores">${games.map((g) => { const played = g.status >= 2; const a = teams.get(g.away_tgid), h = teams.get(g.home_tgid); return html`<a class="ms-game" href="${gameHref(slug, g)}">${row(a, g.away_score, played && g.status === 2, played)}${row(h, g.home_score, played && g.status === 3, played)}<div class="ms-status">${played ? (g.overtime ? 'Final/OT' : 'Final') : 'Preview'}${g.user_played ? ' · user' : ''}</div></a>`; })}</div>` : html`<p class="muted">${empty}</p>`;
+};
+
 export const gamesTable = (slug: string, games: GameRow[], teams: Map<number, TeamRow>, empty = 'No games.') =>
   games.length ? html`<table class="games">${games.map((g) => scoreLine(slug, g, teams))}</table>` : html`<p class="muted">${empty}</p>`;
 

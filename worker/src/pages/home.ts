@@ -3,7 +3,7 @@ import { html } from '../html.js';
 import { layout, box, two } from '../layout.js';
 import { getTeams, getGames, getStories, teamMap, getUserTeams, getMembers, listWebStories, type GameRow } from '../db/queries.js';
 import { storyImageUrl, paragraphs } from './stories.js';
-import { gamesTable, weekLabel, teamLink, teamLogo, rankOf, pollName, seasonLabel } from './common.js';
+import { gamesTable, miniScores, weekLabel, teamLink, teamLogo, rankOf, pollName, seasonLabel } from './common.js';
 
 export async function homePage(ctx: PageCtx) {
   const { env, dyn } = ctx;
@@ -41,7 +41,7 @@ export async function homePage(ctx: PageCtx) {
   `;
   const right = html`
     ${box('Dynasty Members', members.length ? html`<table class="list members">${memberRows}</table>` : html`<p class="muted">${online ? 'No members yet.' : 'Imported from an offline save; user teams come from the coach table.'}</p>`)}
-    ${scores.length ? box(`Scores · ${weekLabel(scoresWeek)}`, gamesTable(dyn.slug, scores, tm)) : box('Scores', html`<p class="muted">No games played yet.</p>`)}
+    ${scores.length ? box(`Scores · ${weekLabel(scoresWeek)}`, miniScores(dyn.slug, scores, tm)) : box('Scores', html`<p class="muted">No games played yet.</p>`)}
     ${box(`${pollName(teams)} Top 10`, html`<table class="list">${top.map((t) => html`<tr><td class="rk">${rankOf(t)}</td><td>${teamLogo(t, 'xs')} ${teamLink(dyn.slug, t)}</td><td>${t.wins}-${t.losses}</td></tr>`)}</table>`)}
   `;
   return layout({ strip: ctx.strip, member: ctx.member, members: ctx.members, path: ctx.url.pathname, title: 'Home', siteName: env.SITE_NAME, dyn, section: 'home', body: two(left, right) });

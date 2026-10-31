@@ -5,6 +5,7 @@ import { html, raw, esc, notFound, type Raw } from '../html.js';
 import { layout, box } from '../layout.js';
 import { getTeams, getStories, getGames, teamMap, listWebStories, getWebStory, insertWebStory, updateWebStory, setWebStoryImage, deleteWebStory, type WebStory, type WebStoryInput, type TeamRow, type GameRow, type MemberRow } from '../db/queries.js';
 import { redirect } from '../session.js';
+import { listCaptures, getCapture } from '../db/visits.js';
 import { teamLink, teamLogo, weekLabel, gameHref } from './common.js';
 
 const TITLE_MAX = 120, BODY_MAX = 12000, IMAGE_MAX = 5 * 1024 * 1024;
@@ -55,7 +56,7 @@ export async function storyFormPage(ctx: PageCtx, id?: number) {
   const { env, dyn, url, member, members } = ctx;
   const db = env.DB, d = dyn.id, y = dyn.season_year, week = dyn.week ?? 0;
   const page = (title: string, body: Raw) => layout({ strip: ctx.strip, member, members, path: url.pathname, title, siteName: env.SITE_NAME, dyn, section: 'stories', body });
-  if (!member) return page('Write a story', html`<h2>Write a story</h2><p class="flash err">Pick who you are in the top bar to write a story.</p>`);
+  if (!member) return page('Write a story', html`<h2>Write a story</h2><p class="flash err">${ctx.locked ? 'Sign in from the top bar to write a story.' : 'Pick who you are in the top bar to write a story.'}</p>`);
   const s = id !== undefined ? await getWebStory(db, d, id) : null;
   if (id !== undefined && !s) return notFound('No such story');
   if (s && !canEditStory(member, s)) return redirect(`/d/${dyn.slug}/stories?err=${enc('You can only edit your own stories.')}`);
@@ -68,6 +69,8 @@ export async function storyFormPage(ctx: PageCtx, id?: number) {
   const gameLabel = (g: GameRow) => `${weekLabel(g.week)}: ${tm.get(g.away_tgid)?.name ?? '?'} at ${tm.get(g.home_tgid)?.name ?? '?'}${g.status >= 2 ? ` (${g.away_score}-${g.home_score}${g.overtime ? ' OT' : ''})` : ''}`;
   const err = url.searchParams.get('err');
   const action = s ? `/d/${dyn.slug}/stories/${s.id}/edit` : `/d/${dyn.slug}/stories/new`;
+  const captures = await listCaptures(db, d, 24);
+  const capLabel = (c: { home_tgid: number | null; away_tgid: number | null; home_score: number | null; away_score: number | null; play_text: string | null; week: number | null; taken_at: string | null }) => c.home_tgid && c.away_tgid ? `${tm.get(c.away_tgid)?.abbr ?? '?'} at ${tm.get(c.home_tgid)?.abbr ?? '?'} ${c.away_score ?? ''}-${c.home_score ?? ''}${c.play_text ? ` · ${c.play_text}` : ''}` : (c.taken_at ?? '').slice(0, 16);
   const body = html`<h2>${s ? 'Edit story' : 'Write a story'}</h2>${err ? html`<p class="flash err">${err}</p>` : ''}
   ${box(s ? s.title : 'New story', html`<form class="wform" method="post" action="${action}" enctype="multipart/form-data">
     <div class="fields">
@@ -77,6 +80,7 @@ export async function storyFormPage(ctx: PageCtx, id?: number) {
       <div><label for="sf-game">About this game</label><select id="sf-game" name="game"><option value="">None</option>${games.map((g) => html`<option value="${g.week}:${g.game_no}" ${`${g.week}:${g.game_no}` === selGame ? 'selected' : ''}>${gameLabel(g)}</option>`)}</select></div>
       <div class="wide"><label for="sf-img">Photo <span class="exp">(JPEG, PNG or WebP, up to 5 MB)</span></label><input id="sf-img" type="file" name="image" accept="image/jpeg,image/png,image/webp">
         ${s?.image_key ? html`<p class="muted sf-cur"><img class="sf-thumb" src="${storyImageUrl(s)}" alt=""> Current photo. <label class="inline-check"><input type="checkbox" name="remove_image" value="1"> Remove it</label></p>` : ''}</div>
+      ${captures.length ? html`<div class="wide"><label>Or use an in-game capture</label><div class="caps"><label class="cap"><input type="radio" name="capture" value="" checked><span class="cap-none">None</span></label>${captures.map((c) => html`<label class="cap" title="${capLabel(c)}"><input type="radio" name="capture" value="${c.id}"><img src="${storyImageUrl(c)}" alt="" loading="lazy" decoding="async"><span class="cap-cap">${capLabel(c)}</span></label>`)}</div></div>` : ''}
     </div>
     <div class="actions"><button class="btn">${s ? 'Save changes' : 'Publish'}</button><a class="btn light" href="/d/${dyn.slug}/stories">Cancel</a></div>
   </form>`)}`;
@@ -89,7 +93,7 @@ export async function storyAction(ctx: PageCtx, a: string, b?: string): Promise<
   const db = env.DB, d = dyn.id, y = dyn.season_year, week = dyn.week ?? 0;
   const list = `/d/${dyn.slug}/stories`;
   const fail = (to: string, msg: string) => redirect(`${to}?err=${enc(msg)}`);
-  if (!member) return fail(list, 'Pick who you are in the top bar to write a story.');
+  if (!member) return fail(list, ctx.locked ? 'Sign in from the top bar to write a story.' : 'Pick who you are in the top bar to write a story.');
   const isNew = a === 'new';
   const id = isNew ? NaN : num(a);
   const existing = !isNew && Number.isInteger(id) ? await getWebStory(db, d, id) : null;
@@ -120,7 +124,17 @@ export async function storyAction(ctx: PageCtx, a: string, b?: string): Promise<
   const input: WebStoryInput = { title, body: text, tgid, game_week, game_no };
   const storyId = existing ? existing.id : await insertWebStory(db, d, y, week, member, input);
   if (existing) await updateWebStory(db, d, storyId, input);
-  if (file) {
+  const capId = num(String(form.get('capture') ?? ''));
+  const cap = !file && Number.isInteger(capId) && capId > 0 ? await getCapture(db, d, capId) : null;
+  if (cap) { // the story gets its own copy of the capture so deleting either never breaks the other
+    const obj = await env.SAVES.get(cap.image_key);
+    if (obj) {
+      const key = `stories/${d}/${storyId}-${Date.now()}.jpg`;
+      await env.SAVES.put(key, await obj.arrayBuffer(), { httpMetadata: { contentType: 'image/jpeg' } });
+      if (existing?.image_key) await env.SAVES.delete(existing.image_key);
+      await setWebStoryImage(db, d, storyId, key);
+    }
+  } else if (file) {
     const key = `stories/${d}/${storyId}-${Date.now()}.${IMAGE_TYPES[file.type]}`;
     await env.SAVES.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: file.type } });
     if (existing?.image_key) await env.SAVES.delete(existing.image_key);

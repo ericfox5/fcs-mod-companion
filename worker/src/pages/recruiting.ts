@@ -1,7 +1,8 @@
 import type { PageCtx } from '../index.js';
 import { html, type Raw } from '../html.js';
 import { layout, box } from '../layout.js';
-import { getTeams, getTeam, getRecruits, getBoard, getUserTeams, teamMap, getWebBoard, upsertWebBoard, deleteWebBoard, type BoardRow, type RecruitRow, type TeamRow, type WebBoardRow } from '../db/queries.js';
+import { getTeams, getTeam, getRecruits, getBoard, getUserTeams, getGames, teamMap, getWebBoard, upsertWebBoard, deleteWebBoard, type BoardRow, type RecruitRow, type TeamRow, type WebBoardRow, getCommittedPrsis } from '../db/queries.js';
+import { getTeamVisits, getWebVisits, upsertWebVisits, deleteWebVisits, type VisitRow } from '../db/visits.js';
 import { redirect } from '../session.js';
 import { teamLink, teamLogo, pos, heightFt, headshot, interestStack, weekLabel } from './common.js';
 
@@ -23,6 +24,14 @@ async function desiredBoard(db: D1Database, d: number, tgid: number, year: numbe
   if (web && !web.delivered_at) return { rows: JSON.parse(web.rows_json), pending: true, updatedAt: web.updated_at };
   const board = await getBoard(db, d, tgid);
   return { rows: board.map((b) => toRow(b, tgid)).sort((a, b) => a.PROR - b.PROR), pending: false, updatedAt: null };
+}
+const DEFAULT_VISIT_VALUE = 350; // OFGP the console assigns to a typical scheduled visit; it recomputes outcomes itself
+// Visits the member is working on: the pending web set if there is one, else the console's own RECV rows for the team.
+async function desiredVisits(db: D1Database, d: number, tgid: number, year: number, week: number): Promise<{ rows: VisitRow[]; pending: boolean }> {
+  const web = await getWebVisits(db, d, tgid, year, week);
+  if (web && !web.delivered_at) return { rows: JSON.parse(web.rows_json), pending: true };
+  const rows = (await getTeamVisits(db, d, tgid)).map((v) => ({ VMVP: v.mvp, TGID: tgid, PRSI: v.prsi, OFGP: v.value, RCWK: v.week, NFGZ: v.nfgz, NFGM: v.nfgm }));
+  return { rows, pending: false };
 }
 const renumber = (rows: WebBoardRow[]) => rows.sort((a, b) => a.PROR - b.PROR).map((r, i) => ({ ...r, PROR: i }));
 
@@ -68,6 +77,15 @@ export async function recruitingPage(ctx: PageCtx) {
   const recruitOf = (prsi: number): RecruitRow | undefined => byPrsi.get(prsi) ?? extra.find((r) => r.prsi === prsi);
   const used = desired.rows.reduce((s, r) => s + (r.PPSC || 0), 0);
   const { budget } = budgetOf(team);
+  const visits = team ? await desiredVisits(db, d, team.tgid, y, week) : { rows: [] as VisitRow[], pending: false };
+  const visitOf = new Map(visits.rows.map((v) => [v.PRSI, v]));
+  const homeWeeks = team ? (await getGames(db, d, y, { tgid: team.tgid })).filter((g) => g.home_tgid === team.tgid && g.week >= week && g.status < 2).map((g) => ({ week: g.week, opp: tm.get(g.away_tgid)?.abbr ?? '?' })) : [];
+  const visitCell = (prsi: number) => {
+    const v = visitOf.get(prsi);
+    if (v && v.RCWK < week) return html`<span class="visit-done" title="Visited">Wk ${v.RCWK + 1} &#10003;</span>`;
+    if (!canEdit) return html`${v ? `Wk ${v.RCWK + 1}` : html`<span class="muted">-</span>`}`;
+    return html`<select class="visit-sel" name="visit_${prsi}"><option value="">No visit</option>${homeWeeks.map((w) => html`<option value="${w.week}" ${v?.RCWK === w.week ? 'selected' : ''}>Wk ${w.week + 1} vs ${w.opp}</option>`)}</select>`;
+  };
   const flash = url.searchParams.get('saved') ? html`<p class="flash">Board saved. The console picks it up the next time the dynasty loads (refresh or resume), and it stays until the console confirms it.</p>` : url.searchParams.get('err') ? html`<p class="flash err">${url.searchParams.get('err')}</p>` : html``;
   const picker = html`<form class="inline" method="get"><select name="team" onchange="this.form.submit()">${teams.map((t) => html`<option value="${t.tgid}" ${t.tgid === tgid ? 'selected' : ''}>${t.name}${userTeams.some((u) => u.tgid === t.tgid) ? ' (user)' : ''}</option>`)}</select></form>`;
   const header = html`<div class="rec-head"><h2>Recruiting · ${weekLabel(week)}</h2>${top300Badge(dyn.slug)}${picker}</div>`;
@@ -76,6 +94,7 @@ export async function recruitingPage(ctx: PageCtx) {
       <div><div class="b-num">${used.toLocaleString()}</div><div class="b-lbl">points this week</div></div>
       <div class="${budget && used > budget ? 'over' : ''}"><div class="b-num">${budget ? (budget - used).toLocaleString() : '?'}</div><div class="b-lbl">left of ${budget ? budget.toLocaleString() : '?'}</div></div>
       <div><div class="b-num">${desired.rows.length}</div><div class="b-lbl">of ${BOARD_SLOTS} slots</div></div>
+      <div><div class="b-num">${visits.rows.filter((v) => v.RCWK >= week).length}</div><div class="b-lbl">visits scheduled${visits.pending ? ' (pending)' : ''}</div></div>
       <div class="b-state">${desired.pending ? html`<span class="tag">PENDING</span>saved ${desired.updatedAt} UTC · applied when the dynasty next loads on the console` : html`in-game board as of the last sync`}</div>
     </div>` : html``;
 
@@ -85,8 +104,11 @@ export async function recruitingPage(ctx: PageCtx) {
   const prospect = (r: WebBoardRow, i: number) => {
     const rec = recruitOf(r.PRSI);
     const name = rec ? `${rec.first_name} ${rec.last_name}` : `Prospect ${r.PRSI}`;
-    const tag = rec?.committed ? html` <span class="tag">${rec.committed_tgid === tgid ? 'COMMITTED' : 'GONE'}</span>` : html``;
-    return html`<div class="pr" ${dataAttrs(rec, i, r.PPSC, r.PPSL)}>
+    const done = !!rec?.committed, ours = done && rec!.committed_tgid === tgid;
+    const tag = done ? (ours ? html` <span class="tag commit">&#10003; COMMITTED</span>` : html` <span class="tag gone">COMMITTED ${tm.get(rec!.committed_tgid ?? -1)?.abbr ?? 'ELSEWHERE'}</span>`) : html``;
+    const locked = html`<span class="st-f st-done">${ours ? html`&#10003; Committed to ${team?.abbr ?? 'you'}` : html`Committed to ${tm.get(rec!.committed_tgid ?? -1)?.name ?? 'another school'}`}</span>`;
+    const ctl = done ? (ours || !canEdit ? html`` : html`<button class="btn sm danger" name="remove" value="${r.PRSI}">Remove</button>`) : canEdit ? controls(r) : html``;
+    return html`<div class="pr ${done ? (ours ? 'committed ours' : 'committed gone') : ''}" ${dataAttrs(rec, i, r.PPSC, r.PPSL)}>
       <div class="pr-sum" role="button" tabindex="0" aria-expanded="false">
         <span class="pr-rk">${i + 1}</span>${rec ? headshot(rec) : html`<span class="headshot sm"></span>`}
         <span class="pr-name"><span class="pr-n">${name}${tag}</span><span class="pr-meta mob-only">${rec ? html`${pos(rec.pos)} · <span class="stars">${stars(rec.stars)}</span> · #${rec.rank}` : ''}</span></span>
@@ -98,9 +120,9 @@ export async function recruitingPage(ctx: PageCtx) {
         <span class="pr-col c-ovr"><b>${rec?.pre_scout_overall ?? ''}</b></span>
         <span class="pr-col c-int">${interestStack(tm, rec?.teams_json ?? null)}</span>
         <span class="pr-col c-last">${r.PPSL}</span>
-        <span class="pr-st">${canEdit ? html`<span class="st-f"><span class="st-l">Points</span>${stepper(`pts_${r.PRSI}`, r.PPSC, MAX_PER_PROSPECT, 10)}</span><span class="st-f"><span class="st-l">Scout</span>${stepper(`scout_${r.PRSI}`, r.PSCP, MAX_SCOUT, 50, 'scouting points')}</span>` : html`<span class="st-f"><span class="st-l">Points</span><b class="c-ptsv">${r.PPSC}</b></span><span class="st-f"><span class="st-l">Scout</span><b class="c-ptsv">${r.PSCP}</b></span>`}</span>
+        <span class="pr-st">${done ? locked : canEdit ? html`<span class="st-f"><span class="st-l">Points</span>${stepper(`pts_${r.PRSI}`, r.PPSC, MAX_PER_PROSPECT, 10)}</span><span class="st-f"><span class="st-l">Scout</span>${stepper(`scout_${r.PRSI}`, r.PSCP, MAX_SCOUT, 50, 'scouting points')}</span><span class="st-f"><span class="st-l">Visit</span>${visitCell(r.PRSI)}</span>` : html`<span class="st-f"><span class="st-l">Points</span><b class="c-ptsv">${r.PPSC}</b></span><span class="st-f"><span class="st-l">Scout</span><b class="c-ptsv">${r.PSCP}</b></span><span class="st-f"><span class="st-l">Visit</span>${visitCell(r.PRSI)}</span>`}</span>
         <span class="pr-col c-pt">${r.PEPV}</span>
-        <span class="pr-col c-ctl">${canEdit ? controls(r) : ''}</span>
+        <span class="pr-col c-ctl">${ctl}</span>
         <span class="pr-pts mob-only"><b>${r.PPSC}</b><small>pts</small></span>
         <span class="pr-chev mob-only" aria-hidden="true"></span>
       </div>
@@ -112,11 +134,11 @@ export async function recruitingPage(ctx: PageCtx) {
           <div><label>Size</label>${rec ? `${heightFt(rec.height)} · ${rec.weight} lb` : ''}</div>
           <div class="span2"><label>Interest</label>${interestStack(tm, rec?.teams_json ?? null)}</div>
         </div>
-        ${canEdit ? html`<div class="pr-ctl">${controls(r)}</div>` : ''}
+        ${canEdit && !(done && ours) ? html`<div class="pr-ctl">${ctl}</div>` : ''}
       </div>
     </div>`;
   };
-  const head = html`<div class="pr-head desk-only"><span class="pr-rk">${sortBtn('order', '#', 'Board order')}</span><span></span><span class="pr-name">${sortBtn('name', 'Prospect')}</span><span class="pr-col c-pos">${sortBtn('pos', 'Pos')}</span><span class="pr-col c-stars">${sortBtn('stars', 'Stars')}</span><span class="pr-col c-rank">${sortBtn('rank', 'Rank', 'National rank')}</span><span class="pr-col c-ht">${sortBtn('ht', 'Ht')}</span><span class="pr-col c-wt">${sortBtn('wt', 'Wt')}</span><span class="pr-col c-ovr">${sortBtn('ovr', 'OVR', 'Scouted overall (rises as scouting completes)')}</span><span class="pr-col c-int">Interest</span><span class="pr-col c-last">${sortBtn('last', 'Last wk')}</span><span class="pr-st"><span class="st-f">${sortBtn('pts', 'Points')}</span><span class="st-f">Scout</span></span><span class="pr-col c-pt">PT</span><span class="pr-col c-ctl"></span></div>`;
+  const head = html`<div class="pr-head desk-only"><span class="pr-rk">${sortBtn('order', '#', 'Board order')}</span><span></span><span class="pr-name">${sortBtn('name', 'Prospect')}</span><span class="pr-col c-pos">${sortBtn('pos', 'Pos')}</span><span class="pr-col c-stars">${sortBtn('stars', 'Stars')}</span><span class="pr-col c-rank">${sortBtn('rank', 'Rank', 'National rank')}</span><span class="pr-col c-ht">${sortBtn('ht', 'Ht')}</span><span class="pr-col c-wt">${sortBtn('wt', 'Wt')}</span><span class="pr-col c-ovr">${sortBtn('ovr', 'OVR', 'Scouted overall (rises as scouting completes)')}</span><span class="pr-col c-int">Interest</span><span class="pr-col c-last">${sortBtn('last', 'Last wk')}</span><span class="pr-st"><span class="st-f">${sortBtn('pts', 'Points')}</span><span class="st-f">Scout</span><span class="st-f">Visit</span></span><span class="pr-col c-pt">PT</span><span class="pr-col c-ctl"></span></div>`;
   const recs = desired.rows.map((r) => recruitOf(r.PRSI)).filter((r): r is RecruitRow => !!r);
   const list = html`${tools(recs)}<div class="prlist board">${head}${desired.rows.map(prospect)}</div>`;
   const form = canEdit ? html`<form method="post" action="/d/${dyn.slug}/recruiting/board"><input type="hidden" name="tgid" value="${team!.tgid}"><input type="hidden" name="week" value="${week}">${list}
@@ -128,7 +150,7 @@ export async function recruitingPage(ctx: PageCtx) {
   const addBox = canEdit ? box('Add a prospect', html`<form class="addbox" method="get"><input type="hidden" name="team" value="${team!.tgid}"><input type="text" name="q" value="${q}" placeholder="Search by name" inputmode="search"> <button class="btn light">Search</button> <span class="muted">or browse the</span> ${top300Badge(dyn.slug)}${desired.rows.length >= BOARD_SLOTS ? html` <span class="muted">Board is full.</span>` : ''}</form>
       ${matches.length ? html`<div class="prlist t300">${t300Head()}${matches.map((r, i) => t300Row(dyn.slug, tm, r, i, canEdit && team ? { tgid: team.tgid, week, full: desired.rows.length >= BOARD_SLOTS, onBoard: false, back: `/d/${dyn.slug}/recruiting?team=${team.tgid}&q=${encodeURIComponent(q)}` } : null))}</div>` : q ? html`<p class="muted">No uncommitted prospect matches "${q}".</p>` : html``}`) : html``;
 
-  const who = !member && members && members.length > 1 ? html`<p class="flash err">Pick who you are in the top bar to edit your board.</p>` : member && !canEdit && team ? html`<p class="muted">Viewing ${team.name}'s board. ${myTeam ? html`<a href="?team=${myTeam}">Go to your board</a>.` : 'You have no team yet.'}</p>` : html``;
+  const who = !member && (ctx.locked || (members?.length ?? 0) > 1) ? html`<p class="flash err">${ctx.locked ? 'Sign in from the top bar to edit your board.' : 'Pick who you are in the top bar to edit your board.'}</p>` : member && !canEdit && team ? html`<p class="muted">Viewing ${team.name}'s board. ${myTeam ? html`<a href="?team=${myTeam}">Go to your board</a>.` : 'You have no team yet.'}</p>` : html``;
   const body = html`${header}${flash}${who}${box(html`${teamLogo(team, 'sm')}${team ? `${team.name} recruiting board` : 'Recruiting board'}`, html`${budgetBar}${desired.rows.length ? form : html`<p class="muted">Nothing on the board.</p>`}`)}${addBox}`;
   return layout({ strip: ctx.strip, member, members, path: url.pathname + url.search, title: 'Recruiting', siteName: env.SITE_NAME, dyn, section: 'recruiting', body, wide: true });
 }
@@ -185,7 +207,7 @@ export async function boardAction(ctx: PageCtx, form: FormData): Promise<Respons
   if (num(form.get('week'), -1) !== week) return back(`err=${encodeURIComponent('The dynasty advanced while you were editing; the board was reloaded.')}`);
   const team = await getTeam(db, d, tgid);
   const action = String(form.get('action') ?? 'save');
-  if (action === 'reset') { await deleteWebBoard(db, d, tgid, y, week); return back('reset=1'); }
+  if (action === 'reset') { await deleteWebBoard(db, d, tgid, y, week); await deleteWebVisits(db, d, tgid, y, week); return back('reset=1'); }
   const { rows } = await desiredBoard(db, d, tgid, y, week);
   let next = rows.map((r) => ({ ...r }));
   for (const r of next) {
@@ -207,9 +229,29 @@ export async function boardAction(ctx: PageCtx, form: FormData): Promise<Respons
     note = `move ${move}`;
   }
   next = renumber(next);
+  // committed prospects take no points (and no visits below): the board keeps them only as a record
+  const committed = await getCommittedPrsis(db, d, next.map((r) => r.PRSI));
+  for (const r of next) if (committed.has(r.PRSI)) r.PPSC = 0;
   const used = next.reduce((s, r) => s + r.PPSC, 0);
   const { budget } = budgetOf(team ?? undefined);
   if (budget && used > budget) return back(`err=${encodeURIComponent(`That is ${used - budget} points over the weekly budget of ${budget}.`)}`);
   await upsertWebBoard(db, d, tgid, y, week, next, member.blaze_id, note);
+  // visits: one select per prospect (home-game weeks); completed visits are kept as the console reported them
+  if ([...form.keys()].some((k) => k.startsWith('visit_'))) {
+    const current = await desiredVisits(db, d, tgid, y, week);
+    const kept = current.rows.filter((v) => v.RCWK < week);
+    const futureNow = new Map(current.rows.filter((v) => v.RCWK >= week).map((v) => [v.PRSI, v]));
+    const nextVisits: VisitRow[] = [...kept];
+    for (const r of next) {
+      const raw = form.get(`visit_${r.PRSI}`);
+      if (raw === null || raw === '' || committed.has(r.PRSI)) continue;
+      const wk = num(raw, -1);
+      if (wk < week) continue;
+      const prevV = futureNow.get(r.PRSI);
+      nextVisits.push(prevV && prevV.RCWK === wk ? prevV : { VMVP: 0, TGID: tgid, PRSI: r.PRSI, OFGP: prevV?.OFGP || DEFAULT_VISIT_VALUE, RCWK: wk, NFGZ: 0, NFGM: 0 });
+    }
+    const key = (rows: VisitRow[]) => JSON.stringify(rows.map((v) => [v.PRSI, v.RCWK]).sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0)));
+    if (key(nextVisits) !== key(current.rows) || current.pending) await upsertWebVisits(db, d, tgid, y, week, nextVisits, member.blaze_id, note);
+  }
   return back('saved=1');
 }

@@ -7,8 +7,10 @@ import { exportDynasty, isPlayed } from '@ncaa/ncaa14';
 import { loadConfig } from './config.js';
 import { importSave } from './commands/import.js';
 import { odImport, odList, odWatch, syncWebEdits } from './commands/od.js';
+import { syncCaptures } from './commands/captures.js';
 import { loadOdStore } from './od.js';
 import { photosUpload } from './commands/photos.js';
+import { odInvite } from './commands/invite.js';
 import { logosUpload } from './commands/logos.js';
 
 const [, , cmd, ...rest] = process.argv;
@@ -99,11 +101,14 @@ function exportCmd(path: string) {
 switch (cmd) {
   case 'import': await importSave(loadConfig(flags), args[0]!, { note: flags.get('note'), files: !flags.has('no-files') }); break;
   case 'logos': await logosUpload(loadConfig(flags, { needSlug: false }), flags.get('dir') ?? 'archive/logos', { force: flags.has('force') }); break; // logos upload --dir <folder with teams/ and conf/>
+  case 'invite': await odInvite(loadConfig(flags, { needSlug: false }), { did: flags.has('did') ? Number(flags.get('did')) : undefined, persona: flags.get('persona') ?? '' }); break; // alias of: od invite --did N --persona NAME
   case 'photos': await photosUpload(loadConfig(flags, { needSlug: false }), { force: flags.has('force') }); break; // photos upload [--photos-dir D --faces-dir F --force]
   case 'od': { // online dynasties served by the Blaze stub (spike/blaze/server)
     const cfg = loadConfig(flags, { needSlug: false });
     const did = flags.has('did') ? Number(flags.get('did')) : undefined;
     if (args[0] === 'list') odList(cfg);
+    else if (args[0] === 'invite') await odInvite(cfg, { did, persona: flags.get('persona') ?? '' }); // od invite --did N --persona NAME -> join link
+    else if (args[0] === 'captures') { const store = loadOdStore(cfg.odDir); for (const d of Object.values(store.dynasties)) if ((did === undefined || d.id === did) && d.fileId) await syncCaptures(cfg, d, undefined, { limit: Number(flags.get('limit') ?? 50) }); }
     else if (args[0] === 'edits') { const store = loadOdStore(cfg.odDir); for (const d of Object.values(store.dynasties)) if ((did === undefined || d.id === did) && d.fileId) await syncWebEdits(cfg, d); }
     else if (args[0] === 'import') await odImport(cfg, { did, files: !flags.has('no-files'), note: flags.get('note'), force: flags.has('force') });
     else if (args[0] === 'watch') await odWatch(cfg, { did, interval: Number(flags.get('interval') ?? 5), settle: Number(flags.get('settle') ?? 8), files: !flags.has('no-files') });

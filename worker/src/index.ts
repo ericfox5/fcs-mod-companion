@@ -17,8 +17,12 @@ import { awardsPage } from './pages/awards.js';
 import { recruitingPage } from './pages/recruiting.js';
 import { gamePage } from './pages/game.js';
 import { boardAction, top300Page } from './pages/recruiting.js';
+import { handleSupersim, type SimEnv } from './supersim/routes.js';
 import { playerEditAction } from './pages/player-edit.js';
 import { currentMember, memberCookie, redirect } from './session.js';
+import { loginPage, loginAction, logoutAction } from './pages/login.js';
+import { joinPage, joinAction } from './pages/join.js';
+import { membersPage, inviteAction, revokeInviteAction } from './pages/members.js';
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
@@ -33,23 +37,31 @@ export default {
       if (parts[0] === 'img' && (parts[1] === 'players' || parts[1] === 'faces') && parts[2]) return servePhoto(env, `photos/${parts[1]}/${decodeURIComponent(parts[2])}`);
       if (parts[0] === 'img' && parts[1] === 'logos' && parts[2] && parts[3]) return serveLogo(env, `logos/${parts[2]}/${decodeURIComponent(parts[3])}`, url.searchParams.get('t') ?? '');
       if (parts[0] === 'img' && parts[1] === 'stories' && parts[2] && parts[3]) return serveStoryImage(env, `stories/${parts[2]}/${decodeURIComponent(parts[3])}`);
-      if (parts[0] === 'css' || parts[0] === 'js' || parts[0] === 'img' || parts[0] === 'favicon.ico') return env.ASSETS.fetch(req);
+      if (parts[0] === 'css' || parts[0] === 'js' || parts[0] === 'img' || parts[0] === 'data' || parts[0] === 'favicon.ico') return env.ASSETS.fetch(req); // data/: playbook JSON for Supersim
       if (parts.length === 0) return landingPage(env, await listDynasties(env.DB));
       if (parts[0] === 'd' && parts[1]) {
         const dyn = await getDynasty(env.DB, parts[1]);
         if (!dyn) return notFound('No such dynasty');
         if (parts[2] === 'strip') { const w = Number(url.searchParams.get('week') ?? dyn.week ?? 0); return new Response((await stripTiles(env, dyn, Number.isFinite(w) ? w : (dyn.week ?? 0))).html, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=60' } }); }
         const section = parts[2] ?? 'home';
-        const { member, members } = await currentMember(req, env.DB, dyn.id);
+        const auth = await currentMember(req, env.DB, dyn.id);
+        const { member, members, account, locked } = auth;
+        if (parts[2] === 'supersim') return handleSupersim(req, env as SimEnv, dyn, parts[3], auth.account ? auth.member : null); // official game sim: signed-in account required
         if (req.method === 'POST') {
+          const actx = { env, dyn, url, req, member, members, account, locked }; // accounts: login / logout / join / invites (pages/login.ts, join.ts, members.ts)
+          if (parts[2] === 'login' && !parts[3]) return loginAction(actx, await req.formData());
+          if (parts[2] === 'logout' && !parts[3]) return logoutAction(actx, await req.formData());
+          if (parts[2] === 'join' && !parts[3]) return joinAction(actx, await req.formData());
+          if (parts[2] === 'members' && parts[3] === 'invite' && !parts[4]) return inviteAction(actx, await req.formData());
+          if (parts[2] === 'members' && parts[3] === 'invite' && parts[4] && parts[5] === 'revoke') return revokeInviteAction(actx, parts[4]);
           if (parts[2] === 'member') { const form = await req.formData(); const id = Number(form.get('blaze_id')); const back = String(form.get('back') ?? `/d/${dyn.slug}`); return redirect(back.startsWith('/') ? back : `/d/${dyn.slug}`, members.some((m) => m.blaze_id === id) ? { 'set-cookie': memberCookie(id) } : {}); }
           if (parts[2] === 'recruiting' && parts[3] === 'board') return boardAction({ env, dyn, url, req, member, members }, await req.formData());
           if (parts[2] === 'player' && parts[3] && parts[4] === 'edit') return playerEditAction({ env, dyn, url, req, member, members }, Number(parts[3]), await req.formData());
           if (parts[2] === 'stories' && parts[3]) return storyAction({ env, dyn, url, req, member, members }, parts[3], parts[4]);
           return json({ error: 'not found' }, 404);
         }
-        const ctx = { env, dyn, url, req, member, members, strip: await scoreStrip(env, dyn) };
-        switch (section) {
+        const ctx = { env, dyn, url, req, member, members, account, locked, strip: await scoreStrip(env, dyn) };
+        const res = await (async (): Promise<Response | undefined> => { switch (section) {
           case 'home': return homePage(ctx);
           case 'teams': return teamsPage(ctx);
           case 'team': return teamPage(ctx, Number(parts[3]));
@@ -63,7 +75,11 @@ export default {
           case 'stories': return parts[3] === 'new' ? storyFormPage(ctx) : parts[3] && parts[4] === 'edit' ? storyFormPage(ctx, Number(parts[3])) : storiesPage(ctx);
           case 'awards': return awardsPage(ctx);
           case 'recruiting': return parts[3] === 'top300' ? top300Page(ctx) : recruitingPage(ctx);
-        }
+          case 'login': return loginPage(ctx);
+          case 'join': return joinPage(ctx);
+          case 'members': return membersPage(ctx);
+        } return undefined; })();
+        if (res) { if (auth.setCookie) res.headers.append('set-cookie', auth.setCookie); return res; } // sliding session renewal
       }
       return notFound();
     } catch (e: any) {
@@ -73,4 +89,4 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-export interface PageCtx { env: Env; dyn: import('./db/queries.js').Dynasty; url: URL; req?: Request; member?: import('./db/queries.js').MemberRow | null; members?: import('./db/queries.js').MemberRow[]; strip?: import('./html.js').Raw }
+export interface PageCtx { env: Env; dyn: import('./db/queries.js').Dynasty; url: URL; req?: Request; member?: import('./db/queries.js').MemberRow | null; members?: import('./db/queries.js').MemberRow[]; strip?: import('./html.js').Raw; account?: import('./session.js').AccountInfo | null; locked?: boolean }

@@ -10,6 +10,7 @@ import { WorkerApi } from '../api.js';
 import type { BridgeConfig } from '../config.js';
 import { loadOdStore, lockerIndex, readLockerBlob, openDynastyFile, odFingerprint, odSlug, odName, type OdDynasty, type OdGameResult } from '../od.js';
 import { pushExport } from './import.js';
+import { syncCaptures } from './captures.js';
 import { loadPhotoIndex, attachPhotoKeys } from '../photos.js';
 import { attachLogoKeys } from '../logos.js';
 
@@ -22,6 +23,9 @@ const stamp = () => new Date().toTimeString().slice(0, 8);
 const sk = (cfg: BridgeConfig, d: OdDynasty) => `${cfg.workerUrl} #${d.id}`; // one sync state per site (local dev and production differ)
 
 const REBZ_COLUMNS = { SINT: ['PSCP', 'PPSC', 'PPSL', 'TGID', 'PRSI'], TINT: ['USEL', 'PROR', 'PEPV'] };
+// REVZ as the console pulls it: the RECV layout (VMVP/NFGZ/NFGM are outcomes the game fills after the visit).
+const REVZ_COLUMNS = { SINT: ['VMVP', 'TGID', 'PRSI', 'OFGP'], TINT: ['RCWK', 'NFGZ', 'NFGM'] };
+interface PendingVisits { id: number; tgid: number; week: number; rows: Record<string, number>[]; note?: string | null; updatedAt?: string }
 interface PendingBoard { id: number; tgid: number; week: number; rows: Record<string, number>[]; note?: string | null; updatedAt?: string }
 // D1 timestamps are "YYYY-MM-DD HH:MM:SS" in UTC; the stub's push timestamps are epoch seconds.
 const epochOf = (iso: string | undefined) => (iso ? Math.floor(Date.parse(iso.replace(' ', 'T') + (iso.endsWith('Z') ? '' : 'Z')) / 1000) : 0);
@@ -59,11 +63,12 @@ type PlyzRow = Record<string, number | string> & { PGID: number; TGID: number };
 // dynasty in one file; the stub filters by TGID) and PLYZ.json from pending player edits laid over the console's own
 // last roster push; acks edits whose week the dynasty has already left.
 export async function syncWebEdits(cfg: BridgeConfig, d: OdDynasty, api = new WorkerApi(cfg), opts: { quiet?: boolean } = {}): Promise<void> {
-  const res = await api.json<{ dynastyWeek: number | null; boards: PendingBoard[]; players?: PendingPlayerEdit[] }>('GET', `/api/bridge/web-edits?od=${d.id}`);
+  const res = await api.json<{ dynastyWeek: number | null; boards: PendingBoard[]; players?: PendingPlayerEdit[]; visits?: PendingVisits[] }>('GET', `/api/bridge/web-edits?od=${d.id}`);
   const dir = join(cfg.odDir, 'web-edits', String(d.id));
   const week = d.week ?? 0;
   await syncBoards(d, api, dir, week, res.boards ?? [], opts, cfg.odDir);
   await syncPlayerEdits(cfg, d, api, dir, week, res.players ?? [], opts);
+  await syncVisits(cfg, d, api, dir, week, res.visits ?? [], opts);
 }
 
 async function syncBoards(d: OdDynasty, api: WorkerApi, dir: string, week: number, boards: PendingBoard[], opts: { quiet?: boolean }, odDir = join(dir, '..', '..')): Promise<void> {
@@ -85,6 +90,30 @@ async function syncBoards(d: OdDynasty, api: WorkerApi, dir: string, week: numbe
 // Player edits: the console pulls its whole PLYZ table at the advance, so the file carries the FULL roster of every team
 // with a pending edit, taken from the console's last push (dynasty-tables/<did>/PLYZ.json; a PGID may repeat there and
 // the last row wins) with the edited columns swapped in. The site lacks PLFL/PTEN/PTYP/PLCR, hence the push as the base.
+// A visit set counts as delivered when the console's RECV push is newer than the save and lists the same prospects
+// with the same visit weeks for that team.
+const visitsReflected = (odDir: string, did: number, v: PendingVisits): boolean => {
+  const push = loadPush(odDir, did, 'RECV');
+  if (!push || push.updatedAt <= epochOf(v.updatedAt)) return false;
+  const mine = push.rows.filter((r) => r.TGID === v.tgid);
+  if (mine.length !== v.rows.length) return false;
+  const want = new Map(v.rows.map((r) => [r.PRSI, r.RCWK]));
+  return mine.every((r) => want.get(r.PRSI as number) === r.RCWK);
+};
+async function syncVisits(cfg: BridgeConfig, d: OdDynasty, api: WorkerApi, dir: string, week: number, sets: PendingVisits[], opts: { quiet?: boolean }): Promise<void> {
+  const file = join(dir, 'REVZ.json');
+  const done = (v: PendingVisits) => v.week < week || visitsReflected(cfg.odDir, d.id, v);
+  for (const v of sets.filter(done)) { await api.json('POST', `/api/bridge/web-edits/${v.id}/delivered?kind=visit`); if (!opts.quiet) console.log(`${stamp()} DID ${d.id}: visits for team ${v.tgid} week ${v.week} delivered`); }
+  const live = sets.filter((v) => !done(v));
+  const prev = existsSync(file) ? readFileSync(file, 'utf8') : null;
+  if (!live.length) { if (prev !== null) { unlinkSync(file); if (!opts.quiet) console.log(`${stamp()} DID ${d.id}: no pending visits, REVZ.json removed`); } return; }
+  const rows = live.flatMap((v) => v.rows.map((r) => ({ ...r, TGID: v.tgid })));
+  if (prev !== null && JSON.stringify(JSON.parse(prev).rows ?? null) === JSON.stringify(rows)) return;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(file, JSON.stringify({ table: 'REVZ', columns: REVZ_COLUMNS, rows, meta: { type: 0, flty: 1, source: 'site', updatedAt: Math.floor(Date.now() / 1000) } }));
+  if (!opts.quiet) console.log(`${stamp()} DID ${d.id}: REVZ.json <- ${live.length} visit set(s), ${rows.length} rows (${live.map((v) => `team ${v.tgid} wk ${v.week}`).join(', ')})`);
+}
+
 async function syncPlayerEdits(cfg: BridgeConfig, d: OdDynasty, api: WorkerApi, dir: string, week: number, edits: PendingPlayerEdit[], opts: { quiet?: boolean }): Promise<void> {
   const file = join(dir, 'PLYZ.json');
   const done = (e: PendingPlayerEdit) => e.week < week || playerReflected(cfg.odDir, d.id, e);
@@ -234,6 +263,7 @@ export async function odWatch(cfg: BridgeConfig, opts: { did?: number; interval:
         if (opts.did !== undefined && d.id !== opts.did) continue;
         if (!d.fileId) continue;
         if (tick % 3 === 1) await syncWebEdits(cfg, d, api).catch((e: Error) => console.error(`${stamp()} DID ${d.id} web edits: ${e.message}`));
+        if (tick % 6 === 2) await syncCaptures(cfg, d, api).catch((e: Error) => console.error(`${stamp()} DID ${d.id} captures: ${e.message}`));
         const fp = odFingerprint(d);
         if (state[sk(cfg, d)]?.fingerprint === fp) { pending.delete(d.id); continue; }
         const p = pending.get(d.id);

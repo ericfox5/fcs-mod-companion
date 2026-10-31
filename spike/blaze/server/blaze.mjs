@@ -11,7 +11,8 @@ import { PacketStream, encodePacket, describe, MSG } from './packet.mjs';
 import { decode, Writer, T } from './tdf.mjs';
 import { parseXi5 } from './xi5.mjs';
 import { log, captureFile } from './log.mjs';
-import { DOD, handleDod } from './dod.mjs';
+import { DOD, handleDod, store as dodStore, save as dodSave, loadTable as dodLoadTable } from './dod.mjs';
+import { startSupersimPoller } from './supersim.mjs';
 import { LOCKER, handleLocker, startLockerHttp } from './locker.mjs';
 
 const arg = (name, dflt) => { const i = process.argv.indexOf(name); return i === -1 ? dflt : process.argv[i + 1]; };
@@ -270,6 +271,7 @@ function handle(sock, p, body) {
 
 log('blaze', `capture file: ${captureFile} (settings mode: ${SETTINGS_MODE})`);
 startLockerHttp({ port: HTTP_PORT, host: HTTP_HOST });
+startSupersimPoller({ store: dodStore, save: dodSave, loadTable: dodLoadTable });
 net.createServer((sock) => {
   log('blaze', `connection from ${sock.remoteAddress}:${sock.remotePort}`);
   const stream = new PacketStream();

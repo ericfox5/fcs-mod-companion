@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { defaultOdDir } from './od.js';
 
-export interface BridgeConfig { workerUrl: string; token: string; dynastySlug: string; dynastyName?: string; saveDir?: string; rpcs3Root?: string; odDir: string; photosDir?: string; facesDir?: string }
+export interface BridgeConfig { workerUrl: string; token: string; dynastySlug: string; dynastyName?: string; saveDir?: string; rpcs3Root?: string; odDir: string; photosDir?: string; facesDir?: string; screenshotsDir?: string; gameUsrDir?: string }
 
 // Precedence: CLI flags > environment (NCAA_WORKER_URL, NCAA_BRIDGE_TOKEN, NCAA_DYNASTY, NCAA_OD_DIR) > ~/.ncaa-bridge/config.json
 // odDir = the Blaze stub's private store (spike/blaze/private in this checkout) for the `od` commands.
@@ -20,6 +20,8 @@ export function loadConfig(flags: Map<string, string>, opts: { needSlug?: boolea
     odDir: flags.get('od-dir') ?? process.env.NCAA_OD_DIR ?? fromFile.odDir ?? defaultOdDir(),
     photosDir: flags.get('photos-dir') ?? fromFile.photosDir, // folder holding player_photos/ + player_photos_manifest.csv
     facesDir: flags.get('faces-dir') ?? fromFile.facesDir, // folder holding face_<n>.png
+    screenshotsDir: flags.get('screenshots-dir') ?? fromFile.screenshotsDir ?? (fromFile.rpcs3Root ? join(fromFile.rpcs3Root, 'screenshots') : undefined), // RPCS3 F12 screenshots
+    gameUsrDir: fromFile.gameUsrDir ?? (fromFile.rpcs3Root ? join(fromFile.rpcs3Root, 'dev_hdd0', 'game', 'BLUS31159', 'USRDIR') : undefined), // the game's highlight XML lives here
   };
   if (!cfg.token) throw new Error('bridge token missing (set NCAA_BRIDGE_TOKEN, --token, or ~/.ncaa-bridge/config.json)');
   if (opts.needSlug !== false && !cfg.dynastySlug) throw new Error('dynasty slug missing (set NCAA_DYNASTY, --dynasty, or config)');

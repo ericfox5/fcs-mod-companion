@@ -58,3 +58,12 @@ export function decodeRecruitingBoard(file: TdbFile): BoardEntry[] {
     order: n(r, 'PROR'), playingTime: n(r, 'PEPV'), userSelected: n(r, 'USEL') === 1, raw: r,
   }));
 }
+
+// RECV: scheduled and completed recruit visits. RCWK = week of the (home) game, OFGP = the visit's expected value when
+// scheduled; VMVP/NFGZ/NFGM are filled by the game once the visit happens.
+export interface RecruitVisit { tgid: number; prsi: number; week: number; value: number; mvp: number; nfgz: number; nfgm: number; raw: Record<string, number | string> }
+export function decodeRecruitVisits(file: TdbFile): RecruitVisit[] {
+  if (!file.hasTable('RECV')) return [];
+  const n = (r: Record<string, number | string>, k: string) => (typeof r[k] === 'number' ? (r[k] as number) : 0);
+  return [...file.table('RECV').rows()].map((r) => ({ tgid: n(r, 'TGID'), prsi: n(r, 'PRSI'), week: n(r, 'RCWK'), value: n(r, 'OFGP'), mvp: n(r, 'VMVP'), nfgz: n(r, 'NFGZ'), nfgm: n(r, 'NFGM'), raw: r }));
+}

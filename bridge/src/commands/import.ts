@@ -17,7 +17,7 @@ export async function pushExport(api: WorkerApi, importId: number, ex: DynastyEx
     ['coaches', ex.coaches], ['depthChart', ex.depthChart], ['schedule', ex.schedule], ['stories', ex.stories], ['heisman', ex.heisman],
     ['allAmericans', ex.allAmericans], ['teamSeasonStats', ex.teamSeasonStats], ['teamHistory', ex.teamHistory],
     ['playerSeasonStats', Object.entries(ex.playerSeasonStats).flatMap(([kind, rows]) => rows.map((r) => ({ ...r, kind })))],
-    ['recruits', ex.recruits], ['recruitInterest', ex.recruitInterest], ['recruitingBoard', ex.recruitingBoard],
+    ['recruits', ex.recruits], ['recruitInterest', ex.recruitInterest], ['recruitingBoard', ex.recruitingBoard], ['recruitVisits', ex.recruitVisits],
     ['gameLogs', Object.entries(ex.gameLogs).flatMap(([kind, rows]) => rows.map((r) => ({ ...r, kind })))],
   ];
   for (const [table, rows] of sets) {

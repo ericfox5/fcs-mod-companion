@@ -28,8 +28,15 @@ Companion website (Cloudflare Worker) + local RPCS3 save bridge for NCAA Footbal
   mapped by name in `bridge/data/logos.json`, stored in R2 by `ncaa-bridge logos upload --dir archive/logos`.
 - Headshots: the league's own FCS player photos (`ncaa-bridge photos upload` puts them in R2; matched by team + name at
   import) with the game's face art as the fallback. Original-site research and the write-back design: `docs/site-reference.md`.
+- Member accounts: personas get a username + password through invite codes; the first invite comes from the league
+  server (`ncaa-bridge od invite --did N --persona NAME`), later ones from a signed-in commissioner on `/d/<slug>/members`.
+  Once a dynasty has an account only signed-in members edit (`docs/site-reference.md`, "Member accounts").
+- Supersim coaching mode: a member calls every play of their own game from the team's real NCAA 14 playbook (formation,
+  set, play; the books are extracted from the game's `.ast` archives by `tools/playbooks-extract.mts`, see
+  `docs/playbooks.md`), the server rolls each snap when it is called and animates all 22 players from the play art, and
+  the final goes to the league server as an official result. `/d/<slug>/supersim`, signed-in members only.
 - Next: write-back (web recruiting/roster edits delivered to the console as the per-team change packages the game asks
-  for during an advance), Story Builder, member accounts on the site.
+  for during an advance), Story Builder, password reset for member accounts.
 
 Fan passion project. Not affiliated with, endorsed by, or sponsored by Electronic Arts, EA SPORTS,
 the NCAA, or any school or conference. Not monetized. You must own NCAA Football 14 to use any of this.

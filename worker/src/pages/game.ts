@@ -3,6 +3,7 @@ import { html, notFound, type Raw } from '../html.js';
 import { layout, box } from '../layout.js';
 import { getTeams, getGame, getGames, getGameLogs, getTeamSeasonStats, getTeamPlayerSeasonStats, getPlayersByIds, teamMap, type TeamRow, type GameRow, type PlayerRow, type StatRow } from '../db/queries.js';
 import { teamLogo, teamLink, playerLink, headshot, weekLabel, rankOf, pos } from './common.js';
+import { allowedGame } from '../supersim/access.js';
 
 type Stats = Record<string, number>;
 const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
@@ -35,8 +36,13 @@ export async function gamePage(ctx: PageCtx, week: number, gameNo: number) {
     <div class="gh-score">${played ? html`<span class="${g.status === 2 ? 'won' : ''}">${g.away_score}</span><span class="dash">-</span><span class="${g.status === 3 ? 'won' : ''}">${g.home_score}</span>` : html`<span class="vs">at</span>`}
       <div class="gh-status">${played ? (g.overtime ? 'Final / OT' : 'Final') : 'Scheduled'} · ${weekLabel(g.week)}${g.user_played ? ' · user game' : ''}</div></div>
     ${side(home, true)}</section>`;
+  // Supersim: the acting member's own current-week game, not yet played by the console (or already simulated here: replay).
+  const canSim = env.SUPERSIM_ENABLED === 'true' && !!ctx.account && allowedGame(dyn, ctx.member ?? null, g) && (!played || g.source === 'supersim');
+  const live = canSim && !played ? await db.prepare("SELECT status, json_extract(state_json, '$.q') AS q, json_extract(state_json, '$.score[0]') AS a, json_extract(state_json, '$.score[1]') AS h FROM supersim_live WHERE dynasty_id=? AND season_year=? AND week=? AND game_no=?").bind(d, y, g.week, g.game_no).first<{ status: string; q: number; a: number; h: number }>() : null;
+  const cta = g.source === 'supersim' ? 'Supersim result' : live?.status === 'live' ? `Resume your Supersim game (${live.a}-${live.h}, Q${live.q})` : 'Coach this game in Supersim';
+  const simLink = canSim ? html`<p class="sim-cta"><a class="btn" href="/d/${dyn.slug}/supersim">${cta}</a> <span class="muted">${g.source === 'supersim' ? 'Official result recorded; the console picks it up on load.' : 'Call every play from your real playbook; the final is recorded for the console.'}</span></p>` : html``;
   const body = played ? await boxScore(env, dyn.id, y, g, away, home, dyn.slug) : await preview(env, dyn.id, y, away, home, dyn.slug);
-  return layout({ strip: ctx.strip, member: ctx.member, members: ctx.members, path: ctx.url.pathname, title: `${away.name} at ${home.name}`, siteName: env.SITE_NAME, dyn, section: 'schedule', body: html`${header}${body}`, wide: true });
+  return layout({ strip: ctx.strip, member: ctx.member, members: ctx.members, path: ctx.url.pathname, title: `${away.name} at ${home.name}`, siteName: env.SITE_NAME, dyn, section: 'schedule', body: html`${header}${simLink}${body}`, wide: true });
 }
 
 // ---- preview: season averages head to head + each team's stat leaders ----

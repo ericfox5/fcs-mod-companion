@@ -1,5 +1,6 @@
 import { html, raw, page, type Raw } from './html.js';
 import type { Dynasty, MemberRow } from './db/queries.js';
+import type { AccountInfo } from './session.js';
 import { weekLabel, seasonLabel } from './pages/common.js';
 
 export const NAV: [string, string][] = [
@@ -12,11 +13,15 @@ export const DISCLAIMER = 'Fan passion project. Not affiliated with, endorsed by
 // "2013 season · Week 4" (SEAI.SEWN is zero-based; week type 151 is the preseason stage before the first advance).
 export const stageLabel = (d: Dynasty) => `${seasonLabel(d)} · ${d.week_type === 151 ? 'Preseason' : weekLabel(d.week ?? 0)}`;
 
+// "You" area in the bar: once the dynasty has accounts (locked) it shows the signed-in persona (team) · Sign out, or a Sign in
+// link; before that, the persona <select> from the one-commissioner days.
 // Sports-network style chrome: black global bar with the section nav, the week's scoreboard strip, white cards on a
 // light grey page. No third-party marks: the brand is the FCS shield plus our own wordmark.
-export function layout(opts: { title: string; siteName: string; dyn?: Dynasty; section?: string; body: Raw; wide?: boolean; strip?: Raw; member?: MemberRow | null; members?: MemberRow[]; path?: string }): Response {
+export function layout(opts: { title: string; siteName: string; dyn?: Dynasty; section?: string; body: Raw; wide?: boolean; strip?: Raw; member?: MemberRow | null; members?: MemberRow[]; path?: string; account?: AccountInfo | null; locked?: boolean }): Response {
   const d = opts.dyn;
   const base = d ? `/d/${d.slug}` : '';
+  const viewer = opts.members?.[0]?.auth; // stamped by currentMember; pages only pass member/members
+  const locked = opts.locked ?? viewer?.locked ?? false, account = opts.account ?? viewer?.account ?? null;
   return page(html`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -31,10 +36,15 @@ export function layout(opts: { title: string; siteName: string; dyn?: Dynasty; s
 <header class="gh">
   <div class="wrap gh-inner">
     <a class="brand" href="${base || '/'}"><img class="fcs-mark" src="/img/fcs-logo.svg" alt="NCAA Division I FCS" width="38" height="36"><span class="brand-text"><span class="brand-top">Online Dynasty</span><span class="brand-sub">FCS</span></span></a>
-    <nav class="gnav">${d
+    ${d ? html`<button type="button" class="gnav-toggle" aria-expanded="false" aria-controls="gnav">Menu <span class="gnav-caret"></span></button>` : ''}
+    <nav class="gnav" id="gnav">${d
       ? NAV.map(([k, label]) => html`<a class="${k === opts.section ? 'active' : ''}" href="${base}/${k}">${label}</a>`)
       : html`<a class="active" href="/">Dynasties</a>`}</nav>
-    <div class="gh-right">${d && opts.members && opts.members.length ? html`<form class="who" method="post" action="${base}/member"><input type="hidden" name="back" value="${opts.path ?? base}"><label>You</label><select name="blaze_id" onchange="this.form.submit()">${opts.member ? '' : html`<option value="" selected>Pick a member</option>`}${opts.members.map((m) => html`<option value="${m.blaze_id}" ${opts.member?.blaze_id === m.blaze_id ? 'selected' : ''}>${m.persona}</option>`)}</select></form>` : ''}${d
+    <div class="gh-right">${d && locked
+      ? (account
+        ? html`<div class="who"><a class="who-me" href="${base}/members" title="Members and accounts">${opts.member ? html`${opts.member.persona}${opts.member.team_name ? html` <span class="who-team">(${opts.member.team_name})</span>` : ''}` : account.username}</a><span class="sep">·</span><form class="who-out" method="post" action="${base}/logout"><input type="hidden" name="back" value="${opts.path ?? base}"><button type="submit">Sign out</button></form></div>`
+        : html`<div class="who"><a class="who-me" href="${base}/members" title="Members and accounts">Members</a><span class="sep">·</span><a class="who-in" href="${base}/login?back=${encodeURIComponent(opts.path ?? base)}">Sign in</a></div>`)
+      : d && opts.members && opts.members.length ? html`<form class="who" method="post" action="${base}/member"><input type="hidden" name="back" value="${opts.path ?? base}"><label>You</label><select name="blaze_id" onchange="this.form.submit()">${opts.member ? '' : html`<option value="" selected>Pick a member</option>`}${opts.members.map((m) => html`<option value="${m.blaze_id}" ${opts.member?.blaze_id === m.blaze_id ? 'selected' : ''}>${m.persona}</option>`)}</select><a class="who-in" href="${base}/members" title="Members and accounts">Members</a></form>` : ''}${d
       ? html`<a class="dyn-pill" href="/" title="Browse dynasties"><span class="dyn-name">${d.name}</span><span class="dyn-stage">${stageLabel(d)}</span></a>`
       : html`<span class="dyn-pill"><span class="dyn-stage">Fan revival of the NCAA 14 web app</span></span>`}</div>
   </div>

@@ -30,3 +30,9 @@ worker/public/img/fcs-logo.svg
 /*.jpg
 /*.jpeg
 /*.png
+# source handoff package for Supersim (integrated into worker/src/supersim and worker/public/js/supersim)
+FCS-Supersim-Claude-Handoff-v2/
+# playbooks extracted from the game's own .ast archives (EA data): regenerate with `npx tsx tools/playbooks-extract.mts`
+worker/public/data/playbooks/
+# local dev test account (wrangler dev only)
+worker/.dev-account.json

@@ -4,6 +4,9 @@ import type { Env } from '../env.js';
 import { json } from '../html.js';
 import { IMPORT_TABLES, buildInserts } from '../db/import-tables.js';
 import { handlePhotos } from './photos.js';
+import { handleInvites } from './auth.js';
+import { handleSupersimBridge, type SimEnv } from '../supersim/routes.js';
+import { listPendingWebVisits, markWebVisitsDelivered, insertCapture } from '../db/visits.js';
 import { listPendingWebBoards, markWebBoardDelivered, getDynastyByOdId, listPendingPlayerEdits, markPlayerEditDelivered } from '../db/queries.js';
 
 async function sha256Hex(s: string): Promise<string> {
@@ -68,8 +71,21 @@ export async function handleBridge(req: Request, env: Env, path: string[]): Prom
   const db = env.DB;
 
   if (resource === 'ping') return json({ ok: true, now: new Date().toISOString() });
+  if (resource === 'supersim') return handleSupersimBridge(req, env as SimEnv, path); // official-game outbox + receipts
   if (resource === 'photos') return handlePhotos(req, env);
   if (resource === 'logos') return handlePhotos(req, env, 'logos');
+  if (resource === 'invites') return handleInvites(req, env, path.slice(1));
+  if (resource === 'captures' && req.method === 'PUT') { // an in-game screenshot from the bridge, captioned from the highlight log
+    const body = await readJson(req);
+    const dyn = await getDynastyByOdId(db, Number(body.od));
+    if (!dyn) return json({ error: 'unknown dynasty' }, 404);
+    const name = String(body.name ?? '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80);
+    if (!name || typeof body.b64 !== 'string') return json({ error: 'name and b64 required' }, 400);
+    const keyR2 = `stories/${dyn.id}/cap-${name}.jpg`;
+    await env.SAVES.put(keyR2, Uint8Array.from(atob(body.b64), (c) => c.charCodeAt(0)), { httpMetadata: { contentType: 'image/jpeg' } });
+    await insertCapture(db, { dynasty_id: dyn.id, source_name: name, image_key: keyR2, taken_at: body.takenAt ?? null, season_year: dyn.season_year, week: num(body.week), home_tgid: num(body.homeTgid), away_tgid: num(body.awayTgid), home_score: num(body.homeScore), away_score: num(body.awayScore), quarter: num(body.quarter), clock: body.clock ?? null, play_text: body.playText ?? null, width: num(body.width), height: num(body.height) });
+    return json({ ok: true, key: keyR2 });
+  } // member invite codes (worker/src/api/auth.ts)
   if (resource === 'web-edits') { // pending site edits for one online dynasty (by DID), and delivery acks
     if (req.method === 'GET') {
       const odId = Number(new URL(req.url).searchParams.get('od'));
@@ -77,10 +93,12 @@ export async function handleBridge(req: Request, env: Env, path: string[]): Prom
       if (!dyn) return json({ boards: [], players: [] });
       const boards = (await listPendingWebBoards(db, dyn.id)).map((b) => ({ id: b.id, tgid: b.tgid, week: b.week, seasonYear: b.season_year, note: b.note, updatedAt: b.updated_at, rows: JSON.parse(b.rows_json) }));
       const players = (await listPendingPlayerEdits(db, dyn.id)).map((p) => ({ id: p.id, tgid: p.tgid, pgid: p.pgid, week: p.week, seasonYear: p.season_year, jersey: p.jersey, pos: p.pos, redshirt: p.redshirt, firstName: p.first_name, lastName: p.last_name, note: p.note, updatedAt: p.updated_at }));
-      return json({ dynastyWeek: dyn.week, boards, players });
+      const visits = (await listPendingWebVisits(db, dyn.id)).map((v) => ({ id: v.id, tgid: v.tgid, week: v.week, seasonYear: v.season_year, note: v.note, updatedAt: v.updated_at, rows: JSON.parse(v.rows_json) }));
+      return json({ dynastyWeek: dyn.week, visits, boards, players });
     }
     if (req.method === 'POST' && id && sub === 'delivered') { // ?kind=player acks a player edit; a board otherwise
-      if (new URL(req.url).searchParams.get('kind') === 'player') await markPlayerEditDelivered(db, Number(id)); else await markWebBoardDelivered(db, Number(id));
+      const kind = new URL(req.url).searchParams.get('kind');
+      if (kind === 'player') await markPlayerEditDelivered(db, Number(id)); else if (kind === 'visit') await markWebVisitsDelivered(db, Number(id)); else await markWebBoardDelivered(db, Number(id));
       return json({ ok: true });
     }
     return json({ error: 'not found' }, 404);

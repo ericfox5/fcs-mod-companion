@@ -22,7 +22,8 @@
   ],
   "vars": {
     "SITE_NAME": "NCAA Online Dynasty FCS",
-    "BASE_YEAR": "2013"
+    "BASE_YEAR": "2013",
+    "SUPERSIM_ENABLED": "true"
     // Secret (never in this file): BRIDGE_TOKEN -> wrangler secret put BRIDGE_TOKEN
   },
   "observability": { "enabled": true }
