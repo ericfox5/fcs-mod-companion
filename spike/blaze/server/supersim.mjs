@@ -12,7 +12,9 @@ import { fileURLToPath } from 'node:url';
 import { buildGameTables, saveGameData } from './gamedata.mjs';
 import { readDynastyFile } from './tdb-read.mjs';
 
-const LOCKER_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'private', 'locker');
+const LOCKER_DIR = path.join(process.env.NCAA_PRIVATE
+  ? path.resolve(process.env.NCAA_PRIVATE)
+  : path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'private'), 'locker');
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -30,7 +32,11 @@ export function acceptResult({ store, save, loadTable }, envelope) {
   if (d.supersimLedger[e.runId]) return d.supersimLedger[e.runId];
   if (d.advancing || d.update) throw new Error('dynasty busy (advance or update in progress)');
   if ((d.week ?? 0) !== e.week) throw new Error(`stale week: site ${e.week}, server ${d.week}`);
-  if (!d.members.some((m) => m.blazeId === e.blazeId && m.team === e.ownedTeamId)) throw new Error('ownership changed');
+  // A web-only member (a site account with no console, 2026-11-01) plays a team no console member controls: the site
+  // vouches for the pairing (only that member can start the run) and the result rides game data like any other; here
+  // we only make sure the team has not since gone to a console member.
+  const owned = e.webMember === true ? !d.members.some((m) => m.team === e.ownedTeamId) : d.members.some((m) => m.blazeId === e.blazeId && m.team === e.ownedTeamId);
+  if (!owned) throw new Error(e.webMember === true ? 'a console member now controls that team' : 'ownership changed');
   const g = e.gameResult;
   if (!g || ![g.ATID, g.HTID].includes(e.ownedTeamId) || g.GMWK !== e.week || ![g.ATSC, g.HTSC].every((x) => Number.isInteger(x) && x >= 0) || g.ATSC === g.HTSC) throw new Error('invalid game result');
   const row = (loadTable(d.id, 'SCHD')?.rows ?? []).find((x) => x.SEWN === e.week && x.GHTG === g.HTID && x.GATG === g.ATID);
@@ -50,6 +56,9 @@ export function acceptResult({ store, save, loadTable }, envelope) {
     saveGameData(d.id, id, { runId: e.runId, week: e.week, team: e.ownedTeamId, sgnm: row.SGNM, createdAt: now(), tables });
     const wk = String(e.week);
     (d.gameData ??= {})[wk] = [...(d.gameData[wk] ?? []).filter((x) => x.team !== e.ownedTeamId), { team: e.ownedTeamId, id, runId: e.runId }];
+    // a game between two members: the other member's console looks for its own team's game data as well
+    const otherTeam = g.HTID === e.ownedTeamId ? g.ATID : g.HTID;
+    if (d.members.some((m) => m.team === otherTeam)) d.gameData[wk] = [...d.gameData[wk].filter((x) => x.team !== otherTeam), { team: otherTeam, id, runId: e.runId }];
     gameData = { id, rows: Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length])), coachXp: opts.coachXp ?? null };
   } catch (err) { log('supersim', `run ${e.runId}: no game data (${err.message}); the console will show the score but simulate the game at the advance`); }
   const receipt = { runId: e.runId, durable: true, acceptedAt: new Date().toISOString(), week: e.week, home: g.HTID, away: g.ATID, score: [g.ATSC, g.HTSC], gameData };

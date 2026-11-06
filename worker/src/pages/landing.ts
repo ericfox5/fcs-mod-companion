@@ -6,6 +6,11 @@ import type { Dynasty } from '../db/queries.js';
 export function landingPage(env: Env, dynasties: Dynasty[]) {
   const body = html`
 <div class="landing">
+  <div class="thanks-card"><img src="/img/home/floridaman-thanks.jpg" alt="None of this is possible without TheFloridaMan's FCS mod. Thank you, FloridaMan!" width="1600" height="533"></div>
+  <div class="roster-dl">
+    <a href="/downloads/FCS-2025-Roster-STABLEV1.zip" download title="RPCS3 save folder BLUS31159-ROSTER-STABLEV1 (the 2025 FCS roster)"><img src="/img/home/download-2025-roster.png" alt="Download 2025 FCS Roster" width="1000" height="141"></a>
+    <a href="/downloads/FCS-2026-Roster.zip" download title="RPCS3 save folder BLUS31159-ROSTER-FCS2026 (the 2026 FCS roster)"><img src="/img/home/download-2026-roster.png" alt="Download 2026 FCS Roster" width="1000" height="140"></a>
+  </div>
   <div class="featured">
     <h1>NCAA Online Dynasty FCS</h1>
     <p class="lede">The companion site EA shut down, rebuilt for RPCS3 leagues: the console plays its Online Dynasty against the league's own server, and every advance and uploaded result shows up here.</p>

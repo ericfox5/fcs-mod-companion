@@ -54,34 +54,58 @@ Dynasty Wire stories and comments live on the site (D1); the console's own story
 
 ## Assets
 
-- Player photos: the league's own set (7,160 FCS player headshots from school roster pages, `player_photos_manifest.csv`)
-  matched by team + name at import (6,662 of 8,694 players in the current dynasty); fallback is the game's face art
-  by head id (PGHE, 239 images); then a silhouette. Served from R2 under `/img/players/` and `/img/faces/`.
+- Player photos: the league's own sets (`photosDir` + `photosDirs` in the bridge config, each a folder with
+  `player_photos/` + `player_photos_manifest.csv`): the original 7,160 FCS headshots from school roster pages (matched by
+  team + name at import, 6,662 of 8,694 players in the first dynasty) and, since 2026-11-05, the 2026 roster's 13,057
+  photos packed by `tools/photo-pack.py` from the scrape in `FCS/Rosters/2026` (160 px JPEGs named `2026__<Team>__<Name>.jpg`;
+  the manifest carries the game's team id and in-game name, so a 2026-roster dynasty matches its players exactly; a later
+  set wins a key both hold). Fallback is the game's face art by head id (PGHE, 239 images); then a silhouette. Served from
+  R2 under `/img/players/` and `/img/faces/`.
 - Team logos: not in the archive (EA's FBS logos only). Needs the league's FCS logo pack (PNG per team) or an
   extraction from the mod's `.ast` texture archives.
 
-## Member accounts (migration 0008)
+## Member accounts (migrations 0008, 0023-0026)
 
-The console decides who is in the league (`od_members`, mirrored by the bridge); the site only adds a login to each
-persona. Tables: `accounts` (one per member per dynasty: username unique per dynasty, PBKDF2-SHA256 100k-iteration
-hash + 16-byte salt), `invites` (code per member, `used_at` once an account was made from it), `sessions` (SHA-256 of
-the cookie token, 30-day sliding expiry, renewed when under 7 days remain). Cookie `od_session` is HttpOnly, Secure,
-SameSite=Lax, Path=/.
+The console decides who is in the league (`od_members`, mirrored by the bridge); the site only adds a login. An account
+is site-wide: one username + password (`accounts`: username unique site-wide, PBKDF2-SHA256 100k-iteration hash +
+16-byte salt) that owns at most one league-server persona (`accounts.blaze_id` > 0, the RPCN user the console signs in
+with). `account_members` links the account to the member it acts as in each dynasty. Other tables: `invites` (code per
+member, `used_at` once it was taken), `sessions` (SHA-256 of the cookie token, 30-day sliding expiry, renewed when under
+7 days remain; one session serves every linked dynasty). Cookie `od_session` is HttpOnly, Secure, SameSite=Lax, Path=/.
 
-- **Lock.** A dynasty with no accounts behaves as before: the `od_member` persona cookie picks who you are and a
-  single-member dynasty auto-selects. As soon as it has one account it is *locked*: the persona cookie is ignored,
-  visitors without a session are nobody (`member = null`), and only signed-in members edit boards, players and stories.
+- **Console identity.** Whenever the bridge syncs a dynasty's member list (`POST /api/bridge/dynasties`), every console
+  member whose persona owns an account is linked to the dynasty (`linkPersonaStatements`), and links of members who
+  left are dropped. So the person who creates or joins an online dynasty on the console is its commissioner / member
+  on the site at once, with the session they already have; no new account, no second sign-in. `currentMember` also
+  links lazily when it finds the signed-in account's persona among the members. One persona per account.
+- **Lock.** A dynasty with no linked account behaves as before: the `od_member` persona cookie picks who you are and a
+  single-member dynasty auto-selects. As soon as it has one it is *locked*: the persona cookie is ignored, visitors
+  without a session are nobody (`member = null`), and only signed-in members edit boards, players and stories. A
+  signed-in account that is not a member of an unlocked dynasty is treated like any visitor there.
 - **Bootstrap.** The first invite comes from the league server (`ncaa-bridge od invite --did N --persona NAME`, which
   calls `POST /api/bridge/invites` with the bridge token), so making the first account proves control of the server.
-  After that a signed-in commissioner creates and revokes invites on `/d/<slug>/members`.
+  After that a signed-in commissioner creates and revokes invites on `/d/<slug>/members`. Both the bridge call and
+  "Create invite" link a console persona that already owns an account instead of inviting it (`{ linked: true }`).
 - **Routes** under `/d/<slug>`: `login` (GET form, POST username + password; generic failure message with a 400 ms
-  pause), `logout` (POST), `join?code=...` (GET shows the persona the code is for, POST creates the account, marks the
-  invite used and signs in), `members` (everyone: persona, team, commissioner tag, account; commissioner: invite
-  controls), `members/invite` and `members/invite/<code>/revoke` (POST, commissioner only). Usernames are 3-24
-  characters `[A-Za-z0-9_.-]`, passwords at least 8. Bridge API: `POST /api/bridge/invites {od, blazeId, note?}` and
-  `GET /api/bridge/invites?od=N`.
-- **Code**: `worker/src/session.ts` (hashing, sessions, `currentMember` returning `member/members/account/locked`),
-  `worker/src/pages/{login,join,members}.ts`, `worker/src/api/auth.ts`, `bridge/src/commands/invite.ts`.
+  pause), `logout` (POST), `join?code=...` (GET shows the persona the code is for; POST creates the account, marks the
+  invite used and signs in, or with `link=1` takes the invite with the account the browser is already signed in with:
+  any account for a web player, an account owning no persona yet for a console member), `members` (everyone:
+  persona, team, commissioner tag, account; commissioner: invite controls), `members/invite` and
+  `members/invite/<code>/revoke` (POST, commissioner only). Usernames are 3-24 characters `[A-Za-z0-9_.-]`, passwords
+  at least 8. Bridge API: `POST /api/bridge/invites {od, blazeId, note?}` and `GET /api/bridge/invites?od=N`.
+- **Web players** (migration 0014) have negative, per-dynasty blaze ids; their accounts own no persona and are linked
+  to that dynasty only (another dynasty's invite can be taken with the same account). Removing a web player drops the
+  link, and the account too when nothing else uses it.
+- **Migrations 0023-0026** turned the per-dynasty rows into site-wide ones: one account per console persona (its
+  newest row's username and password; a username an earlier persona already used gets `-<blaze id>`), one per web
+  player (`-<dynasty id>` on a clash), console personas linked to every dynasty they are in, all sessions dropped. It
+  is four files (create staging tables; fill them and drop the old tables; create the final `accounts` + `sessions`;
+  move the rows and drop the staging table) because D1's remote query API, which `wrangler d1 migrations apply
+  --remote` posts each file to, refuses as "not authorized [code: 7403]" any INSERT/UPDATE/DELETE/DROP/ALTER whose
+  table did not exist when the request began. A migration file may create tables, but only a later file can write to
+  or drop them; the local D1 does not enforce this, so it only shows at the remote apply.
+- **Code**: `worker/src/session.ts` (hashing, sessions, `currentMember` returning `member/members/account/locked`,
+  `sessionAccount`), `worker/src/pages/{login,join,members}.ts`, `worker/src/api/auth.ts`, `bridge/src/commands/invite.ts`.
 - Not done yet: password reset / re-invite for a member who already has an account, rate limiting beyond the pause.
 
 ## Supersim coaching mode (2026-10-29 revamp)
@@ -121,3 +145,58 @@ by its starter or a commissioner until it is final.
   "short", "hits the right upright and bounces out"); the client flies the ball on that arc with a shadow and an air
   trace, flashes the posts on a make, shakes them on a doink, and eases a kick camera in on the hold and the posts.
   PAT block odds are now ~0.5% (2% against a block call), FG 1.2% (5%).
+- In-game Dynasty Wire (2026-10-31): the console's Story Center runs over EA Sports World + XMS, which the league server
+  now serves (spike/blaze/server/easw.mjs, enabled by OSDK_EASW_ALLOWED_LOCALES "****"). Member stories are delivered as
+  in-game user stories with their photo (wire.mjs, /api/bridge/wire, migration 0012 `web_stories.wire_*`); photos and
+  recap/user stories the console uploads come back as captures and `console_stories` (News Wire "In-game Dynasty Wire").
+  Stories are filed by week (SEARCH_KEY_1), recaps get the game's own photos, and blank console photos (RPCS3's
+  photo pass comes out white for now) stay off the site. Formats in spike/blaze/NOTES.md (2026-10-31, both entries)
+  and server/story.mjs.
+
+### 2026-11-02 additions
+
+- Depth Chart page (`/d/<slug>/depth`, menu group "Team", was "Players"): every slot of the game's depth chart (DCHT,
+  88 per team) as a select, "Fill by ratings", a pending tag, and a formation-subs table per playbook set (PLSU,
+  experimental). A save is `web_depth_edits` (migration 0018); the bridge writes it into the dynasty-file copy the
+  console downloads at its next load (no change table exists for DCHT/PLSU), so a player the in-game screen refuses
+  (a portal player the game redshirted) still starts. Supersim uses the pending chart, subs and player edits at once.
+- Supersim clocks run in real time against the CPU: the play clock (40, or 25 after a stoppage) counts down while the
+  coach picks the play and the game clock runs with it when it was left running; the server charges what was shown
+  (at least its own reading). A CPU offense snaps at a point rolled in the huddle (the count stops there on defense).
+  At zero the server flags a delay of game (or ends the period). The board shows the pre-snap down, distance, score
+  and stats until the animation is over (`detail.pre` / `detail.post`). Human-vs-human games keep the tempo model.
+- Transfer eligibility: the game redshirts portal players who land on (or stay on) a member's team at the rollover;
+  the bridge clears that redshirt in the first weeks of the season (PLYZ + the dynasty-file copy). See
+  spike/blaze/NOTES.md 2026-11-02.
+- Supersim fixes after the first full game (evening): a return touchdown or a pick six is the defense's score (it was
+  credited to the offense as a rush); the final no longer shows the last PAT line; the quarter-end clock flicker is
+  gone; a quarter that turns over in the huddle plays the snap in the new quarter. Every punt is now played out through
+  the coverage (gunners jammed at the line, then running their lanes); the returner fair catches only when a cover man
+  is about to reach him, lets end-zone balls go, and muffs one in eighty.
+- Fang's Recruit Overhaul runs automatically (`ncaa-bridge od overhaul --set-exe …` once, `--install-rcat …` once per
+  RPCS3 install): on the first dynasty file of a season (the preseason, week 0) the bridge runs the tool on the class
+  the game generated and publishes the reshaped class as the dynasty file; consoles take it at their next load. Memo
+  per season in `~/.ncaa-bridge/od-state.json`; details in spike/blaze/NOTES.md (2026-11-02 evening).
+- Generic FCS slots (TEAM.CSAT `D1AAEX/WX/NW/MW/SE`, used by Mercyhurst, West Florida, Wagner, Tuskegee and Delta
+  State in the FCS mod): the mod's archive XML for `D1AANW` names an "FBSGEN 2022" uniform set that does not exist,
+  so a game with Wagner crashed at load (RPCS3 `VM: Access violation` in FGGameCore after ENOENT on
+  `FBSGEN_*_2022_*_big.AST`). The game prefers a `<CSAT>_Pack0_MixAndMatch.XML` found in any `DLC/FCS_DLC_*` folder
+  and lets it name archive-resident art, so `spike/blaze/tools/uniforms/` holds drop-in XMLs built on the game's own
+  2007 generic art; they go into `USRDIR/DLC/FCS_DLC_NEC/` of every install. Details in spike/blaze/NOTES.md
+  (2026-11-02 16:00).
+- FCS playoff (2026-11-02, redesigned the same night): `/d/<slug>/bracket` shows a 24-team bracket, projected from the
+  coaches poll, records and conference standings until the bridge sets the field from the console's week-18 file, then
+  live from `playoff_state` (migration 0021; the bridge PUTs seeds/rounds and GETs the site's results through
+  `/api/bridge/playoff?od=N`; worker/src/playoff-state.ts merges them and writes the bracket games into `games` as
+  source 'playoff'). The bracket is played on the site in Supersim while the console sits at Bowl Season (the game
+  simulates weeks 18-21 in one advance, so it cannot play rounds); when the champion is known the bridge writes all 23
+  games with results into the console's dynasty-file copy (bridge/src/playoff.ts; layout shared in
+  packages/ncaa14/src/playoff.ts BRACKET_ROWS/BRACKET_WEEKS) and the league server holds the console's advance
+  (CheckAdvanceWeekStatus ALLW 0) until that copy is loaded.
+- New dynasties start in the year set by `ncaa-bridge od year --default 2025` (the Dynasty Tool's Year Changer, applied
+  to a new dynasty's first preseason file; `od year --did N --year Y` for one dynasty at that stage).
+- Prospect pages (`/d/<slug>/recruit/<prsi>`, linked from every prospect name on the recruiting pages) carry a recruit
+  editor (name, position, height, weight, stars) for the commissioner or the coach he committed to; edits reach the
+  console through the dynasty-file copy and show an EDIT tag until a console file carries them. The commissioner's
+  "Recruiting class" box on /recruiting re-generates the class with Fang's overhaul during the preseason (week 0) and
+  reports the bridge's result (migration 0019).

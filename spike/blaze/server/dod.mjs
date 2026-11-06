@@ -15,7 +15,9 @@ import { fileURLToPath } from 'node:url';
 import { T } from './tdf.mjs';
 import { log } from './log.mjs';
 import { noteConsoleOverride } from './supersim.mjs';
-import { GAME_FILTER, LAYOUTS as GAME_LAYOUTS, loadGameData, gameTableRows } from './gamedata.mjs';
+import { GAME_FILTER, LAYOUTS as GAME_LAYOUTS, loadGameData, saveGameData, gameTableRows } from './gamedata.mjs';
+import { latestContent, publishContent, setDownloadHook } from './locker.mjs';
+import { isPublicDynasty, canSeeInSearch, matchesDynastyQuery, mayJoinDynasty } from './league-auth.mjs';
 
 export const DOD = 2148;
 export const DOD_COMMANDS = {
@@ -42,11 +44,28 @@ export const DOD_COMMANDS = {
 };
 
 // ---- persistent dynasty store (private/dynasties.json, gitignored) ----
-const PRIVATE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'private');
+const PRIVATE = process.env.NCAA_PRIVATE
+  ? path.resolve(process.env.NCAA_PRIVATE)
+  : path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'private');
 const STORE_FILE = path.join(PRIVATE, 'dynasties.json');
 const load = () => { try { return JSON.parse(fs.readFileSync(STORE_FILE, 'utf8')); } catch { return { nextId: 1, dynasties: {} }; } };
 const store = load();
 const save = () => { try { fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2)); } catch { /* best effort */ } };
+log('dod', `dynasty store ${STORE_FILE} (${Object.keys(store.dynasties).length} dynasties)`);
+
+// Uploaded results (d.games) and game data (d.gameData) are keyed by week, so they hold one season: d.gamesYear. When
+// the dynasty's year moves on they go to d.seasons[<year>]. Before this (2026-11-02), last season's week-1 final
+// (Brown at Furman 49-14) came back through RetrieveGameResults as this season's week-1 result, the same matchup, and
+// last season's game data would have been offered for this season's weeks 7, 9, 10, 11 and 17.
+function rollSeason(d) {
+  const year = d.year ?? 0, held = d.gamesYear ?? 0;
+  if (year === held) return false;
+  if (Object.keys(d.games ?? {}).length || Object.keys(d.gameData ?? {}).length) (d.seasons ??= {})[held] = { games: d.games ?? {}, gameData: d.gameData ?? {} };
+  d.games = {}; d.gameData = {}; d.gamesYear = year;
+  log('dod', `DID ${d.id}: year ${held} results and game data archived; the dynasty is in year ${year}`);
+  return true;
+}
+if (Object.values(store.dynasties).map(rollSeason).some(Boolean)) save();
 
 const now = () => Math.floor(Date.now() / 1000);
 // NCID = the small online user id the real service assigns per user (DynastyUser.NCID, GetContinueDynastyInfoResponse.NCID,
@@ -71,7 +90,62 @@ const COLUMN_LISTS = [['SINT', 'SINT'], ['TINT', 'TINT'], ['INTC', 'INTV'], ['ST
 // the site/bridge; served back to the console through GetTableUpdate (the advance pulls the per-user Z tables filtered by
 // its TGID/CCID). Column names are packed like the console packs them (pack4 is the inverse of name4).
 const WEB_DIR = path.join(PRIVATE, 'web-edits');
+// The console's advance is refused (CheckAdvanceWeekStatus ALLW 0 with the reason as THTM/UTM) while the bridge holds
+// it: web-edits/<did>/ADVANCE.hold.json {reason} (the FCS playoff being played on the site), or a published dynasty-file
+// copy flagged requireLoad in DYNASTY.patch.json that the console has not downloaded yet (the finished bracket).
+// consoleLoadedCid = the dynasty file the console last downloaded (locker download hook).
+const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
+export function advanceHold(d) {
+  const dir = path.join(WEB_DIR, String(d.id));
+  const hold = readJson(path.join(dir, 'ADVANCE.hold.json'));
+  if (hold?.reason) return String(hold.reason);
+  const m = readJson(path.join(dir, 'DYNASTY.patch.json'));
+  const base = d.consoleFileId ?? d.fileId ?? 0;
+  if (m?.requireLoad && m.base === base && (!d.patch || d.consoleLoadedCid !== d.patch.cid)) return String(m.holdReason || 'Load the dynasty from the hub first: a league update is waiting');
+  return null;
+}
+setDownloadHook((c) => {
+  if (c.name !== 'DYNASTY.dynasty' || !c.group?.id) return;
+  const d = store.dynasties[String(c.group.id)]; if (!d || d.consoleLoadedCid === c.cid) return;
+  d.consoleLoadedCid = c.cid; save();
+  log('dod', `DID ${d.id}: a console downloaded dynasty file ${c.cid}${d.patch?.cid === c.cid ? ' (the copy with site edits)' : ''}`);
+});
 const loadWebEdits = (did, table) => { try { return JSON.parse(fs.readFileSync(path.join(WEB_DIR, String(did), `${table}.json`), 'utf8')); } catch { return null; } };
+// Site edits the change tables cannot carry (a transfer for a player with no TRAN row: TRAZ only merges into existing
+// rows) come as a copy of the console's dynasty file with them written in: DYNASTY.patch.bin + DYNASTY.patch.json
+// {base, key, size, changes}, built by the bridge (bridge/src/dynasty-patch.ts). When it was built from the console's
+// current upload it is published as a new locker file and DFID names it; the console finds a file id it does not have
+// and downloads it at its next load, as it would a commissioner's change. The console's next upload (EndDynastyUpdate
+// UPDT 0) supersedes it, and with the patch gone DFID goes back to the console's own file. Decided only when a console
+// loads (getDynasty, GetDynastyStatus for its team) and never during an advance, so DFID holds still within a session.
+function refreshPatch(d) {
+  if (d.advancing) return;
+  const base = d.consoleFileId ?? d.fileId ?? 0;
+  const dir = path.join(WEB_DIR, String(d.id));
+  let m = null; try { m = JSON.parse(fs.readFileSync(path.join(dir, 'DYNASTY.patch.json'), 'utf8')); } catch { /* none */ }
+  const bin = path.join(dir, 'DYNASTY.patch.bin');
+  // A console inside the dynasty restarts it from the server's file whenever DFID changes (the restart check), and
+  // everything it did since its last upload (recruiting points, depth charts) is gone with it. So a copy already
+  // published for this base is replaced only when the console comes back in through the hub (getContinueDynastyInfo
+  // after its last load); a copy nothing needs any more is kept until the console uploads a new base, since it holds
+  // what the console already has. A new base (the console's own upload) publishes at once: the console just sent it.
+  const fresh = (d.hubAt ?? 0) >= (d.loadedAt ?? 0);
+  if (!m || !base || m.base !== base || !fs.existsSync(bin)) {
+    if (d.patch && d.patch.base === base && !m) return; // nothing pending, but the console may be on this copy
+    if (d.patch) {
+      log('dod', `DID ${d.id}: dynasty file ${d.patch.cid} (site edits) withdrawn${m ? ` (built from file ${m.base}, the console's is ${base})` : ''}; DFID back to ${base}`);
+      d.fileId = base; d.patch = null; save();
+    }
+    return;
+  }
+  if (d.patch?.key === m.key && d.fileId === d.patch.cid) return;
+  if (d.patch && d.patch.base === base && !fresh) { if (!d.patchHeld) { d.patchHeld = true; log('dod', `DID ${d.id}: newer site edits for file ${base} wait for the console's next load (it is inside the dynasty on file ${d.patch.cid})`); } return; }
+  d.patchHeld = false;
+  const c = publishContent(base, fs.readFileSync(bin));
+  if (!c) { log('dod', `DID ${d.id}: dynasty file ${base} is not in the locker; site edits not published`); return; }
+  d.consoleFileId = base; d.fileId = c.cid; d.patch = { cid: c.cid, base, key: m.key, at: now() }; save();
+  log('dod', `DID ${d.id}: dynasty file ${c.cid} published = file ${base} + site edits: ${(m.changes ?? []).join('; ')}`);
+}
 export const pack4 = (name) => Buffer.from(String(name).padEnd(4).slice(0, 4).split('').reverse().join(''), 'latin1').readUInt32BE(0);
 // DodTableUpdate with rows (tags in order): BINC DYID FILT FLTY GHID INTC PACK ROWS RTID SINT STRC TABL TINT TYPE; each row
 // struct carries only its non-empty lists (BINY, INTV, SINT, STRV, TINT), as the console itself sends them.
@@ -99,11 +173,38 @@ const coachId = (did, tgid, dflt = 0) => { if (!coachCache.has(did)) coachCache.
 // SCHD row of a team in a week (opponent lookup for the hub card)
 const scheduleCache = new Map();
 const scheduleRow = (did, week, tgid) => { if (!scheduleCache.has(did)) scheduleCache.set(did, loadTable(did, 'SCHD')?.rows ?? []); return scheduleCache.get(did).find((r) => r.SEWN === week && (r.GHTG === tgid || r.GATG === tgid)) ?? null; };
-const memberCoach = (d, m) => (m.team && m.team !== 1023 ? coachId(d.id, m.team, m.coach ?? 0) : (m.coach ?? 0));
-function applyTableUpdate(d, body) {
+const memberCoach = (d, m) => (m.coach ? m.coach : (m.team && m.team !== 1023 ? coachId(d.id, m.team, 0) : 0));
+// Game data of console-played games. After a game the console uploads its 14 game tables (StartDynastyUpdate UPDT 2 ->
+// sendTableUpdate x14 -> UploadGameResults -> EndDynastyUpdate UPDT 2). They are kept per game like a Supersim final
+// (gamedata.mjs) and listed in DynastyStatus.GAME for the member's team. A console that reloads the dynasty before the
+// advance (game or server restart) rebuilds it from the last dynasty file + the team file, so without them the game was
+// unplayed again and the advance simulated it (2026-10-31: weeks 1, 4, 12 and 14 re-simmed; weeks 2 and 5, advanced
+// without a reload, kept). The load only fetches game data for a game that is still unplayed, so nothing is applied twice.
+const pendingGames = new Map(); // did -> { tables, columns, ghid, rtid, result } while an UPDT-2 upload is in progress
+function registerConsoleGame(d, body, user) {
+  const pg = pendingGames.get(d.id); pendingGames.delete(d.id);
+  const ginf = pg?.tables.GINF?.[0];
+  if (!ginf) return log('dod', `DID ${d.id}: game upload without GINF, no game data kept`);
+  const team = num(body.TMID) || pg.rtid || num(pg.result?.TMID);
+  const member = d.members.find(m => m.blazeId === user.blazeId);
+  if (d.update?.byUser && (!member || member.team !== team || ![num(ginf.GATG),num(ginf.GHTG)].includes(team)))
+    return log('dod', `DID ${d.id}: rejected game data with mismatched member/team`);
+  const week = pg.result ? num(pg.result.GMWK) : num(body.NWWK, d.week ?? 0);
+  const id = d.nextGameDataId ?? 900001; d.nextGameDataId = id + 1;
+  saveGameData(d.id, id, { source: 'console', by: user.blazeId, ghid: pg.ghid, week, team, sgnm: num(ginf.SGNM), createdAt: now(), columns: pg.columns, tables: pg.tables });
+  const wk = String(week);
+  (d.gameData ??= {})[wk] = [...(d.gameData[wk] ?? []).filter((x) => x.team !== team), { team, id, source: 'console' }];
+  log('dod', `DID ${d.id}: console game week ${week} ${ginf.GATG}@${ginf.GHTG} ${ginf.GASC}-${ginf.GHSC} (GQTR ${ginf.GQTR}) kept as game data ${id} for team ${team}`);
+}
+function applyTableUpdate(d, body, memberScope = null) {
   const table = name4(body.TABL);
   const upd = d.update ?? { updt: 0, touched: [] };
-  const t = loadTable(d.id, table) ?? { table, columns: {}, rows: [], meta: {} };
+  // Authenticated non-commissioner uploads must never replace shared league tables.
+  // Their canonical .team file is still published normally; retain their table snapshot separately.
+  const scopedFile = memberScope ? path.join(PRIVATE,'dynasty-member-tables',String(d.id),String(memberScope),`${table}.json`) : null;
+  let previous = null;
+  if (scopedFile) { try { previous = JSON.parse(fs.readFileSync(scopedFile,'utf8')); } catch { /* first snapshot */ } }
+  const t = (scopedFile ? previous : loadTable(d.id, table)) ?? { table, columns: {}, rows: [], meta: {} };
   const filtCol = body.FILT && body.FILT.COLM ? name4(body.FILT.COLM) : null;
   if (!upd.touched.includes(table)) { // first chunk of this table in this update session: replace (full) or drop the filtered rows (partial)
     if (upd.updt === 2) { const ghid = num(body.GHID); t.rows = t.rows.filter((r) => !(ghid && r.GHID === ghid) && !(filtCol && r[filtCol] === num(body.FILT.VALU) && r.GHID === ghid)); } // game stats: one game's rows (GHID) replace the same game's earlier rows
@@ -113,6 +214,11 @@ function applyTableUpdate(d, body) {
   }
   for (const [listTag] of COLUMN_LISTS) if (body[listTag]) t.columns[listTag] = items(body[listTag]).map(name4);
   t.meta = { type: num(body.TYPE), flty: num(body.FLTY), rtid: num(body.RTID), ghid: num(body.GHID), filter: filtCol ? { column: filtCol, value: num(body.FILT.VALU) } : null, updatedAt: now() };
+  const game = upd.updt === 2 ? pendingGames.get(d.id) : null; // console game upload: keep this game's rows as sent
+  if (game) {
+    game.ghid ||= num(body.GHID); game.rtid ||= num(body.RTID); game.tables[table] ??= [];
+    game.columns[table] ??= Object.fromEntries(COLUMN_LISTS.filter(([tag]) => body[tag]).map(([tag]) => [tag, items(body[tag]).map(name4)]));
+  }
   let added = 0;
   for (const r of items(body.ROWS)) {
     const row = {};
@@ -120,13 +226,14 @@ function applyTableUpdate(d, body) {
       const cols = t.columns[listTag] ?? [], vals = items(r[valueTag]);
       vals.forEach((v, i) => { row[cols[i] ?? `${listTag}${i}`] = typeof v === 'bigint' ? Number(v) : v; });
     }
-    t.rows.push(row); added++;
+    t.rows.push(row); if (game) game.tables[table].push({ ...row }); added++;
   }
-  saveTable(d.id, t);
+  if (scopedFile) { fs.mkdirSync(path.dirname(scopedFile),{recursive:true}); fs.writeFileSync(scopedFile,JSON.stringify(t)); }
+  else saveTable(d.id, t);
   if (table === 'TEAM') teamCache.delete(d.id);
   if (table === 'COCH' || table === 'COCZ') coachCache.delete(d.id);
   if (table === 'SCHD') scheduleCache.delete(d.id);
-  (d.tables ??= {})[table] = { rows: t.rows.length, updatedAt: t.meta.updatedAt };
+  if (!scopedFile) (d.tables ??= {})[table] = { rows: t.rows.length, updatedAt: t.meta.updatedAt };
   d.update = upd;
   return { table, added, total: t.rows.length, pack: num(body.PACK), filter: t.meta.filter };
 }
@@ -150,15 +257,38 @@ function memberInfo(w, d, m) {
 // (string values): the client's converter at 0x2f4278 walks C2B, finds the T2B entry whose persona string matches, and
 // inserts one DYUS row {persona, coach, team} per member; its member check then compares DYUS with the status pairs.
 const personaMap = (tag, w, entries) => w.map(tag, T.INT, T.STRING, entries, (x, k) => x.varint(k), (x, v) => x.string(v));
-function dynasty(w, d) {
+// The shared dynasty file names the commissioner's coach and team (DEID). A joiner fails the restart check
+// against that file, so their copy lives on member.dynastyFileId and is the only FID/DFID they are shown.
+const memberFileId = (d, viewerId) => {
+  const own = viewerId == null ? 0 : d?.members.find((m) => m.blazeId === viewerId)?.dynastyFileId;
+  return own || d?.fileId || 0;
+};
+// Check 3 (0x33d084) counts DYUS rows built from the persona maps and compares that count, then each row's team,
+// with the status T2B pairs (count at versionMgr+0x198). Those maps have to list every placed member or the
+// member list drops anyone left out. The team-file list is separate: a joiner is only handed their own file.
+const placedMembers = (d) => (d?.members ?? []).filter((m) => m.team && m.team !== 1023);
+const shownMembers = (d, viewer) => {
+  const placed = placedMembers(d);
+  if (viewer && !viewer.commissioner) return placed.filter((m) => m.blazeId === viewer.blazeId);
+  return placed;
+};
+function dynasty(w, d, viewerId) {
   const r = d.request;
-  const placed = d.members.filter((m) => m.team && m.team !== 1023);
+  // The load's first getDynasty is what the restart check counts. A joiner's open team file is the current
+  // database then, and that file only has their team, so the check can resolve only that one row. Later
+  // replies list every placed member, which is what the in-game member list shows.
+  const roster = placedMembers(d);
+  const placed = d.limitRoster ? roster.filter((m) => m.blazeId === viewerId) : roster;
+  const pub = isPublicDynasty(d);
+  const storedPass = str(r.PASS);
+  const showPass = viewerId === undefined || d.members.some((m) => m.blazeId === viewerId);
+  const viewer = viewerId == null ? null : d.members.find((m) => m.blazeId === viewerId) ?? null;
   w.str('ABBR', str(r.ABBR)); w.int('ACTV', 1); personaMap('C2B', w, placed.map((m) => [memberCoach(d, m), m.persona])); w.int('CENS', 0); w.int('CHMP', 0); w.int('CHUM', 0);
   w.struct('CMSH', (x) => dynastyUser(x, d.members[0])); w.int('CRTM', d.createdAt); w.str('DESC', str(r.DESC)); w.int('DID', d.id); w.int('DNF', num(r.DNF)); w.int('DSKL', num(r.DSKL));
-  w.int('FATG', num(r.FATG)); w.int('FID', d.fileId ?? 0); w.int('HFAE', num(r.HFAE)); w.int('HIDN', 0); w.int('ICTK', num(r.ICTK)); w.int('INJU', num(r.INJU)); w.int('JOIN', 1);
-  w.int('MEM', d.members.length); w.int('MHUM', num(r.MHUM, 12)); w.str('NAME', str(r.NAME)); w.int('ONLN', 1); w.int('OSKL', num(r.OSKL)); w.str('PASS', str(r.PASS)); w.int('PDLC', num(r.PDLC));
+  w.int('FATG', num(r.FATG)); w.int('FID', memberFileId(d, viewerId)); w.int('HFAE', num(r.HFAE)); w.int('HIDN', pub ? 0 : 1); w.int('ICTK', num(r.ICTK)); w.int('INJU', num(r.INJU)); w.int('JOIN', pub ? 1 : 0);
+  w.int('MEM', viewer && !viewer.commissioner ? placed.length : d.members.length); w.int('MHUM', num(r.MHUM, 12)); w.str('NAME', str(r.NAME)); w.int('ONLN', 1); w.int('OSKL', num(r.OSKL)); w.str('PASS', showPass ? storedPass : ''); w.int('PDLC', num(r.PDLC));
   w.int('PLCL', num(r.PLCL)); w.int('QTQB', num(r.QTQB)); w.int('QTR', num(r.QTR, 5)); w.int('RSTR', 0); w.int('SEAS', d.season ?? 1); w.str('SINF', ''); w.int('STTE', d.state ?? 0); // server-side state = what the last completed update reported (NWST); echoing the console's own mid-advance STAT back (run 31) loops the restart check
-  personaMap('T2B', w, placed.map((m) => [m.team, m.persona])); w.int('USKL', num(r.USKL)); w.int('VERS', 0); w.int('VIS', 1); w.int('WEEK', d.week ?? 0); w.int('WTHR', num(r.WTHR));
+  personaMap('T2B', w, placed.map((m) => [m.team, m.persona])); w.int('USKL', num(r.USKL)); w.int('VERS', 0); w.int('VIS', pub ? 1 : 0); w.int('WEEK', d.week ?? 0); w.int('WTHR', num(r.WTHR));
 }
 const teamRecord = (tr) => (w) => { w.int('LOSS', num(tr?.TSLO)); w.int('WINS', num(tr?.TSWI)); }; // TEAM.TSWI/TSLO as of the last push
 // Blaze::DynastyOnDemand::ContinueDynastyInfo: one hub card per dynasty the user belongs to
@@ -171,13 +301,15 @@ function continueDynastyInfo(w, d, m) {
   const sr = tr ? scheduleRow(d.id, d.week ?? 0, m.team) : null; // this week's opponent from the pushed schedule
   const or = sr ? teamRow(d.id, sr.GHTG === m.team ? sr.GATG : sr.GHTG) : null;
   w.int('AWST', 0); w.int('CDIF', 0); w.int('COLR', 0); w.int('CONF', num(tr?.CGID, m.conf ?? 0));
-  w.struct('DYNA', (x) => dynasty(x, d));
+  w.struct('DYNA', (x) => dynasty(x, d, m.blazeId));
   w.struct('GAMR', (x) => { x.int('GPLD', g ? 1 : 0); x.int('OSCR', g ? num(home ? g.ATSC : g.HTSC) : 0); x.int('OVTF', g ? num(g.OTFL) : 0); x.int('USCR', g ? num(home ? g.HTSC : g.ATSC) : 0); });
   w.int('HMST', 0); w.int('LOGO', num(tr?.TLGL, 0));
   w.struct('MUSR', (x) => memberInfo(x, d, m));
   w.int('NMSG', 0); w.int('NRDY', 0); w.str('ONME', str(or?.TDNA)); w.int('OPON', 0);
   w.struct('OPPO', (x) => dynastyUser(x, { blazeId: 0, persona: '' }));
-  w.struct('OREC', teamRecord(or)); w.int('OTRK', 0); w.int('RSTA', 0); w.str('SEAS', `Year ${(d.year ?? 0) + 1}`); w.int('TCAV', 0); w.int('UIHT', 0);
+  // SEAS counts the dynasty's seasons from the year it started in (startYear: the year offset of its first advance; a
+  // dynasty the bridge started in 2025 reports NWYR 12 from the beginning)
+  w.struct('OREC', teamRecord(or)); w.int('OTRK', 0); w.int('RSTA', 0); w.str('SEAS', `Year ${(d.year ?? 0) - (d.startYear ?? 0) + 1}`); w.int('TCAV', 0); w.int('UIHT', 0);
   w.struct('UREC', teamRecord(tr)); w.int('UTRK', 0);
 }
 // Blaze::DynastyOnDemand::DynastyStatus {B2N map, CFID, DFID, GAME list<DynastyFileInfo{DFID, TMID}>, T2B map, TEAM list<DynastyFileInfo{DFID, TMID}>}
@@ -187,7 +319,11 @@ function continueDynastyInfo(w, d, m) {
 // client loaded or uploaded, then looks the caller's blaze id up in those pairs and compares the team with DEID.TGID in
 // the loaded file (run 15 still looped because the pairs were sent team-first). B2N is iterated as {u64, u32} pairs
 // (blaze id -> NCID, presumably); left empty for now.
-function dynastyStatus(w, d, me, allTeams) {
+// The coaching carousel's shared state: the newest .contract package a console uploaded since the dynasty's last advance
+// (an older one belongs to a finished carousel). See the CFID note in dynastyStatus and case 91.
+const contractFile = (d) => latestContent({ group: d.id, suffix: '.contract', since: d.fileSavedAt ?? 0, owners: d.members.map((m) => m.blazeId) });
+
+function dynastyStatus(w, d, me, allTeams, cfid) {
   // TEAM = DynastyFileInfo per team. The load (request TMID = the caller's team) needs the team file id there: with 0 the
   // client skips the team-data download and the table sync and then fails its restart check (runs 26-27). The advance
   // step asks with TMID 1023 and treats every listed file as a server-built change package (DB with an ODCN table,
@@ -199,18 +335,32 @@ function dynastyStatus(w, d, me, allTeams) {
   // Run 35: with TEAM empty during the advance the console uploaded no refreshed team file, and the next resume merged
   // the stale preseason team file into the week-1 dynasty (loop). TEAM therefore stays listed during the advance; only
   // CFID (the own change package) is withheld, which is what the step-1 crash was actually reading (run 32).
-  const withFiles = d.members.filter((m) => m.teamFileId);
-  const withTeams = d.members.filter((m) => m.team && m.team !== 1023);
+  const shown = shownMembers(d, me);
+  // A joiner must not be handed the other member's team file. The commissioner still sees every file, as before.
+  const withFiles = (me && !me.commissioner ? shown : d.members).filter((m) => m.teamFileId);
+  // Check 2 looks the signed-in blaze id up in T2B and compares it with select TGID from DEID, which
+  // returns 1023 here. The real id must stay out of the map. Check 3 resolves each DYUS row through
+  // B2N; with no registration that blaze id is 0, so one pair of 0 -> the joiner's team matches the
+  // row and posts RtGm.TmChg, which copies that DYUS team onto the controlled coach.
+  const withTeams = me && !me.commissioner
+    ? (me.team && me.team !== 1023 ? [{ blazeId: 0, team: me.team }] : [])
+    : placedMembers(d);
   // B2N = map<blazeId, NCID>: the client registers each pair with its user service; on resume 0x447f2c reads TEAM.NCID of a
   // member's team and maps it back to the blaze id through those registrations before comparing teams (0x33d084).
   // Every NCID the stub ever issued was 0 (DynastyUser.NCID, GetContinueDynastyInfoResponse.NCID), so the uploaded file's
   // TEAM.NCID is 0 as well; ncId stays 0 for existing members to match it.
   // Run 32: with TEAM empty the advance step still fetched the own team file, taken from CFID, and crashed opening it as
   // the ODCN package. So CFID is the own change package during an advance (none -> 0) and the own team file otherwise.
-  w.intMap('B2N', withTeams.map((m) => [m.blazeId, m.ncId ?? 0])); w.int('CFID', d.advancing ? 0 : (me?.teamFileId ?? 0)); w.int('DFID', d.fileId ?? 0);
-  // GAME is list<DynastyFileInfo {DFID, TMID}> (0x2f6b18 copies it like TEAM): a member team whose game this week was played
-  // away from the console (Supersim), DFID = the game-data id the console then fetches table by table (gamedata.mjs).
-  w.list('GAME', T.STRUCT, d.gameData?.[String(d.week ?? 0)] ?? [], (x, g) => { x.int('DFID', g.id); x.int('TMID', g.team); x.push(0); });
+  // 2026-11-01: the coaching carousel ('Checking for contract data') asks with TMID 1023, STAT 12 and opens CFID the same
+  // way, as the carousel's contract package: the newest .contract a console uploaded (case 91), or 0 before the first one
+  // (a team file there crashes it at 0xa6a8fc reading 0x11). The caller picks CFID (case 58).
+  w.intMap('B2N', (me && !me.commissioner ? [] : withTeams).map((m) => [m.blazeId, m.ncId ?? 0])); w.int('CFID', cfid); w.int('DFID', memberFileId(d, me?.blazeId));
+  // GAME is list<DynastyFileInfo {DFID, TMID}> (0x2f6b18 copies it like TEAM): a member team whose game this week has game
+  // data (a Supersim final, or a game a console played and uploaded), DFID = the game-data id the console then fetches
+  // table by table (gamedata.mjs) when that game is still unplayed in the dynasty it loaded.
+  const games = d.gameData?.[String(d.week ?? 0)] ?? [];
+  const gameList = me && !me.commissioner ? games.filter((g) => shown.some((m) => m.team === g.team)) : games;
+  w.list('GAME', T.STRUCT, gameList, (x, g) => { x.int('DFID', g.id); x.int('TMID', g.team); x.push(0); });
   w.intMap('T2B', withTeams.map((m) => [m.blazeId, m.team]));
   w.list('TEAM', T.STRUCT, withFiles, (x, m) => { x.int('DFID', m.teamFileId); x.int('TMID', m.team); x.push(0); });
 }
@@ -234,38 +384,71 @@ export function handleDod({ p, body, session, reply }) {
     }
     case 5: // getDynasty {DID} -> Dynasty (a load: any advance flag from an aborted advance is cleared)
       if (!d) return reply(undefined, ok, note(`: unknown DID ${did}, generic response`));
-      if (d.advancing) { d.advancing = false; save(); }
-      return reply(undefined, (w) => dynasty(w, d), note(`: DID ${did}`));
+      if (me && (!session?.leagueAuthenticated || me.commissioner)) {
+        if (d.advancing) { d.advancing = false; save(); }
+        refreshPatch(d);
+        d.loadedAt = now(); save();
+      }
+      d.limitRoster = !!(me && !me.commissioner && !d.rosterExpanded);
+      if (d.limitRoster) d.rosterExpanded = true;
+      return reply(undefined, (w) => dynasty(w, d, user.blazeId), note(`: DID ${did}${d.limitRoster ? ' (load roster)' : ''}${d.patch ? ` (FID ${d.fileId}: file ${d.patch.base} + site edits)` : ''}`));
     case 9: // getInvitations -> GetInvitationsResponse {DYNS list<Dynasty>, INVS list<Invitation>}
       return reply(undefined, (w) => { w.list('DYNS', T.STRUCT, [], () => {}); w.list('INVS', T.STRUCT, [], () => {}); }, note(': none'));
     case 13: { // getContinueDynastyInfoForUser -> GetContinueDynastyInfoResponse {DNFO list<ContinueDynastyInfo>, NCID}
       const mine = Object.values(store.dynasties).filter((x) => x.members.some((m) => m.blazeId === user.blazeId));
+      for (const x of mine) { x.hubAt = now(); x.rosterExpanded = false; x.limitRoster = false; } if (mine.length) save(); // the console is at the hub: its next getDynasty is a fresh load (refreshPatch)
       const myNcid = user.ncId;
       return reply(undefined, (w) => { w.list('DNFO', T.STRUCT, mine, (x, dd) => { continueDynastyInfo(x, dd, dd.members.find((m) => m.blazeId === user.blazeId)); x.push(0); }); w.int('NCID', myNcid); }, note(`: ${mine.length} dynasties for ${user.persona}, NCID ${myNcid}`));
     }
-    case 22: return reply(undefined, (w) => w.list('DLST', T.STRUCT, [], () => {}), note(': none')); // FindDynastiesResponse
+    case 22: {
+      // DLST element ctor 0x14ef5d8 calls Dynasty ctor 0x775b74 (size 0x128).
+      // Search lists public dynasties (the default) plus the caller's own. PRIV 0x7fffffff means no privacy filter.
+      const list = Object.values(store.dynasties).filter((x) =>
+        canSeeInSearch(x, session, user.blazeId) && matchesDynastyQuery(x, body))
+        .slice(0, Math.min(50, Math.max(1, num(body.MAXR, 50))));
+      return reply(undefined, (w) => w.list('DLST', T.STRUCT, list, (x,dd) => { dynasty(x, dd, user.blazeId); x.push(0); }), note(`: ${list.length} results [${list.map((x) => str(x.request?.NAME)).join(', ')}]`));
+    }
     case 26: { // GetDynastyUserInfo {BZID, DYID} -> DynastyUserInfoResponse {DUIF list<DynastyUserInfo{AUTO, BZID, LDCL, LLOG, NCID, OFFP, PERS}>}
-      const list = d ? d.members : [];
-      return reply(undefined, (w) => w.list('DUIF', T.STRUCT, list, (x, m) => { x.int('AUTO', 0); x.int('BZID', m.blazeId); x.int('LDCL', 0); x.int('LLOG', now()); x.int('NCID', m.ncId ?? 0); x.str('OFFP', ''); x.str('PERS', m.persona); x.push(0); }), note(`: ${list.length} member(s)`));
+      // BZID 0 asks for the whole dynasty. A specific id asks for that member; answering with someone else first
+      // makes the caller treat the commissioner's identity as its own and leave.
+      const want = num(body.BZID);
+      const list = (d?.members ?? []).filter((m) => !want || m.blazeId === want);
+      return reply(undefined, (w) => w.list('DUIF', T.STRUCT, list, (x, m) => { x.int('AUTO', 0); x.int('BZID', m.blazeId); x.int('LDCL', 0); x.int('LLOG', now()); x.int('NCID', m.ncId ?? 0); x.str('OFFP', ''); x.str('PERS', m.persona); x.push(0); }), note(`: ${list.length} member(s) for BZID ${want || 'all'}`));
     }
     case 69: case 70: return reply(undefined, (w) => w.list('NLST', T.STRUCT, [], () => {}), note(': none')); // DynastyNotificationResponse
     case 93: return reply(undefined, (w) => w.list('TLST', T.STRUCT, [], () => {}), note(': no sync tables')); // GetSyncTablesResponse
     case 56: // StartDynastyUpdate {DYID, UPDT} -> begins a table push (UPDT 1 = user's team rows, 0 = whole dynasty)
-      if (d) { d.update = { updt: num(body.UPDT), startedAt: now(), touched: [] }; save(); }
+      if (d) {
+        d.update = { updt: num(body.UPDT), byUser: user.blazeId, startedAt: now(), touched: [] }; save();
+        if (num(body.UPDT) === 2) pendingGames.set(d.id, { tables: {}, columns: {}, ghid: 0, rtid: 0, result: null }); else pendingGames.delete(d.id);
+      }
       return reply(undefined, ok, note(`: DID ${did} UPDT ${body.UPDT}`));
     case 12: { // sendTableUpdate (DodTableUpdate) -> DodTableUpdateResponse {MSG}
       if (!d) return reply(undefined, (w) => w.str('MSG', ''), note(`: unknown DID ${did}`));
       let r;
-      try { r = applyTableUpdate(d, body); } catch (e) { log('dod', `table update failed: ${e.stack ?? e.message}`); return reply(undefined, (w) => w.str('MSG', ''), note(': store error')); }
+      try { r = applyTableUpdate(d, body, session?.leagueAuthenticated && !me?.commissioner ? user.blazeId : null); } catch (e) { log('dod', `table update failed: ${e.stack ?? e.message}`); return reply(undefined, (w) => w.str('MSG', ''), note(': store error')); }
       save();
       return reply(undefined, (w) => w.str('MSG', ''), note(`: ${r.table} pack ${r.pack} +${r.added} rows (${r.total} total${r.filter ? `, ${r.filter.column}=${r.filter.value}` : ''})`));
     }
     case 57: { // EndDynastyUpdate {DYID, FID, NWST, NWWK, NWYR, TMID, UPDT}
       if (d) {
-        if (num(body.UPDT) === 1) { const m = me ?? d.members.find((x) => x.team === num(body.TMID)); if (m) { m.team = num(body.TMID, m.team); m.teamFileId = num(body.FID, m.teamFileId ?? 0); } }
-        else if (num(body.UPDT) === 0 && num(body.FID)) { d.fileId = num(body.FID); d.fileSavedAt = now(); }
+        if (num(body.UPDT) === 1) {
+          const team = num(body.TMID);
+          const m = team > 0 && team < 1023 ? (me ?? d.members.find((x) => x.team === team)) : null;
+          if (m) { m.team = team; m.teamFileId = num(body.FID, m.teamFileId ?? 0); }
+        }
+        else if (num(body.UPDT) === 0 && num(body.FID)) { d.fileId = d.consoleFileId = num(body.FID); d.patch = null; d.fileSavedAt = now(); }
         // UPDT 2 = a played game's stat tables + UploadGameResults; FID is 0 there and the dynasty file is unchanged (run 38 took it as file 0)
-        d.state = num(body.NWST, d.state); d.status = d.state; d.week = num(body.NWWK, d.week); d.year = num(body.NWYR, d.year ?? 0); d.update = null; d.advancing = false; save();
+        else if (num(body.UPDT) === 2) registerConsoleGame(d, body, user);
+        const prevYear = d.year ?? 0;
+        if (!session?.leagueAuthenticated || me?.commissioner) {
+          d.state = num(body.NWST, d.state); d.status = d.state; d.week = num(body.NWWK, d.week); d.year = num(body.NWYR, d.year ?? 0); d.advancing = false;
+        }
+        d.update = null;
+        // the year offset the dynasty's first season ran in (hub card "Year N"): taken from the first advance into the
+        // regular season, when a start year the bridge set (2025 -> NWYR 12) is already in the file
+        if (d.startYear === undefined && num(body.NWST) === 7 && prevYear === 0) d.startYear = d.year;
+        rollSeason(d); save();
       }
       return reply(undefined, ok, note(`: DID ${did} FID ${body.FID} UPDT ${body.UPDT} (tables: ${Object.keys(d?.tables ?? {}).length})`));
     }
@@ -280,19 +463,55 @@ export function handleDod({ p, body, session, reply }) {
           const entry = Object.values(d?.gameData ?? {}).flat().find((g) => g.id === id);
           const data = entry ? loadGameData(did, id) : null;
           const rows = data ? gameTableRows(data, table) : [];
-          const layout = GAME_LAYOUTS[table] ?? {};
-          return reply(undefined, (w) => tableUpdate(w, did, body, { columns: layout, meta: { type: 0, flty: 2 } }, rows, { ghid: id, rtid: entry?.team ?? 0 }), note(`: ${table} game data ${id}: ${rows.length} rows${data ? '' : ' (unknown game id)'}${GAME_LAYOUTS[table] ? '' : ' (unknown table)'}`));
+          const layout = data?.columns?.[table === 'WQSC' ? 'UWQS' : table] ?? GAME_LAYOUTS[table]; // a console game goes back with the columns it was sent with
+          return reply(undefined, (w) => tableUpdate(w, did, body, { columns: layout ?? {}, meta: { type: 0, flty: 2 } }, rows, { ghid: id, rtid: entry?.team ?? 0 }), note(`: ${table} game data ${id}${data?.source === 'console' ? ' (console game)' : ''}: ${rows.length} rows${data ? '' : ' (unknown game id)'}${layout ? '' : ' (unknown table)'}`));
         }
         const edits = loadWebEdits(did, table);
         const filtCol = body.FILT && num(body.FILT.COLM) ? name4(num(body.FILT.COLM)) : null;
-        const rows = edits ? edits.rows.filter((r) => !filtCol || r[filtCol] === undefined || r[filtCol] === num(body.FILT.VALU)) : [];
-        return reply(undefined, (w) => tableUpdate(w, did, body, edits, rows), note(`: ${table} UPDA ${body.UPDA}: ${rows.length} web rows${edits ? '' : ' (no web edits)'}`));
+        // PLYZ and TRAZ merge by PGID on the console (their descriptors use mode 2, NOTES 2026-11-01), so every row goes
+        // to every console whatever the filter (a transfer's PTID or a player's TGID need not be the console's team). The
+        // other tables replace the filtered subset (mode 0): a console gets only the rows of its own filter value.
+        const keyed = table === 'PLYZ' || table === 'TRAZ';
+        // Those two tables ignore the team filter, so the other team's rows arrive on every joiner load.
+        // The joiner's published dynasty file already contains them. Sending the rows again marks the loaded
+        // file changed, and the restart check loops (run 16). The commissioner still receives them.
+        const baked = keyed && !!(me && !me.commissioner && me.dynastyFileId);
+        const rows = edits && !baked ? edits.rows.filter((r) => keyed || !filtCol || r[filtCol] === undefined || r[filtCol] === num(body.FILT.VALU)) : [];
+        return reply(undefined, (w) => tableUpdate(w, did, body, edits, rows), note(`: ${table} UPDA ${body.UPDA}: ${rows.length} web rows${baked ? ' (already in the joiner file)' : edits ? '' : ' (no web edits)'}`));
       }
-    case 6: return reply(undefined, (w) => w.int('COCH', 0), note()); // JoinDynastyResponse
-    case 14: return reply(undefined, (w) => w.int('DEST', 0), note()); // RemoveMemberResponse
+    case 6: {
+      let joined = false;
+      let member = me;
+      if (d && mayJoinDynasty(d, session, body)) {
+        const picked = num(body.COCH);
+        const coach = picked && picked !== 65535 ? picked : 0;
+        const row = coach ? loadTable(d.id, 'COCH')?.rows?.find((r) => r.CCID === coach) : null;
+        const team = num(row?.TGID);
+        const open = team > 0 && team < 1023 && !d.members.some((m) => m.blazeId !== user.blazeId && m.team === team);
+        if (!member) {
+          member = { ...user, commissioner: false, coach, team: open ? team : 0 };
+          d.members.push(member);
+          joined = true;
+        } else if (!member.team && coach) {
+          member.coach = coach;
+          if (open) member.team = team;
+        }
+        save();
+      }
+      return reply(undefined, (w) => w.int('COCH', member?.coach ?? 0), note(joined ? `: joined DID ${did} coach ${member?.coach ?? 0} team ${member?.team ?? 0}` : '')); // JoinDynastyResponse
+    }
+    case 14: { // RemoveMember {BZID, DID}. BZID 0 is the caller leaving.
+      const target = num(body.BZID) || user.blazeId;
+      const before = d?.members.length ?? 0;
+      if (d && (target === user.blazeId || me?.commissioner)) {
+        d.members = d.members.filter((m) => m.blazeId !== target);
+        save();
+      }
+      return reply(undefined, (w) => w.int('DEST', 0), note(`: removed ${target}, ${before} -> ${d?.members.length ?? 0}`));
+    }
     case 24: { // UploadGameResults {AOTS, AQ1S..AQ4S, ATID, ATSC, CRCT, DYID, FLID, GMWK, HOTS, HQ1S..HQ4S, HTID, HTSC, OTFL, STCT, TMID} -> {DYID, SFFG}
       if (d) { const g = Object.fromEntries(Object.entries(body).filter(([k]) => k !== 'DYID').map(([k, v]) => [k, num(v)])); g.by = user.blazeId; g.at = now();
-        const wk = String(num(body.GMWK)); (d.games ??= {})[wk] ??= []; const ours = d.games[wk].find((x) => x.HTID === g.HTID && x.ATID === g.ATID && x.supersimRunId); if (ours) noteConsoleOverride(store, d, g, ours); const list = d.games[wk].filter((x) => !(x.HTID === g.HTID && x.ATID === g.ATID)); list.push(g); d.games[wk] = list; save(); }
+        const wk = String(num(body.GMWK)); (d.games ??= {})[wk] ??= []; const ours = d.games[wk].find((x) => x.HTID === g.HTID && x.ATID === g.ATID && x.supersimRunId); if (ours) noteConsoleOverride(store, d, g, ours); const pg = pendingGames.get(d.id); if (pg) pg.result = g; const list = d.games[wk].filter((x) => !(x.HTID === g.HTID && x.ATID === g.ATID)); list.push(g); d.games[wk] = list; save(); }
       return reply(undefined, (w) => { w.int('DYID', did); w.int('SFFG', 0); }, note(`: week ${body.GMWK} ${body.ATID}@${body.HTID} ${body.ATSC}-${body.HTSC}`));
     }
     case 25: { // RetrieveGameResults {DYID, WKID} -> {DYID, GRLI list<GameResultsData>, TIDL list<team id per result>}
@@ -311,14 +530,30 @@ export function handleDod({ p, body, session, reply }) {
     case 58: { // GetDynastyStatus {DFON, DYID, STAT, TMID, WEEK, YEAR} -> DynastyStatus
       // WEEK/YEAR here are the console's placeholders (31/0 before it has loaded); the authoritative week comes from
       // EndDynastyUpdate (NWWK/NWYR). Copying 31 over the advanced week looped the restart check after run 34.
-      if (d) { if (me && body.TMID !== undefined && num(body.TMID) !== 1023) me.team = num(body.TMID); d.status = num(body.STAT, d.status ?? 0); save(); }
+      if (d && me && (!session?.leagueAuthenticated || me.commissioner)) {
+        if (body.TMID !== undefined && num(body.TMID) !== 1023 && !me.team) me.team = num(body.TMID);
+        d.status = num(body.STAT, d.status ?? 0);
+        save();
+        if (num(body.TMID) !== 1023) refreshPatch(d);
+      }
       if (!d) return reply(undefined, (w) => { w.intMap('B2N', []); w.int('CFID', 0); w.int('DFID', 0); w.list('GAME', T.STRUCT, [], () => {}); w.intMap('T2B', []); w.list('TEAM', T.STRUCT, [], () => {}); }, note(`: unknown DID ${did}`));
-      return reply(undefined, (w) => dynastyStatus(w, d, me, num(body.TMID) === 1023), note(`: TMID ${body.TMID} DFID ${d.fileId ?? 0} CFID ${me?.teamFileId ?? 0}, T2B ${JSON.stringify(d.members.filter((m) => m.team && m.team !== 1023).map((m) => [m.blazeId, m.team]))}, B2N ${JSON.stringify(d.members.filter((m) => m.team && m.team !== 1023).map((m) => [m.blazeId, m.ncId ?? 0]))}`));
+      const contract = num(body.TMID) === 1023 && num(body.STAT) === 12; // the carousel's contract check (see dynastyStatus)
+      const cf = contract && !d.advancing ? contractFile(d) : null;
+      const cfid = d.advancing ? 0 : contract ? (cf?.cid ?? 0) : (me?.teamFileId ?? 0);
+      const why = contract ? (cf ? ` (contract check: ${cf.name} from ${cf.persona})` : ' (contract check: no package yet)') : '';
+      const dfid = memberFileId(d, me?.blazeId);
+      const pairs = me && !me.commissioner ? (me.team && me.team !== 1023 ? [{ blazeId: 0, team: me.team }] : []) : placedMembers(d);
+      const b2n = me && !me.commissioner ? [] : pairs;
+      return reply(undefined, (w) => dynastyStatus(w, d, me, num(body.TMID) === 1023, cfid), note(`: TMID ${body.TMID} STAT ${body.STAT} DFID ${dfid} CFID ${cfid}${why}, T2B ${JSON.stringify(pairs.map((m) => [m.blazeId, m.team]))}, B2N ${JSON.stringify(b2n.map((m) => [m.blazeId, m.ncId ?? 0]))}`));
     }
     case 64: return reply(undefined, (w) => { w.intMap('TBID', []); w.intMap('TDMP', []); w.intMap('TSID', []); w.intMap('TTID', []); }, note()); // DownloadViewDetailsDataResponse
-    case 71: { const r = d?.request ?? {}; return reply(undefined, (w) => { w.str('DESC', str(r.DESC)); w.int('MHUM', num(r.MHUM, 12)); w.str('PASS', str(r.PASS)); w.int('SSOW', num(r.SSOW)); }, note()); } // GetExtraDynastySettingsResponse
-    case 83: return reply(undefined, (w) => { w.int('ALLW', 1); w.str('THTM', ''); w.str('UTM', ''); }, note()); // CheckAdvanceWeekStatusResponse
-    case 84: if (d) { d.consoleRecruitingState = num(body.STAT); save(); } return reply(undefined, ok, note(`: STAT ${body.STAT}`)); // ReportConsoleRecruitingState
+    case 71: { const r = d?.request ?? {}; return reply(undefined, (w) => { w.str('DESC', str(r.DESC)); w.int('MHUM', num(r.MHUM, 12)); w.str('PASS', me ? str(r.PASS) : ''); w.int('SSOW', num(r.SSOW)); }, note()); } // GetExtraDynastySettingsResponse
+    case 83: { // CheckAdvanceWeekStatusResponse {ALLW, THTM, UTM}: ALLW 0 refuses the advance; the strings are shown to the commissioner
+      const hold = d ? advanceHold(d) : null;
+      if (hold) log('dod', `DID ${did}: advance refused: ${hold}`);
+      return reply(undefined, (w) => { w.int('ALLW', hold ? 0 : 1); w.str('THTM', hold ? hold.slice(0, 64) : ''); w.str('UTM', hold ? hold.slice(0, 64) : ''); }, note(hold ? `: HELD "${hold}"` : ''));
+    }
+    case 84: if (d) { if (session?.leagueAuthenticated && !me?.commissioner) { (d.memberRecruitingState ??= {})[user.blazeId] = num(body.STAT); } else d.consoleRecruitingState = num(body.STAT); save(); } return reply(undefined, ok, note(`: STAT ${body.STAT}`)); // ReportConsoleRecruitingState
     case 88: if (d) { d.advancing = true; save(); } return reply(undefined, (w) => { w.int('QUPS', 0); w.int('TRAF', 0); }, note(': advance in progress')); // RequestAdvanceWeekRequestResponse
     case 90: // SetReadyToUploadAdvanceWeekData -> {AQST AdvanceWeekQueueStatus {BGUP, QUPS}}: the console has advanced the week locally and
       // asks for its upload slot; BGUP 0 shows the "heavy traffic, you are next in line" wait forever (run 33). There is no queue here.
@@ -326,8 +561,16 @@ export function handleDod({ p, body, session, reply }) {
     case 103: return reply(undefined, (w) => { w.int('BGUP', 0); w.int('QUPS', 0); }, note()); // AdvanceWeekQueueStatus
     case 68: return reply(undefined, (w) => w.int('SUCS', 1), note()); // TransferCommishStatusResponse
     case 41: return reply(undefined, (w) => { w.int('CTSC', 0); w.int('ICMT', 0); }, note()); // OfferScholarshipResponse
-    case 91: return reply(undefined, (w) => { w.int('RSIM', 0); w.int('SYTY', 0); w.int('TLID', 0); }, note()); // MakeContractPickResponse
-    case 4: return reply(undefined, (w) => memberInfo(w, d ?? { id: did }, me ?? { ...user, commissioner: true }), note()); // getMemberByBlazeId -> MemberInfo (assumed)
+    case 91: { // MakeContractPick {CHID coach, CTID contract, DID} -> {RSIM, SYTY, TLID}
+      // The coaching carousel. Accept and decline send the same request (the choice stays on the console). RSIM = 1 tells
+      // the picking console to simulate: it fetches the newest .contract (contract check, case 58), applies its own
+      // decision, lets the CPU coaches decide up to the next human on the clock and uploads the result as a new
+      // .contract, which every other console then merges from its own contract check. With RSIM 0 the console finished
+      // the pick with nothing changed and showed the same offer again (NOTES 2026-11-01).
+      if (d) { (d.contractPicks ??= []).push({ by: user.blazeId, coach: num(body.CHID), contract: num(body.CTID), at: now() }); if (d.contractPicks.length > 200) d.contractPicks.shift(); save(); }
+      return reply(undefined, (w) => { w.int('RSIM', 1); w.int('SYTY', 0); w.int('TLID', 0); }, note(`: coach ${body.CHID} contract ${body.CTID} -> RSIM 1 (the console simulates)`));
+    }
+    case 4: return reply(undefined, (w) => memberInfo(w, d ?? { id: did, request: {}, members: [] }, me ?? { ...user, commissioner: false, coach: 0, team: 0 }), note(me ? '' : ': not a member')); // getMemberByBlazeId -> MemberInfo
     case 3: if (d) { delete store.dynasties[did]; save(); } return reply(undefined, ok, note(`: DID ${did}`));
     case 45: // changeUserTeam {DYID, NWTM, OLTM}
       if (me) { me.team = num(body.NWTM); save(); }

@@ -11,6 +11,13 @@ export class WorkerApi {
     if (!res.ok) throw new Error(`${method} ${path} -> ${res.status}: ${text.slice(0, 300)}`);
     return text ? JSON.parse(text) : (undefined as T);
   }
+  // a stored file (null when the site has none)
+  async getBytes(path: string): Promise<Uint8Array | null> {
+    const res = await fetch(this.cfg.workerUrl + path, { headers: this.headers() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`GET ${path} -> ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    return new Uint8Array(await res.arrayBuffer());
+  }
   async putFile(path: string, bytes: Uint8Array): Promise<any> {
     const res = await fetch(this.cfg.workerUrl + path, { method: 'PUT', headers: this.headers({ 'content-type': 'application/octet-stream' }), body: bytes });
     if (!res.ok) throw new Error(`PUT ${path} -> ${res.status}: ${(await res.text()).slice(0, 300)}`);

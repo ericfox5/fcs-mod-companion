@@ -16,6 +16,10 @@ export interface OdGameResult {
 export interface OdDynasty {
   id: number; request: Record<string, unknown>; createdAt: number; members: OdMember[];
   season?: number; week?: number; year?: number; state?: number; status?: number; fileId?: number; fileSavedAt?: number; advancing?: boolean;
+  // fileId is the file consoles load: the console's last upload (consoleFileId) or a copy of it carrying site edits (patch)
+  consoleFileId?: number; patch?: { cid: number; base: number; key: string; at: number } | null;
+  // games/gameData are keyed by week and hold the season gamesYear; earlier seasons sit in seasons (dod.mjs rollSeason)
+  gamesYear?: number; seasons?: Record<string, { games: Record<string, OdGameResult[]>; gameData: Record<string, unknown[]> }>;
   games?: Record<string, OdGameResult[]>; tables?: Record<string, { rows: number; updatedAt: number }>;
 }
 export interface OdStore { nextId: number; dynasties: Record<string, OdDynasty>; users?: Record<string, { ncId: number }> }
@@ -29,6 +33,20 @@ export function lockerIndex(dir: string): Record<string, LockerContent> {
 }
 export const lockerBlobPath = (dir: string, cid: number): string => join(dir, 'locker', `${cid}.bin`);
 export const readLockerBlob = (dir: string, cid: number): Uint8Array | null => { const p = lockerBlobPath(dir, cid); return existsSync(p) ? new Uint8Array(readFileSync(p)) : null; };
+// Every locker entry, the trashed ones included (the stub keeps their blobs in locker/trash/<cid>.bin for a while).
+export function lockerIndexAll(dir: string): Record<string, LockerContent & { trashed?: boolean }> {
+  const p = join(dir, 'locker', 'index.json');
+  if (!existsSync(p)) return {};
+  const idx = JSON.parse(readFileSync(p, 'utf8')) as { contents?: Record<string, LockerContent>; trash?: Record<string, LockerContent> };
+  const out: Record<string, LockerContent & { trashed?: boolean }> = {};
+  for (const [k, c] of Object.entries(idx.trash ?? {})) out[k] = { ...c, trashed: true };
+  for (const [k, c] of Object.entries(idx.contents ?? {})) out[k] = c;
+  return out;
+}
+export const readLockerBlobAny = (dir: string, cid: number): Uint8Array | null => {
+  const live = readLockerBlob(dir, cid); if (live) return live;
+  const p = join(dir, 'locker', 'trash', `${cid}.bin`); return existsSync(p) ? new Uint8Array(readFileSync(p)) : null;
+};
 
 export interface OpenedDynastyFile { file: TdbFile; db: Uint8Array; prefix: Uint8Array; inflatedLength: number }
 export function openDynastyFile(blob: Uint8Array): OpenedDynastyFile {
@@ -40,13 +58,18 @@ export function openDynastyFile(blob: Uint8Array): OpenedDynastyFile {
   return { file: parseTdb(db), db, prefix: new Uint8Array(inflated.subarray(0, off)), inflatedLength: inflated.length };
 }
 
+export const consoleFileId = (d: OdDynasty): number => d.consoleFileId ?? d.fileId ?? 0;
+// This season's uploaded results: none while the store still holds the previous season's (a server not yet reloaded
+// after the year changed), whose week numbers would land on this season's games.
+export const seasonGames = (d: OdDynasty): Record<string, OdGameResult[]> => ((d.gamesYear ?? 0) === (d.year ?? 0) ? d.games ?? {} : {});
+
 export const slugify = (s: string): string => s.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '');
 export const odName = (d: OdDynasty): string => String(d.request?.NAME ?? '').trim() || `Online Dynasty ${d.id}`;
 export const odSlug = (d: OdDynasty): string => slugify(String(d.request?.NAME ?? '')) || `od-${d.id}`;
 
 // Everything the site mirrors, in one string: the watcher re-imports a dynasty when it changes.
 export function odFingerprint(d: OdDynasty): string {
-  const games = Object.entries(d.games ?? {}).map(([w, list]) => [w, list.map((g) => [g.HTID, g.ATID, g.HTSC, g.ATSC, g.at ?? 0])]);
+  const games = Object.entries(seasonGames(d)).map(([w, list]) => [w, list.map((g) => [g.HTID, g.ATID, g.HTSC, g.ATSC, g.at ?? 0])]);
   const members = d.members.map((m) => [m.blazeId, m.persona, m.team ?? 0, m.teamFileId ?? 0, m.commissioner ? 1 : 0]);
-  return JSON.stringify([d.fileId ?? 0, d.fileSavedAt ?? 0, d.week ?? 0, d.year ?? 0, d.season ?? 0, d.state ?? 0, members, games]);
+  return JSON.stringify([consoleFileId(d), d.fileSavedAt ?? 0, d.week ?? 0, d.year ?? 0, d.season ?? 0, d.state ?? 0, members, games]);
 }

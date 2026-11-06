@@ -640,3 +640,968 @@ until the client sends them.
 - Stub: tdb-read.mjs reads the dynasty file (locker/<fileId>.bin) for CSKL/CACP/CAPX/COCH; gamedata.mjs sends the head
   coach's CSGM row (CEXP + XP, level/CSKU), all 195 CACG rows with updated counters/tiers and CASG; SCOS from the engine's
   scoring rows; PGOL from line stats. Engine: two-point tries no longer count as touchdowns/yards in the box score.
+
+## 2026-10-31 — in-game Dynasty Wire: Sports World + XMS (Story Center), built, console test pending
+
+- Why the story step failed locally: the Dynasty Wire, game recaps, photo/highlight uploads and site stories all go through
+  EA Sports World (EASW REST, `EASW-Version: 2.0.5.0`) + XMS media. SportsWorld connect (0x10b9a6c) first checks
+  IsLocaleEnabled (0x10b98ec): config `OSDK_EASW_ALLOWED_LOCALES` = up to four comma-separated 4-char patterns, `*` = any;
+  default `----` matches nothing -> connect state 2 (failure) with no network traffic. blaze.mjs now sends `****`.
+- Sign-in: `POST <OSDK_EASW_AUTH_URL>/authentication` + `PS3?version=v2&locale=en_US&skuid=<sku>`, body = NP ticket
+  (fails if the ticket call returns <= 0). Reply headers parsed by 0x10c1ac8: `EASW-Token` (required, < 1 KB),
+  `EASW-Session` (< 68), `EASW-Nucleus-Persona` (int64), `EASW-Userid` (< 24); each ends at CR. `/extension` renews.
+  Game config `GET …/sku/<s>/configuration` -> `sku_config` (game_avatar.*, notification@default_poll_interval,
+  buffer_accomplishments, media_configuration.config{supported_types.type, guid, max_slots, starting_slot}).
+- XMS paths ($u persona, $s sku): upload `POST /personas/$u/sku/$s/media[?maxed_slots=overwrite_oldest|error]`, multipart
+  boundary THIS_IS_THE_OSDK_V4_SPORTSWORLD_MIME_MULTIPART_BOUNDARY_TEXT, parts `xml` (`<create_media type slot>` with
+  description/name/date/attributes `<attribute value key/>`/tags), `thumb` (thumbnail.jpg), one per binary; reply root
+  `media_metadata`. Search `GET …/media_content;full?platform=ps3&include_count=true&<criteria>` -> `<media_list count>`
+  of `<media type id>`; mine `/personas/$u/sku/$s/media;full[?type=]`; binary `/media/<id>/binary/<n>`; update
+  `/media/<id>;full?http-type=PUT&replaceList=true`; delete `?http-type=DELETE`; `/downloadCount`; `/ns/gps/filter_blacklist`;
+  `offensive_content`; `/ns/gps/petitions`. Media XML fields (ParseXml 0x10def00): @id @slot @sku @type, name, description,
+  date, server_date (six numbers), download_count, ratings@count, owner, thumbnail@size (text = URL), attributes.attribute
+  @key @value, tags.tag@name, binary@type @id @size @uri @name.
+- Media factories (type / binary type / binary name): MEDIA_CONTAINER / CONTAINER / container (Story Center),
+  SCREENSHOT (group PHOTOS) / PNG_SCREENSHOT screen_png, JPEG_SCREENSHOT screen_jpg; GR_SCREENSHOT (game recap photos),
+  VIDEOS / FLV_VIDEO, AVI_VIDEO video_avi; GR_VIDEO; PHOTOFACE; NCAAFBSCHOOLMT (Team Builder schools).
+- Story containers (0x30c600-0x310600, Story classes 0x37d000-0x381900; full layout in server/story.mjs): name = 3-hex
+  fields (type 0a0 GameRecapStory / 0a1 WeeklyRecapStory / 0a2 UserStory, then team id) + title (UserStory: name+6);
+  description = headline; attributes CONTAINER_GROUP = MOIN.MIMI (online dynasty id, "6" for efoxOD1), CONTAINER_GUID,
+  CAPTION (81), MEDIA_ID_0..14 / MEDIA_TYPE_0..14 (attached photos/videos), SEARCH_KEY_1 = team id, SEARCH_KEY_2 =
+  SEAI.SSYE (season index); binary `container` = `<?xml version='1.0'?><story_data><story_media type="T"><![CDATA[…]]>
+  </story_media>…</story_data>`, T 0 = packed game tables (UnpackTables loads them; recaps are generated from them),
+  T 1 = text blocks (index 0 = body, 5,120 bytes). The game's own reveal-test UserStory (0x3816c8) is the model:
+  "0a2"+team+title, headline, caption, one type-1 body. The Wire searches by CONTAINER_GROUP (+ SEARCH_KEY_1/2 for
+  team/season views), type MEDIA_CONTAINER. After upload the console calls StoryCenter `storyUploaded`
+  {XMID media id, SUID guid, SNUM/WNUM from the search keys, STYP 0xa0-0xa2, SESS, TOKN} (component id from the wire;
+  unknown components get an empty reply).
+- Built: server/easw.mjs (EASW + XMS on tcp/17504, store private/xms/, raw request dumps), server/story.mjs (container
+  build/parse), server/wire.mjs (site <-> console sync: site stories -> UserStory + SCREENSHOT photo 640 px JPEG;
+  console photos -> site captures; console containers -> /api/bridge/console-stories), Worker migration 0012 + bridge
+  routes /api/bridge/wire, /api/bridge/console-stories, News Wire "In-game Dynasty Wire" section. `--easw off` restores
+  the old behaviour. Offline tests: XMS round trip 15/15, local end-to-end with wrangler dev 10/10.
+- Photos: the stale Pic-* texture is most likely RPCS3 not writing render targets back to guest memory; turn on
+  GPU > "Write Color Buffers" in config_BLUS31159.yml before testing photo uploads.
+- Console test plan: restart the league server; sign in (expect `[easw] … POST …/authentication`); open the Dynasty Wire
+  (expect a media_content search with the real criteria format, our site stories listed); take a photo in a replay and
+  upload it to the Wire; play a user game and accept the recap story (expect MEDIA_CONTAINER upload + storyUploaded).
+- Game recap (the post-game "Recap"): GameRecapStory (0x37fb60) writes its body as the prompt "Tell everyone your side of
+  the story.  Write your game recap at dynasty.easports.com." (type-1 block) followed by type-0 packed tables of the game
+  (PLAY/PGLA selections etc., GameRecapStory::tableBuffer 0xa400 bytes), name = 0a0 + team + more 3-hex fields. The
+  website replaced that text with the coach's write-up. Rebuilt: the News Wire shows console recaps with a "Tell everyone
+  your side of the story" form for the team's coach (or commissioner); wire.mjs rewrites only the type-1 block of the
+  stored container (story.mjs replaceTextBlock, tables byte-identical) and acks POST /api/bridge/wire/recap/<id>/delivered.
+  Local end-to-end with wrangler dev: 12/12.
+
+## 2026-10-31 (evening) — first console test of the Dynasty Wire
+
+- Worked on the console: EASW sign-in (`authenticationPS3?version=v2&locale=en_BR&skuid=NCA14PS3`), sku config, the
+  site story on the in-game Wire (photo + text), a played game (Brown 49, Princeton 42) uploading six GR_SCREENSHOT
+  photos and then its game recap container in one burst at the end of the game.
+- Real Wire search: `media_content;full?platform=ps3&include_count=true&sku_guid=NCA14PS3&types=MEDIA_CONTAINER&
+  bookmarked=false&attributes=CONTAINER_GROUP#6*SEARCH_KEY_2#0[*SEARCH_KEY_1#<n>]&order_by=serverDate&sort_asc=false&
+  translate_attributes=false&page_size=5&page_num=1` (# and * URL-encoded). easw.mjs ignored `types`/`attributes`
+  until now, so every search returned all media; it now applies both, plus page_num (from 1) and sort_asc. Seen
+  SEARCH_KEY_1 values: 12 (the current week) and once 151 (not explained; no table value of Brown's matches).
+- Game recap header decoded from the real upload `0a0 00c 02c 00b 028 00e 007 00e 00e 000 015 00e 007 000 000 028`:
+  field 1 = week (SEAI.SEWN 12), 2 = game number (SCHD.SGNM 44), 3 = home TGID (11 Princeton), 4 = away TGID (40 Brown),
+  the rest not decoded. SEARCH_KEY_1 = 12 = field 1, so SEARCH_KEY_1 is the week, not the team: story.mjs now builds
+  site stories with the week in field 1 / SEARCH_KEY_1 (wire.mjs LAYOUT 2 republishes stories sent with the old layout
+  once), and the recap's team on the site is the uploader's team (it was reading the week, 12 = Drake).
+- The recap leaves MEDIA_ID_0..14 empty. Its photos are the GR_SCREENSHOTs uploaded just before it; they carry
+  HomeTeamName/ID, AwayTeamName/ID, StadiumName, Current/FinalScore*, Quarter, TimeLeftSeconds, Down, YardsGained,
+  DistanceTo1st, description = play text. wire.mjs gives the site recap the first non-blank one of the same game.
+- Photos come out white (console JPEG and the in-game recap alike). Not a server problem: the console's own JPEG has
+  Y 252-255, flat chroma. The local copy `USRDIR/Pic-<session>_NN` is the same frame: MC02 header 0xB0, then 640x360 x
+  4-byte pixels (A8R8G8B8 order assumed). This replaces the DXT1 reading of 2026-10-29, which was stale memory read
+  without Write Color Buffers. With WCB on, the frame is there (contrast stretch shows the replay: Brown #5 hurdling a
+  tackler), but each channel takes only two values (0xfe/0xff, 0xfd/0xfe) and alpha is a constant 0xfe: the photo
+  pass output is about 99.5% white with 0.5% of the frame, i.e. a GPU state difference in RPCS3's handling of the
+  capture pass (`tecNoAlpha_PointSampledPhotoSwizzle`, set up next to `TextureCopyFMV` at 0x37f64; render flags
+  `doSnapPhoto` / `doSnapPhotoLatch`). Settings to try, one at a time, each checked with a single replay photo
+  (decode the newest Pic file): MSAA Disabled + Resolution Scale 100; Strict Rendering Mode; renderer OpenGL;
+  Force CPU Blit with Multithreaded RSX off.
+- Blank-frame guard: bridge/scripts/to-jpeg.ps1 prints a brightness spread (luma max-min over a 32x18 average;
+  `-Check` measures only). The console photos measure 1, real screenshots 100+; wire.mjs keeps photos at <= 6 off the
+  site and out of recaps. RPCS3's own F12 screenshots (`ncaa-bridge captures`, captioned from the highlight XML) remain
+  the fallback for story photos.
+- Calls answered with `<void/>` that did no harm: `personas/1/sku/NCA14PS3;full`, `ns/ondemand/{media_access,
+  providers,labels,channels}`, `POST personas/1/sku/NCA14PS3/online_stats`, `comments;full?topic_name=<CONTAINER_GUID>
+  &lookup_id=30010` (story comments).
+- Tests: XMS round trip 19/19 (adds the console's search format), local end-to-end 12/12, blank photo + recap photo 3/3,
+  old-layout republish 2/2.
+
+## 2026-10-31 (night) — console-played games re-simmed after a reload
+
+- Report: Brown 24-31 NDSU (week 14, played on the console) came back from the advance as 10-21 with other stats. The
+  dynasty files show more: file 61 (week 14 start) has the Princeton game (week 12, played 49-42) as 42-16, and weeks 1
+  and 4 also differ from what was uploaded; weeks 2 and 5 kept their scores. Winners did not change in weeks 12 and 14.
+- Cause: a console-played result survived only when the console advanced in the same session. Every re-simmed week had a
+  reconnect between UploadGameResults and RequestAdvanceWeek (week 4: new login 17:28; week 12: RPCS3 restarted for GPU
+  settings, login 20:20; week 14: league server restarted, login 21:13); weeks 2 and 5 advanced straight after the
+  upload. A reloading console rebuilds the dynasty from DFID + its team file, where the game is unplayed, and the advance
+  then simulates it. RetrieveGameResults only fills TMWP (display). The stub listed game data in DynastyStatus.GAME for
+  Supersim finals only; the console's own UPDT-2 upload was stored as loose rows without a game id.
+- Fix (dod.mjs): the UPDT-2 session (14 tables with the column lists as sent, GHID, RTID) and its UploadGameResults are
+  collected per dynasty and, on EndDynastyUpdate UPDT 2, saved as game data (private/game-data/<did>/<id>.json, source
+  'console', ids shared with Supersim) and listed in d.gameData[week] for the uploader's team. The GH4X GetTableUpdate
+  serves them with the stored columns. The load only fetches game data for a game that is still unplayed, so a console
+  that advances without reloading does not apply it twice. Offline replay of the real NDSU upload through a scratch copy
+  of the server: 24/24 (GAME for TMID 40 and 1023, all 14 tables returned row for row, WQSC answered with UWQS, Supersim
+  data unchanged, a repeated upload replaces the entry, UPDT 1 registers nothing). Console check pending: play a game,
+  restart the game, advance; the game must stay final with the played score.
+- Not repaired: weeks 1, 4, 12 and 14 keep their simulated scores (a rollback would need the console's local save too).
+- Photos with MSAA disabled, Resolution Scale 100, Strict Rendering Mode on and Multithreaded RSX off (Vulkan, Write Color
+  Buffers on): every Pic file of the NDSU game is one flat colour (all 230400 pixels identical, a different colour per
+  photo: bf141b1e, ffa88779, ff79574e), so the photo pass reads a single point of the frame. With Resolution Scale 200 /
+  MSAA Auto it was the frame at ~0.5% over white. Still emulator-side; the site keeps such photos out (range 0) since the
+  blank guard.
+
+## 2026-11-01 — photo tests, continued
+
+- OpenGL: the game's textures render broken; back to Vulkan.
+- Vulkan + Force CPU Blit (rest as in the NDSU test): the Holy Cross photo (`Pic-y s00-efoxod1_11-01 10'15'07_00`) is
+  again one flat colour (ffcdd7db, all pixels), and the field textures look wrong in play. CPU blit switched back off.
+  This file's pixels start at 0xCC, not 0xB0 (file 921,804 B = 0xCC + 921,600); the first 7 "pixels" at 0xB0 are header.
+- RPCS3.log at the moment of the photo (10:17:52, log 0:26:15.267): `{PPU (FGGameSim) [0x0011bbc4]} RSX: Cache miss at
+  address 0x30B80800`, and 6 ms later the game writes the Pic file. So the game's read of the photo surface (main
+  memory, RSX-mapped) does reach RPCS3, which flushes the GPU copy: the readback works, and the flat colour is what
+  RPCS3 rendered into that surface. The fault is in the capture pass itself (`tecNoAlpha_PointSampledPhotoSwizzle`).
+- The log also repeats "MSAA is disabled globally but a shader with multi-sampling enabled was submitted for
+  compilation": the game draws with MSAA, so MSAA Disabled changes how the frame the capture pass samples is laid out.
+- Next test: Strict Rendering Mode off (config set 10:25 at the user's request); then MSAA Auto with Resolution Scale 100.
+- Strict Rendering Mode off (MSAA Disabled, Res 100, WCB on, CPU blit off), photo `..._11-01 10'27'05_00`: back to
+  the near-white kind. Every channel is 254/255 (alpha 254), and a contrast stretch shows the real replay frame
+  (ball carrier by the goal post) at 1 bit per channel: out = 254/255 white + 1/255 frame, the look of a white
+  overlay at ~99.6% drawn over the frame. Strict on gives the flat colour, strict off the white; MSAA makes no
+  difference to the photo. In play, refs/fans/sideline objects glitched with MSAA Disabled, so MSAA is back to Auto
+  and Resolution Scale back to 200 (the settings before the photo tests).
+- The user confirms the screen flashes white when a replay photo is taken; the 254/255 photos match that flash at
+  full strength over the frame. EBOOT strings: `doSnapPhoto` (0x1795e48) and `doSnapPhotoLatch` (0x1795f48) sit in
+  the render-flag name list (enableBloom, enableFXAA, doVideoOverlay, ...); `CameraFlash` (0x17966c0) sits in the
+  particle-effect list (PclEffectBreath/Snow/Rain), so it is most likely the crowd's flashbulbs, not the photo flash.
+  Photo code names: PhotoManager, PhotoManager::TranscodeBuf, PhotoBuffer, static.photoSource, misc.photoSnapPending,
+  SetPhotoPopupActive, PhotoReadyToSave. Where the photo flash is drawn is not found yet.
+- Replay photo code path (EBOOT, 2026-11-01). Apt UI native `ReplayAdapterClass.TakeSnapshot` (0x8c6fa4) ->
+  adapter object [0x1c794ec] (ctor 0x2cad38, vtable 0x189e6e8) slot 0x1c (0x2cafb4) -> ReplayMgr::TakeSnapshot
+  0x228324: clears [[0x1caef20]+0x48]+0xa8 and calls PhotoManager::Request(this, 10) (0x128a90: countdown
+  +0x2a4 = 10, busy +4 = 0). PhotoManager::Update 0x129528 (per game frame): countdown-- ; at 0 sets +4 = 1; next
+  frame 0x129258 sets data key `misc.photoSnapPending` = 1 and clears +4 (IsSnapshotFinished 0x2283d4 = +4 == 0,
+  so it also reads "finished" during the countdown). The renderer side is data-driven (no code reference to
+  doSnapPhoto / static.photoSource besides PhotoManager). SavePhoto 0x11bf44 looks up `static.photoSource`, locks it
+  and calls the writer 0x11bb5c: file = 0x1c-byte block {"MC02", ...} + 0xb0 header + pixels (so pixels at 0xCC),
+  with three checksums (hash 0xf52ca0) that the reader 0x11d904 verifies. The `Photo` / `backbuffer` / `pip` Apt
+  images are drawn by the class at 0x37e74/0x38140 (ADAPTFIXEDTEXTURED, tecNoAlpha_PointSampledPhotoSwizzle,
+  DiffuseColor 1.0): that is the photo preview, not the capture.
+- RPCS3 runs the game at 30 flips/s (sys_rsx_context_attribute 0x101), as on a PS3, so the 10-frame countdown is the
+  same 333 ms. The old `Pic-c s01-rtgdb_06-05` photo (2024-06-05) is the stale-memory kind: photos never worked here.
+- Test patch: patches/imported_patch.yml "Photo capture delay (test)" (PPU-62e25ebc...): li r4,10 -> li r4,60 at
+  0x228348, i.e. capture 2 s after L3. Clean photo = the capture was landing inside the flash.
+- Delay test (patch on, MSAA Auto, Res 200, Strict off, WCB on; photo `..._11-01 10'56'42_00`, readback at log
+  1:06:53.026 again from 0x30B80800): one flat colour ff1f2427. Delaying the capture 2 s did not bring the frame
+  back, so the flash is not the whole story. All seven photos fit one reading: the capture draws the frame almost
+  fully transparent (alpha ~0..1/255) over whatever the photo buffer already held: white once (254/255 + frame/255,
+  alpha 0xfe = a^2 + 255(1-a)), otherwise a leftover flat colour whose alpha is kept (0xbf in one). On a PS3 the
+  frame would be opaque, e.g. an X8R8G8B8 "O8" back buffer reads alpha 0xff from memory while RPCS3's host surface
+  keeps whatever the shaders wrote. Unconfirmed; the capture pass itself (render state) is in the data files.
+- The user sees the white flash right at L3 even with the 2 s delay, so the flash is its own effect.
+- The capture is data-driven: qkl_boot.ast entry #714 = `InGame.pus` ("NCAA PS3 post effects", plain text, zlib).
+  `var texture PhotoBufferRam 640 360 1 format ram`; in the main proc after the scene and before the UI bins:
+  `if misc photoSnapPending: settarget 0 PhotoBufferRam; transferimage FrameBufferRAM FrameBuffer local2local;
+  settexture static texture0 FrameBufferRAM; setshader TransferShader tecNoAlpha; renderquad; settexture static
+  texture0 VideoWaterMarkRam; setshader DecalOverlayShader; renderquad; settexture static photoSource
+  PhotoBufferRam; setbool misc photoSnapPending false`. VideoWaterMarkRam = `Watermark_512x256_scaled` (also drawn
+  on the video-encode path). Suspect: the watermark pass covers the whole photo under RPCS3 (its alpha), which fits
+  the faint frame under 254/255 white and the flat colours.
+- BGFA TOC correction: the third u32 of a record is usize - csize (entry 714: csize 9532, field 44943, inflates to
+  54475); docs/playbooks.md calls it the size.
+- tools/photo-watermark-patch.mjs check|apply|restore: blanks the three watermark lines of the photo block (and the
+  banner comments, so the stream fits the old slot), rewrites entry #714 in place, updates csize/field. Verified on
+  a copy: only entry 714 changes (9532 -> 9495 B), file size unchanged. Backup of the original archive:
+  %LOCALAPPDATA%/ncaa-bridge/backups/qkl_boot.ast.orig (sha256 7adf3714...).
+- Applied to the live qkl_boot.ast on 2026-11-01 11:12 (game stopped; delay patch unticked). hdcache/ is empty (the game never wrote hdcache.ast), so the disc archive is what loads.
+- CONFIRMED 11:17: with the watermark pass removed, the replay photo `..._11-01 11'16'26_00` is a clean frame (Holy
+  Cross kickoff, 47,958 colours, A8R8G8B8 order correct). So the photo pipeline works under RPCS3 (Vulkan, Write
+  Color Buffers on, which the readback needs) and only the DecalOverlayShader watermark pass broke it. Not done: the
+  video-encode block (highlight uploads) draws the same watermark over VEncode; untested whether highlights suffer.
+  Re-apply the tool if qkl_boot.ast is ever replaced (FCS mod update, reinstall); each league member's copy needs it.
+- Video highlights: the `if presentation doVideoEncoding` block renders each encoded frame into VEncode (512x288,
+  aliasing PhotoBufferRam's memory) with BlurColor, then DecalOverlayShader draws for VideoOverLayRam
+  (`Pontiac_512x256_scaled_COL`, only when doVideoOverlay) and the watermark. The tool now removes every
+  DecalOverlayShader draw (with the doVideoOverlay if/endif) from both blocks: 11 lines, 9478 B stream in the 9532 B
+  slot, unused rest of the slot zeroed, so applying to the original or to the photo-only patch gives the same file.
+  Applied to the live archive 11:29 by the user (game stopped at 11:29); live file = the tested copy. Highlights
+  not yet checked in game.
+- 11:50 checks: the highlight `y s00-efoxod1_11-01 11'48'19_01.mjp` (AVI MJPEG, 512x288, 126 frames) shows clean
+  game frames, and the photo `..._11'48'19_00` is clean: both overlay removals work.
+- Graphics glitches (refs, fans, sideline objects) after the photo tests: against the original game config
+  (`config_BLUS31159.yml.bak-offline`, 2026-10-29) the only non-network differences left were Write Color Buffers
+  on (needed: the photo readback), Minimum Scalable Dimension 16 (orig 512) and Output Scaling FSR (orig Bilinear).
+  With Resolution Scale 200, 16 makes RPCS3 upscale the game's small off-screen targets too, which its own help text
+  ties to broken graphics with Write Color Buffers on. Both restored at 11:52; now only WCB differs. If glitches
+  remain: try Resolution Scale 100 with WCB on, then WCB off briefly to confirm (photos break while it is off).
+- Glitches persist with Minimum Scalable Dimension 512 + Bilinear restored (boot 11:53, settings confirmed in the log).
+  Write Color Buffers is the only non-network difference from the original config, and it went on Oct 31 evening for
+  the first photo test (the user's "before I changed settings"). Next test 11:58: Resolution Scale 100 with WCB on
+  (RPCS3 has to rescale render targets on every write-back when upscaling); if it still glitches, WCB off to confirm.
+- Write Color Buffers is the glitch cause: with it off (12:0x boot, config = original except Net) the user reports the
+  ref/fan/sideline/field breakage mostly gone. The screenshot with it on showed stretched geometry (spikes/wedges) on
+  the referee and stands while players drew fine.
+- With WCB off, both capture paths read stale memory: photos `..._12'09'35_00/_03` are the old DXT-like garbage, and the
+  saved highlights `..._12'09'35_01/_02.mjp` (MJPEG 512x288) are noise: highlight recording also goes through
+  VEncode (= PhotoBufferRam's RAM) and a CPU-side encode. The two garbage photos were uploaded (XMS 1021/1022) and the
+  wire mirrored them to the site (they pass the flat-frame guard); the console also uploaded GR_VIDEO 1023 (FLV, 140 KB).
+- First real test of the console-game fix: `console game week 17 40@18 25-27 (GQTR 6) kept as game data 900005 for
+  team 40` at 12:27:04, then the team push (CID 69) as usual.
+- Crash 12:27:14 (log 2:35:37), right after the first ever highlight upload finished: MoviePlayer2 Decode Thread exits
+  after playing `/dev_hdd1/video/..._12'09'35_02.mjp`, FGGameRender frees 0x18af0000 (sys_memory_free from 0x0043b2b0)
+  and 6 ms later writes 0x19aef9e4 inside that block from 0x009e6c48: `VM: Access violation writing location 0x19aef9e4
+  (unmapped memory)`, emulation frozen on the "UPLOAD COMPLETED" dialog. Cause not analysed yet (use-after-free in the
+  game's render thread at movie teardown; unknown whether our video-block edit or WCB off play a part).
+- 12:32 the user applied `photo-watermark-patch.mjs apply --vram-copy` after stopping the frozen game (stop 12:32:22); live archive = the tested copy. RPCS3 config: WCB off (original config except Net). Next: one replay photo.
+
+## 2026-11-01 (afternoon) — re-sim fix confirmed; coaching carousel crash
+
+- Re-sim fix, real case: after the 12:27 crash the console reloaded (12:36) and fetched all 14 GH4X tables of game data
+  900005 ("(console game)"), then advanced twice (FID 71 at 12:37, FID 73 at 12:44). locker/73.bin has week 17
+  `40@18 25-27 GSTA 3`: the played Holy Cross result survived the reload and the advance.
+- Season end -> Coaching Carousel -> "PROCESSING / Checking for contract data:" crash (12:46:32): MakeContractPick(91)
+  {CHID 39, CTID 18, DID 6} (our reply {RSIM 0, SYTY 0, TLID 0}), then GetDynastyStatus {TMID 1023, STAT 12, WEEK 31};
+  the stub answered CFID 69 (own team file, as for every non-advance status), the console downloaded CID 69 and froze:
+  `FGGameSim 0x00a6a8fc: Access violation reading location 0x11`, the run-32 crash (CFID opened as the ODCN package;
+  the binary calls that buffer contractUncompressedOutBuffer). STAT 12 + TMID 1023 appears nowhere else in the captures
+  (TMID 1023 with STAT 2/5/7 is routine after loads and from the hub and must keep CFID). Fix: dod.mjs answers CFID 0 for
+  TMID 1023 + STAT 12 (the contract check), like d.advancing. Offline replay (scratchpad contract-test.mjs): 10/10, other
+  status requests keep CFID 69. Unknown: what the console does next with no contract package (proceed, wait, or loop).
+- League server control (server/league.mjs + start-/stop-/restart-league.cmd, league-status.cmd; start-spike.cmd and
+  stop-spike.cmd now forward to them, start-spike.ps1 removed). One "NCAA League Server" window (opened with cmd's
+  `start` from a detached helper: a detached node has no console, so its services each popped an empty window) runs the
+  four services windowless (windowsHide) with their output tagged; a service that exits restarts with backoff; code
+  changes restart the services whose import graph contains the file (bridge/src for the sync), Blaze/redirector only
+  while no ESTABLISHED connection is on 33152. stop kills the supervisor tree by PID and closes the old -NoExit windows.
+  Checked live: one window; dod.mjs touch -> blaze only; killed qos -> back in ~2 s; a held 33152 connection deferred
+  the reload until it closed; captures.ts edit -> sync restart; stop closes the window. State: private/league.json.
+- bridge captures: "screenshot folder not found" now prints once (it repeated every 30 s for each dynasty).
+- With CFID 0 the carousel loads (13:23-13:24: GetDynastyStatus TMID 1023 STAT 12 -> CFID 0, GetTableUpdate CONT and
+  CFCH unfiltered). The user is offered North Alabama and declines -> MakeContractPick {CHID 39, CTID 547} three times,
+  the same offer each time. CONT (dynasty file 73, 660 rows: CCID TGID CNID SIND CCIE ROCI CCYR COPS VALU CIEX):
+  CNID 18 = coach 39 at TGID 40, SIND 1 (the signed Brown contract; the 12:46 pick was "stay", not Holy Cross),
+  CNID 547 = coach 39 at TGID 8, SIND 0, 5 years (the offer).
+- Client side (EBOOT): MakeContractPick job 0x2f8954, callback 0x2f8abc: error -> 7, else response byte +8 (RSIM)
+  ? 21 : 0. "Update Contract Pick" task (UdCP): start 0x33e090 (coach, contract, accept flag +0x29; the accept and
+  decline wrappers 0x3425bc / 0x3425e4 differ only in that flag, and the request carries CHID/CTID/DID only, so the
+  server cannot tell them apart; +0x29 feeds telemetry "acpt"). onEvent 0x33e358, event 0x27: result 21 -> simd=1 and
+  step PfCP 0x33e2d8 (0x313180 with TMID 1023 -> the status/contract-package download, uncompressedContractBuffer at
+  0x33e544 merging into ODCN like the advance's step 1); event 0x29: if the team changed -> 0x331a34 (team change),
+  then a follow-up job or DynastyNotificationRequest (0x33e1b4), then finish. Result 0 (our reply) -> finish(success)
+  at once with nothing changed locally -> the same offer again (the loop). So the real service resolved each pick
+  (RSIM) and delivered the outcome as a contract package; we have neither the resolution nor the package format.
+- Carousel, approach taken: the accept/decline entry is vtable method 0x27ee18 (vtable 0x189b6c0.., the dynasty action
+  interface that also holds the recruiting-points and throttle methods): args coach, contract, ?, accept, forceLocal.
+  Online (0x33f9ec) and not forceLocal and 0x47be6c -> the wrappers 0x3425bc/0x3425e4 (server); otherwise the game's
+  offline carousel: 0x1eece0() then accept 0x1f0af4(mgr, coach, contract, x) or decline 0x1f0c18(mgr, coach, contract).
+  Patch "Online coaching carousel: decide on the console": 0x27ee7c beq 0x27eecc (0x41820050) -> b 0x27eecc
+  (0x48000050), so decisions resolve locally and reach the server with the next advance upload. Safe against the
+  advance's table pull: GetTableUpdate only returns private/web-edits rows (none). Copy in spike/blaze/rpcs3-patches.yml;
+  installed as <rpcs3>/patches/imported_patch.yml (replaced the old photo-delay test entry). Multi-human caveat: two
+  consoles could take the same job. Untested in game.
+- The local-decision patch made decline work but stalled on "ON THE CLOCK — Matt Mumme" (the next offer, CNID 627,
+  coach 236 at TGID 42, a CPU coach): the offline path never runs the CPU decisions, and online the UI waits for them
+  (polling the contract check). The real protocol, from the EBOOT:
+  * on-clock contract = `select CNID, VALU from CONT where SIND = 0 and CIEX = 0 and CCIE = 0 order by VALU desc, CNID asc`
+    (0x4d02e4); per-contract logic 0x4d446c/0x4d3ed8 reads COCH.CFUC for each candidate; batch loop 0x4d4608
+    ("Updating Coach Contracts - %d remaining") runs CPU decisions until a human is on the clock.
+  * MakeContractPick result 21 (RSIM) -> PfCP -> server-data/contract download -> UdCP.Srvr callback 0x33ec64 ->
+    "Simulating contracts" 0x33e750, which reads the task's accept flag +0x29: decline -> 0x4d04e0 then 0x4d4608;
+    accept -> 0x4d3778 (sign) then 0x4d4608; then 0x33e544 packs uncompressedContractBuffer into mUploadBuffer and
+    uploads "<16 chars>.contract" as task "Contract Data" (task names "Download Contract" / "Upload Contract Data").
+  So the server only coordinates: RSIM 1 to the picking console, and every contract check (TMID 1023, STAT 12) gets the
+  newest .contract as CFID; the game itself handles accept/decline, CPU coaches and other humans' turns.
+- Implemented: dod.mjs case 91 answers RSIM 1 (picks logged in d.contractPicks); case 58's contract check serves
+  locker.mjs latestContent({group: DID, suffix '.contract', since: d.fileSavedAt, owners: members}) (confirmed files
+  only; a file without an owner group counts if a member made it). Offline test scratchpad carousel-test.mjs 14/14
+  (second human member, unconfirmed and stranger files ignored, other status requests keep the team file, advance -> 0,
+  packages before the last advance ignored). The local-decision patch was removed (patches/imported_patch.yml now holds
+  no patches; spike/blaze/rpcs3-patches.yml deleted). The console's local save is from 12:45 (before the carousel), so a
+  restart brings the North Alabama offer back. Untested in game.
+- Carousel coordination confirmed in game: the user's decline of North Alabama ran "Simulating contracts" and the carousel
+  continued. 49 .contract packages came in (CID 75..123; each superseded one deleted by the console), all EMPTY DBs
+  (0 tables): with one human there is nothing for other consoles to merge. The user stayed at Brown and advanced (file 124).
+
+## 2026-11-01 (afternoon) — how the console merges web-edit tables; transfer portal
+
+- GetTableUpdate reply path: callback 0x2f1d88 -> DodBlazeDataMgr::UnpackTableData 0x2f17fc. Empty ROWS -> returns 6
+  (no-op; why a reply without edits never touched anything). Otherwise each Z table's descriptor object decides:
+  vtable +0x10 = filter type, +0x14 = merge mode. Mode 0: `delete from <t> where <col> = <v>` (type 6: a PLAY-join
+  condition for tables without TGID; type 0xa: via COCH CCIDs) then plain bulk insert (0xa56f94); modes 1/3: `use <db>
+  delete from <t>` then insert; mode 2: no delete, keyed merge (0xa58bdc/0xa6a44c) on the key from 0x2ed404 (type 4 ->
+  PRSI, 5/6 -> PGID, 2 + TRAN/TRAZ -> PGID).
+  Descriptors (ctor sites 0x311df0.. 0x3124fc): TRAZ (TransfersChangesTableData) type 2 mode 2; TEMZ 2/2; REBZ 2/0;
+  PLSZ 6/0; PLYZ 5/2. So PLYZ and TRAZ merge by PGID (any player of any team, nothing deleted); REBZ/PLSZ replace the
+  console's own subset (the board removals of 10-29). Pulls: PLYZ TGID UPDA 1, TRAZ PTID UPDA 1, PLSZ TGID UPDA 0.
+- Offseason transfer data (file 124, "Players Leaving"): PLAY.PLFL reason (9 leaving, 10/11 playing time, 14 coach
+  leaving, 15 home sick, 16/17 staying, 19-25 draft, 26 graduation, 28 stays), PLAY.PTYP (0 stay, 1 transfer, 3 out;
+  PTYP 1 also marks an earlier transfer-in: PGID 7217 has PTYP 1, PLFL 28, no TRAN row); TRAN {PTID dest, PGID, TRYR 0,
+  TRAC 1} x70; PLSS {WTLS 70..245, PGID, CSPL 0, CTSP 0} x70. The game's own transfer queries: update PLAY set PTYP,PLFL
+  where PGID; delete/insert PLSS; insert TRAN; update TRAN set PTID where PGID; delete from TRAN where PGID.
+- Transfer portal, server + bridge side: decoder exports players[].leaveFlag/leaveType and transfers[]; the bridge
+  import sends 'transfers' (skipped with a note if the deployed Worker does not know it yet). syncWebEdits now builds
+  PLYZ (player edits + transfer flags, edited players only, from the freshest of the console's PLYZ push and the
+  dynasty file's PLAY), TRAZ (TRAN rows: new destination, or TRAC 0 to stay), PLSZ (full PLSS set per affected team,
+  rows tagged TGID; a team's last row cannot be removed since an empty reply is a no-op). Transfer and player edits are
+  acked once a newer dynasty file comes in (the store's week is a placeholder 31 in the offseason). dod.mjs serves
+  PLYZ/TRAZ unfiltered (keyed), PLSZ per TGID. Offline: scratchpad transfer-test.mts 21/21. Untested in game: whether
+  PTYP 0 + PLFL 28 + TRAC 0 keeps a player home, and whether a CPU player's transfer works without his PLSS row.
+
+## 2026-11-01 (evening) — web-only (Supersim) members + Ready
+
+- Console side, checked: the advance walks every DynastyStatus.GAME pair and the only gate is 0x471008(team) = `select
+  GHTG, GATG, GHSC, GASC, GSTA from SCHD where SEWN in range and (GHTG = team or GATG = team)` (unplayed), with no CFUC
+  or membership test. So a Supersim result for a team no console controls is applied the same way (game data -> final
+  in SCHD -> not simulated).
+- supersim.mjs acceptResult: an envelope with webMember: true is accepted when no console member controls
+  ownedTeamId (the site vouches for the web member; the poll is bridge-token authenticated); console members as before.
+- Site (worker migration 0014): a commissioner adds a web player on /members (name + a team nobody controls); it is an
+  od_members row with web_only = 1 and a negative blaze_id (never reused), and an invite is created with it. The
+  bridge's member sync now deletes only web_only = 0 rows. Supersim: a web member starts games like anyone (the run's
+  envelope carries webMember: true); before a game exists it is refused when the opponent is a console member's team
+  (played on the console) or a console member has taken the web member's own team. A game the console member already
+  started in Supersim can still be joined from the other sideline. Recruiting is read-only for web members (the CPU
+  recruits for that team in the console). Ready: member_ready keyed by (dynasty, blaze_id, dynasties.od_file_id), so
+  each advance (a new dynasty file) clears every flag; POST /d/<slug>/ready. The home "Dynasty Members" box shows per
+  member this week's game (W/L score + Console or Supersim, live Supersim score + quarter, not played, bye) and a
+  Ready pill, "n/m ready" in the title, an "Everyone is ready" line, and the viewer's own I'm ready / Coach your game.
+- Tested: worker end to end on wrangler dev (40 checks: add, invite, join, coach to the final, outbox webMember,
+  ready/undo, console-opponent and team-clash refusals, recruiting read-only, member sync keeps the row, remove);
+  acceptResult on a scratch server copy (webMember accepted; unflagged non-member and console-team envelopes refused).
+- Untested in game: the advance applying a web member's game data for a CPU team (coach tables go to that team's CPU
+  head coach, the same builder as for console members).
+
+## 2026-11-02 — game-line history and player identity across seasons
+
+- A dynasty file's B* tables (BOFF/BDEF/BKIC/BKPR/BOLN/BTES) hold every game of the season so far (week-6 file: weeks
+  0-5) and are emptied in the offseason (week-22 file: 0 lines). The site used to replace the season's game_logs on
+  each import, so the first offseason import wiped the season. Now game_logs are week-scoped (an import replaces only
+  the weeks it carries) and `ncaa-bridge od backfill-logs --did N` refills weeks from the DYNASTY.dynasty each import
+  stored in R2 (production: import #34 restored weeks 0-21, 53,431 lines).
+- PGID is a roster slot (TGID * 70 + n; 8694 of 8832 players match). A transfer gets a new PGID on the new team (in
+  Players Leaving week the leavers already appear as copies on team 300 with new PGIDs) and the slot is reused later.
+  PLAY.POID ("Org. Player ID") stays with the player; POID alone repeats (a copy and the slot's next holder), POID plus
+  hometown (RCHD) is unique per person. The bridge stamps uid = "POID:RCHD" on every game line and season-stat row from
+  the same file (migration 0016); player pages read history by uid, so it follows a transfer and never passes to the
+  slot's next holder (tested locally with a simulated Colgate transfer and a new occupant of the slot).
+- Season stats: rows carry SEYR (season offset); the bridge sends only the current season's rows, and
+  player_season_stats keeps rows a newer file no longer has (graduates and movers vanish from the file while the season
+  label is still the same). To verify at the first rollover: the new season's stat rows carry SEYR = new offset (the
+  bridge logs any rows left out because of SEYR).
+
+## 2026-11-02 — new transfers through the dynasty file
+
+- Robert Coleman (PGID 16382, Lamar) was made a transfer to UAPB (42) on the site. In game, Lamar's Players Leaving
+  showed "Transfer - (Leaving)" with no destination: PLYZ applied (PTYP 1, PLFL 9), but TRAZ merges by PGID into
+  existing TRAN rows only (type 2, mode 2, no insert), and he had no TRAN row. PLSZ only reaches the console's own team.
+- DYNASTY.dynasty = zlib(4-byte prefix + EA DB). The prefix is FNV-1 32-bit (offset 0x811c9dc5, prime 0x01000193,
+  multiply then xor), big-endian, over the DB's first 0x7e5000 bytes. It matches CID 18 and CID 124. The console checks
+  it at 0x335814..0x335858 (a mismatch goes to the error path 0x1ea414, code 0x17), then opens the DB from buffer + 4.
+- The console downloads the dynasty file at load only when DynastyStatus.DFID differs from the file it has. So the
+  bridge writes pending transfers that need a new TRAN row into a copy of the console's upload:
+  web-edits/<did>/DYNASTY.patch.bin + .json {base, key, size, changes}, via bridge/src/dynasty-patch.ts.
+  - A transfer gets PLAY PTYP 1 / PLFL reason, a TRAN row (PTID, TRYR 0, TRAC 1) and a PLSS row (WTLS 150). In the
+    game's own files TRAN and PLSS are parallel lists, one row each per portal player (70/70 in file 124).
+  - A stay gets PLAY PTYP 0 / PLFL 28 and TRAC 0.
+  - The file is checked by re-reading it: CRC chain, prefix, and the TRAN rows. Only PLSS, PLAY and TRAN differ from
+    the base.
+- Publishing: dod.mjs refreshPatch runs at getDynasty and at GetDynastyStatus for the console's team, never during an
+  advance. If the patch was built from the console's current upload (d.consoleFileId), it registers the file as a new
+  locker content (with the metadata of the file it replaces) and sets d.fileId (DFID) to it. EndDynastyUpdate UPDT 0
+  sets fileId = consoleFileId and drops the patch. If the manifest is gone or stale, DFID goes back to the console's
+  file. fileSavedAt is unchanged, so the site edits stay pending until the console's next upload. The bridge imports
+  the site from consoleFileId, not from the patched copy.
+- Tested offline on scratch copies: patch round trip; publish on load; no DFID change mid-session or during an advance;
+  republish on the next load after a rebuild; the console's own upload taking over; withdrawal. In-game check
+  pending: reload the dynasty, look for "Downloading Dynasty File", then Lamar's Players Leaving should show Coleman as
+  "Transfer - UAPB". Backups: %LOCALAPPDATA%\ncaa-bridge\backups\2026-11-01-transfer-patch (store, locker 124, OD save).
+
+## 2026-11-02 — offseason crash at "Generating All-Americans" (FCS mod) and the RPCS3 patch
+
+- First run through a whole offseason. The transfers made through the patched dynasty file all executed (CID 132):
+  Coleman to Samford (143) as PGID 10011, Murphy to Harvard, Wagner to NDSU, Taylor to Princeton; the stays held.
+- The advance from state 15 (to Custom Conferences, "Generating All-Americans") froze. RPCS3.log shows
+  `VM: Access violation reading location 0xd01e3828` at 0x453848. Call stack: 0x453bf8 <- 0x454f8c (return-specialist
+  pass, position 16) <- 0x457988 <- 0x4d6130 <- 0x4f8db4 <- 0x505f28.
+- 0x453898 picks the preseason All-Conference and All-American players for one position:
+  - Cursor: `fetch PGID`. For KR, the candidates come from PSKP (SEYR = season) ordered by PCAP.
+  - Conference lookup: `select CGID from TEAM where TGID = PGID/70` (computed as (PGID+1)*0x7507>>21), defaulting to
+    31 when no row is found. The result is used as the index into 15 slots of 0xCC bytes on the caller's stack (0..13
+    = conferences, 14 = All-Americans) and into a 45-byte counter array.
+  - Index 31 runs past the stack top. CGIDs 15..17 would write into the caller frames.
+- Why CID 132 has such players: the offseason re-keys the 2,312 departing seniors and draft entrants (TGID 1023,
+  PTYP 3) to free PGIDs in unused team slots (0..69 -> "team 0", 8120..8679 -> TGIDs 116..123, which the FCS mod's TEAM
+  table does not have), and their season stat rows go with them. Stat rows also exist for PGIDs with no PLAY row.
+  Nick Manley was the 70th player in the online team copies (teams 300/400 = copies of Brown); his copy got PGID 65535
+  (already the case in the console's own file 124), and his stat rows were keyed to 65535 (PGID/70 = 936). In CID 124
+  no stat row pointed at a missing team; in CID 132, 27..41 rows per stat table do. Whether the original game survives
+  this depends on leftover stack bytes (the slot counters it reads for index 31).
+- Fix: RPCS3 patch "FCS mod: preseason All-Conference crash fix" (PPU-62e25ebc..., copy in private/rpcs3-patches.yml,
+  generator scratchpad allconf-patch.py).
+  - After the CGID query: `lwz r18; cmplwi r18,13; bgt 0x453900`, so a candidate whose conference is not 0..13 is
+    skipped (next row).
+  - Room for it: the profiler-hook call at the top of the loop (0x453914) now loads its base with r16 alone, and the
+    block 0x45393c..0x45399c moved up one slot (the two `bl 0xa691b0` re-aimed). `extsw r18` (a no-op for 0..13)
+    became the moved `li r3,0`.
+  - Nothing else branches into the window (whole-EBOOT scan).
+  - Installed in <rpcs3>/patches/imported_patch.yml and enabled in config/patch_config.yml. Backups:
+    %LOCALAPPDATA%\ncaa-bridge\backups\2026-11-01-allconf-patch (both yml files + the OD save).
+- CONFIRMED 2026-11-01 night: with the patch applied ("PAT: Applied patch ... FCS mod: preseason All-Conference crash
+  fix"), the advance passed All-Americans and reached the preseason (CID 134: SEYR 1, SEWN 0, state 5); no access
+  violation in the new RPCS3.log. First rollover: the PS* stat tables still hold only SEYR 0 rows, so the bridge sends
+  no season-stat rows for year 1 and the site keeps last season's. Coleman is at Samford (PGID 10011, PYEA 1).
+
+## 2026-11-02 — last season's results replayed into the new season (fixed)
+
+- After the advance to year 2 week 1 (Brown at Furman again), the hub showed "W 49-14" without the game being played.
+  d.games and d.gameData were keyed by week only. At 00:18:12 RetrieveGameResults week 1 returned last season's
+  week-1 final (40@35 49-14, uploaded 2026-10-29), and the console wrote it into its hub row (TMWP).
+  - Not in the dynasty: CID 139 (uploaded 00:18:04) has Brown's TMWP at GSTA 1, 0-0, and the console's local save
+    (00:18:07) predates the reply.
+  - The site showed it too: the bridge overlays d.games onto unplayed games with the same week and teams.
+  - Last season's game data (weeks 7, 9, 10, 11, 17) would also have been listed in DynastyStatus.GAME for those
+    weeks of this season.
+- Fix:
+  - dod.mjs rollSeason: d.games/d.gameData hold one season (d.gamesYear). When EndDynastyUpdate moves d.year, and once
+    at load for stores from before, they move to d.seasons[<year>]. Game-data ids come from d.nextGameDataId, so
+    nothing on disk is reused.
+  - The bridge uses seasonGames(d) (empty while gamesYear != year) for the overlay, the pushed od_results and the
+    fingerprint.
+  - Tested on a scratch copy: load archives year 0 (12 weeks of results, 5 of game data); week-1 results -> 0; a new
+    upload this season is served; the year-2 rollover archives year 1; a mid-season advance does not.
+
+## 2026-11-02 — transfers sat down by the game; depth charts from the site; real Supersim clocks
+
+- Eric Fox (Brown, PGID 2815) could not be put on the in-game depth chart in year 2: "transfer, must sit a year". File
+  139 (SEYR 1 SEWN 1) shows why: PRSD 1 (redshirting) with PTYP 0 / PLFL 28, and his TRAN row from the portal still
+  there (TRAC 0, PTID re-rolled 144 -> 66). The only other PRSD 1 player in the whole file is Anthony Bivines (PGID
+  2800, POID 203, PLFL 14), a portal arrival at Brown. Every other TRAN player (69, all on CPU teams, 31 of them moved)
+  has PRSD 0 or 2. So at the rollover the game redshirts the portal players who end up on a USER team, the one who
+  stayed home included, and the depth chart screen then refuses them as transfers. CPU teams' transfers play at once.
+- Rule (bridge syncEligibility, every web-edits pass while the store's week is <= 2): a player on a member's team with
+  PRSD 1 and a TRAN row gets PRSD 0 through PLYZ (the console pulls it at load) and in the dynasty-file copy. Memo per
+  season in the bridge state (pending -> done once a newer file shows PRSD 0), so a redshirt the coach puts back on
+  afterwards stays. Not yet seen in game: whether PRSD 0 alone makes the screen accept him; the site's depth chart
+  bypasses that screen anyway.
+- Depth Chart page (/d/<slug>/depth, menu group "Team"): DCHT is 88 rows per team (slots per position in
+  @ncaa/ncaa14 DEPTH_SLOTS: QB 3, HB 4, FB 3, WR 6, TE 3, OL 3 each, LE/RE 3, DT 5, LLB 3, MLB 4, RLB 3, CB 5, FS/SS 3,
+  K/P 3, KR/PR 5, KO 3, LS 3), rows not contiguous per team, allocType 6, no index. A save is web_depth_edits
+  (migration 0018, one row per team and week, chart_json + subs_json); the bridge writes the chart into
+  DYNASTY.patch.bin (patchDynasty: DCHT slots set in place, 0 keeps the console's player) and acks it when a newer
+  console file arrives. Supersim lines up from the pending chart immediately; pending player edits (redshirt, position,
+  jersey) apply to Supersim too.
+- Formation subs: PLSU {PGID 16b, TGID 10b, PFPI 4b, PLFO 10b, PFIO 1b}, max 600, 0 rows in every file so far. The
+  site reads it as slot (PFPI 0..10), playbook set id (PLFO; set ids go to 960, formation ids to 14301 so it cannot
+  be the formation), offense flag (PFIO). Unverified: the page says so; the decoder exports formationSubs
+  (formation_subs table) so a sub set in the game will show the real encoding after the next upload. The bridge
+  replaces the team's PLSU rows (TdbTable.removeRecord: last row into the gap, refused on indexed tables).
+- patchDynasty(blob, {transfers, depth, eligible}) replaces patchTransfers (PATCH_FORMAT 3); scratch run on file 139:
+  622 ms, only DCHT/PLSU/PLAY differ from the base, re-read checks for every written slot.
+- Supersim clocks are real against the CPU: state.pc (25 after a stoppage, 40 after an ordinary play by the same
+  offense), state.huddle {at, allow, cpuAt}. The browser counts the play clock down from the end of its playback
+  (or from when the server's allowance ran out) and runs the game clock with it when it was left running; the snap
+  sends elapsed and the server charges max(elapsed, its own reading) up to the play clock. A CPU offense snaps at
+  cpuAt, rolled when the huddle starts (the count stops there). At zero on the coach's offense the browser sends
+  'delay': engine expirePlayClock runs the game clock through the play clock, then the end of the period or a delay
+  of game (5 yards, half the distance inside the 10, replay the down, 25-second clock). Human-vs-human games keep the
+  tempo model. Every PlayDetail carries pre/post (the board at the snap and after); the browser shows pre until the
+  animation is over (no more down/score/stats running ahead of the play, FGs included). Tested on wrangler dev with
+  headless Chrome: hold during the play, count on defense stopping at :11/:14 (cpuAt), count on offense into a delay
+  of game at 1st & 10 -> 1st & 15.
+- Later the same day: the rings on the field markers used to go on the play's key players at the snap (a tell); now a
+  player is ringed when the ball comes within 1.6 yards of him or he reaches the ball carrier, the rest when the play
+  is over (coach.js light/unlight; a replay clears them). The chrome around the field (top bar, scoreboard, picker,
+  ticker, controls, panel tables, popup card, subs panel, toast) follows the site's base.css look (black bar, white
+  cards, red accent, Helvetica); the field, play art, diagrams, celebrations and coin are unchanged. A 'delay' is
+  also accepted when the game clock ran out in the huddle before the play clock did.
+
+## 2026-11-02 (evening) — Supersim punts, return touchdowns, the quarter turn; Fang's Recruit Overhaul
+
+First full Supersim game on the new engine (Brown 37, Furman 36, week 1 of 2014, run ac5ba6a1). What the log showed:
+- Play 142, "D. Jones punts 36 yards, returned 62 yards by M. Childs for a TOUCHDOWN", put 6 on FURMAN's side (the
+  punting team), then Furman kicked the PAT and kicked off. runPlay's bookkeeping tested `if (o.td)` before the
+  turnover branches, so any outcome with td + turnover (a punt return, a pick six) was scored as the offense's
+  touchdown, type 1 (rush), carrier -1. Fixed: the offense branch is `o.td && !o.turnover`; int/fumble and
+  punt/kick branches credit the defense (scoring "FUR punt return touchdown" / "defensive touchdown", ball at 100,
+  PAT to the defense). The recorded 37-36 stands on the console (the game played on from the wrong kickoff; a
+  re-sim would be a different game).
+- "Furman extra point" at the final: the board under a held state is `{...hold, ...detail.post}`, and SnapState had
+  no `final`, so the last still detail (FINAL) rendered with phase 'final' but final false -> the scoreboard's
+  fallthrough line "FUR POINT AFTER" (patTeam was still Furman from their last PAT). SnapState now carries `final`;
+  the client treats post.phase 'final' as final and takes winner/ot from the real state.
+- The "2 seconds left" flicker at a quarter's end: the HUD ran the clock to 0:00 and sent 'delay'; while the request
+  was out, render() showed the held pre-request state (clock 0:02) until the END OF Qn detail arrived. HUD.last keeps
+  the reading the count ended on (snap or expiry) and the scoreboard shows it until the detail takes over.
+- A quarter that turns over in the huddle (CPU runoff past the clock, Q1->Q2 / Q3->Q4) used to run the play with
+  the old quarter's orientation and clock (flip, pq, clk0 from before the runoff; the client then ticked the clock
+  from 12:00 to 0:00). runPlay now takes snapQ/atSnap after timeExpired: flip, pq, pre, the log entry and the scoring
+  rows use the quarter at the snap; clk0 = snap when it rolled.
+- Punts: fair catches, touchbacks and muffs were decided by dice before anything moved, and those branches animated
+  nothing but the punter (so a "fair catch" with nobody near and gunners standing still). simulateReturn now plays
+  every punt through the catch: the vices jam the gunners for 0.7-2 s at the snap, the interior protects until the
+  kick then covers, gunners run flat out; at the catch the returner fair catches when the nearest free cover man
+  will reach him within ~0.75 s (1.4 s when pinned inside the 10; PBCV nudges it; never with nobody inside 12 yd),
+  lets a ball coming down in the end zone go (touchback), muffs 1.2% (loose ball, nearest man falls on it, the
+  returner can recover and is down there), else returns. A punt call with no 'ret' assignment sends the deepest man
+  back for a fair catch. 16 harness games: 63% returned (11.3 yd avg, 2 TDs in 256 punts), 26% fair caught, 9%
+  touchbacks, 2 muffs. SimResult gained end 'faircatch' | 'touchback', muffed, nearAtCatch.
+- Fang's Recruit Overhaul V6.0 BETA (Downloads/Givee Screenshots/Recruit_Overhaul_V6.0_BETA): a packaged Node exe
+  (pkg, madden-file-tools inside) that rewrites RCPT (names by skin tone with Hawaiian names, faces PGHE, builds
+  BS**, ratings, POVR/RCOV, stars RCCB, pitch importances IMP1-3: 63 fields) and RCPR (PS01-10, CMTS: 11 fields) of
+  the save in its your-save-file/ folder (relative to the cwd; 44 s on file 139; row counts and PRSI order kept;
+  checksum chain intact; output verified with @ncaa/tdb). Its base ratings are the RCAT table of game file 4664 in
+  qkl_fe2ig.ast (3.5 GB, entry stored uncompressed, 7,966,280 bytes, offset 3,556,361,106); the mod's current entry
+  differs from the tool's only in RCAT and the rivalry name tables RVNM/RVLY (24/35 rows in the mod, 127/382 in the
+  tool's, so those are mod edits worth keeping). Integration (bridge/src/recruit-overhaul.ts, commands/od.ts
+  maybeOverhaul, dynasty-patch.ts recruits): `od overhaul --set-exe <RecruitOverhaul.exe>` copies the tool to
+  %LOCALAPPDATA%/ncaa-bridge/overhaul and records overhaulExe in config.json; `od overhaul --install-rcat
+  <File04664.DB>` rewrites only the RCAT table inside entry 4664 (entry saved to backups/, `--restore-rcat`, refuses
+  while rpcs3.exe runs); `od watch` runs the tool on the first file of a season year at week 0 (the class is
+  generated at the preseason: file 134 was 2014 week 0), stores the output as overhaul/<host>-did<N>-<year>.db with
+  a memo in od-state.json, and publishes it through DYNASTY.patch.bin (PATCH_FORMAT 4: the changed RCPT fields by
+  PRSI onto the current console file, RCPR only while that file is the one the tool ran on; a console file whose
+  names already match (>= 90%) ends it as `taken`; a season past week 1 without it is left alone as `stale`).
+  Consoles take the class at their next dynasty load, so after advancing into the preseason the commissioner should
+  leave the dynasty and re-enter it before preseason recruiting. Scratch run on a copy of file 139: patch applied in
+  666 ms, re-read clean, second application a no-op. `--run --did N [--force]` runs it by hand. Not yet seen in game.
+- "You currently can be the commissioner of only 1 dynasty": decided on the console, never by the server (no
+  createDynasty reached the stub; the console reports its own limit with SetMaxOwnedDynasties MAXD 1). The script
+  binding behind Create Online Dynasty (0x2673d4) calls the gate 0x3415d8: allowed iff (hub dynasties whose
+  commissioner blaze id at dynasty+0x90 is mine, 0x341538) < GetMaxOwnedDynasties (0x34144c) and the hub list holds
+  fewer than 8 dynasties (0x341418). The max is 1, or 5 when the PDLC check 0x52bfac(item 0xf, 0x18 or 0x17: Five
+  Online Dynasties / Commissioner Bundle) passes, 3 for item 0xe (Three Online Dynasties); the error text is picked the
+  same way. Those packs are PSN DLC (USRDIR/DLC/<id>/ea_packagemeta.xml.edat), not Blaze entitlements (the console's
+  listEntitlements asks group NCAAFB14PS3Unlockable, whose only visible tag is NCAA_ADVANCEWEEK_UNLOCK). Fix: RPCS3
+  patch "Online Dynasty: commissioner of up to 5 dynasties" = one word, 0x341460 li r31,1 -> li r31,5 (installed in
+  patches/imported_patch.yml, enabled in config/patch_config.yml, copy in private/rpcs3-patches.yml; backups
+  *.before-commish beside them). The 8-dynasty hub cap stays. CONFIRMED in game: a second online dynasty (DID 7
+  "efoxcareer") was created; od watch imported it, ran the overhaul on its 2013 class (2,702 renamed) and the console
+  took it at the next load (file 152 carried the names; memo `taken`).
+- Start year. The game's calendar year is 2013 + SEAI.SEYR (EBOOT 0x4d9b48 adds 0x7dd before the day-of-week code at
+  0x4d9864); SSYE is the year the dynasty began (hub "Year N" = SEYR - SSYE + 1). The NCAA 14 Dynasty Tool's Year
+  Changer (Electron app, dist/electron/worker.worker.js "changeYear") sets SEAI SSYE = SEYR = year - 2013, SNPW = 8,
+  SEOW = 23 on a freshly created dynasty at its first preseason (its rule: save right when the preseason is reached,
+  never later; v2.1.2 fixed an offseason loop with the SNPW/SEOW values). Built into the bridge the same way:
+  `od year --default 2025` (config startYear; od watch queues it on the first week-0, SEYR-0 file of a new dynasty)
+  and `od year --did N --year Y` for one dynasty at that stage; applied through DYNASTY.patch.bin (dynasty-patch.ts
+  applyStartYear, refused past the first preseason), memo `startYear` in od-state.json (taken / stale like the
+  overhaul). dod.mjs records d.startYear (NWYR of the first advance into the regular season) so the hub card still
+  says "Year 1". Scratch test on file 145: SEAI SSYE/SEYR 0 -> 12, re-read clean; on a week-1 file it is refused. The
+  site needs nothing: season_year = 2013 + SEYR already. DID 7 was already at week 1 when this landed, so it stays
+  2013; the next new dynasty gets 2025. Not yet seen in game. DID 8 "coach1" (created 18:20) got both queued on its
+  first file (145 -> patch: overhaul + 2025); the watcher had missed the year because it read the config at start, so
+  od watch now re-reads overhaulExe/startYear every pass (refreshConfig).
+- Recruit editor + re-generate button (migration 0019). /d/<slug>/recruit/<prsi> is a prospect card (name, pos, stars,
+  rank, size, scouted OVR, interest or commitment) with an editor (first/last name, position QB..P, height 5'0"-7'0",
+  weight 160-400 lb, stars 1-5) for the commissioner (any prospect) or the coach of the team he committed to;
+  prospect names on the board, the search and the Top 300 link there, with an EDIT tag while a site edit is pending.
+  A save is web_recruit_edits (one per prospect and season); the bridge carries it as DynastyPatchSet.recruitEdits
+  (RCPT by PRSI: PFNA/PLNA/PPOS/PHGT/PWGT = lb - 160/RCCB; field widths 88/104 bits, 5, 7, 8, 3) into the dynasty-file
+  copy, applied after the overhaul so the edit wins, and acks it only when a console file newer than the edit carries
+  every value (consoleRecruits caches RCPT per console file). Scratch test on file 163: 321 ms, re-read clean. The
+  commissioner's "Recruiting class" box on /recruiting has "Re-generate with Fang's Recruit Overhaul", enabled at week
+  0 only: a web_overhaul_requests row the bridge takes from GET web-edits (overhaul[]), runs maybeOverhaul(force) on
+  the console's current file inside syncWebEdits (publish = false there, the caller publishes), and reports back with
+  POST web-edits/<id>/overhaul {status, message}; the box shows RUNNING / DONE / FAILED with the message. Checked on
+  wrangler dev with headless Chrome (edit saved -> PENDING note, API lists it; button disabled at week 2 with the note).
+  Production needs `wrangler d1 migrations apply ncaa-online --remote` before the deploy.
+  First live press (DID 8, 19:06): the tool ran (second roll, 2,700 renamed, patch rebuilt 19:07) but the site logged
+  the request as FAILED with an empty message: the result POST is gzip JSON like every bridge body and the route read
+  it with req.json() (fixed: readJson). And the site kept showing the vanilla names: its recruits come from the
+  console's uploads, which cannot carry the class before a console has loaded the copy and uploaded again. Added a
+  preview: PUT /api/bridge/recruits-preview?od=N (recruits + recruit_interest rows in the import's shape, INSERT OR
+  REPLACE under the current snapshot), pushed by the bridge after a run, after every import while the class is still
+  pending (the import puts the vanilla names back), and by hand with `od overhaul --preview --did N`. The console's
+  own upload replaces it once it carries the class. Request #1's row stays "failed" (a production UPDATE from here
+  was refused by the tool policy); cosmetic.
+- Lost recruiting points (DID 8, 19:40-19:48): the console restarts the dynasty from the server's file whenever a
+  getDynasty shows a DFID other than the one it loaded (the restart check), and it calls getDynasty after every team
+  upload, not only on entry; everything it did since its last upload goes with the restart. Two republishes hit the
+  coach mid-session: (1) the console had taken the 2025 start year, the next import read the class as 2025 while the
+  memo said 2013 -> stale -> week 0 -> the tool ran a THIRD time on file 172 and a new copy (175) went out; (2) a
+  minute later the start-year memo was marked taken, the set lost startYear, the key changed, another copy (178).
+  Fixes: dod.mjs refreshPatch replaces a copy already published for the same base only when the console comes back
+  through the hub (d.hubAt from getContinueDynastyInfoForUser >= d.loadedAt from getDynasty) and keeps a copy nothing
+  needs any more until the base changes (the console is on it); the bridge moves the overhaul memo to the new year
+  when the start year is taken (maybeStartYear runs before maybeOverhaul now) instead of treating the class as a new
+  one. Points live only in the console's RECB until its own upload; the server never touches them. The advance at
+  19:47 carried what survived the last restart (250 on one prospect).
+- Face edits (migration 0020, web_recruit_edits.head_id): RCPT.PGHE is a 9-bit id, 1..246 in the files (218 distinct
+  in a class, 239 in PLAY); the EA DB Editor config (Xan) lists them with skin-tone labels "Light 1-95", "Medium",
+  "Dark" (worker/src/pages/faces.ts, generated from the config; 100-104, 125 and 197 have no art in the league's
+  face set). The prospect editor has a grouped picker with the art beside it (site.js swaps /img/faces/<id>.png on
+  change); the bridge writes PGHE with the other recruit fields and the ack checks it. Headless check: 246 options,
+  preview follows the pick, save -> "face 201 (Dark 24) -> 227 (Dark 26)".
+- 2026-11-02 16:00 Holy Cross vs Wagner (DID 8, week 2) "hangs loading": not a hang, a crash. RPCS3.log: `VM: Access
+  violation reading location 0x0` in FGGameCore at 0x0062fee0 (`bl 0x382770` returned null; stack string
+  "compositorReadSceneAwayProp") right after the loader looked for `FBSGEN_JERSEY_2022_WHITE_big.AST`,
+  `FBSGEN_HELMET_2022_BLUE_big.AST` and `FBSGEN_PANTSX_2022_WHITE_big.AST` in USRDIR and on the disc (ENOENT).
+  Wagner's TEAM.CSAT is `D1AANW`, one of the five built-in generic FCS slots (D1AAEX/WX/NW/MW/SE; the mod puts
+  Mercyhurst, West Florida, Wagner, Tuskegee and Delta State on them). The mod's qkl_fe2ig.ast carries a rewritten
+  uniform XML for that slot (entry #3271, zlib, 808 B) whose Home/Away parts point at an "FBSGEN 2022" generic set
+  that exists nowhere (not in any archive, nested bigfile, DLC folder or loose file; the 0.0.32 install has the same
+  archive). The original 2007 art for the slot is still in the archive (D1AANW_JERSEY_2007_GREEN/WHITE/RED with
+  NAME/NAME_DECAL/NUMS_DECAL, PANTSX_2007_GREEN/WHITE/RED, HELMET_2007_GREEN/RED; asset table entry #973).
+  Fix without touching the archive: the game scans every DLC/FCS_DLC_* folder for `<CSAT>_Pack<n>_MixAndMatch.XML`
+  before falling back to the archive's XML (it opened UCFXXX_Pack0 from FCS_DLC_PATRIOT for Holy Cross), and a DLC
+  XML may name archive-resident bigfiles (VANDER_Pack0 in FCS_DLC_BIGSKY does). Wrote
+  `spike/blaze/tools/uniforms/D1AANW_Pack0_MixAndMatch.XML` (green helmet, green home / white away jersey, white
+  pants, vanilla-style like entry #3269) and copied it to `USRDIR/DLC/FCS_DLC_NEC/`. Every member's install needs
+  the same file (like the watermark patch). Not yet tested in game.
+- The `sys_net: Error recvfrom on P2P socket: 54 / ECONNRESET` lines (every 0.5 s from RPCN login onward) are
+  unrelated: RPCS3 sends UDP keepalives from its P2P port 3658 to the RPCN server's UDP port 31313 to learn its
+  external address, and the private RPCN runs in WSL2 with localhostForwarding, which relays TCP only; Windows
+  answers the UDP sends with port-unreachable (verified with a UdpClient probe: ConnectionReset). Harmless for
+  Online Dynasty (no peer-to-peer game), only log noise; mirrored WSL networking would silence it.
+- Same check for the other four generic slots (scratchpad ast/scan_fast.py: the inner TOC of every nested bigfile
+  carries names, so a 256 KB inflated prefix per entry lists all art in 8 s): D1AAEX, D1AASE and D1AAWX XMLs are the
+  vanilla 2007 ones and their art is present; D1AAMW (Tuskegee, entry #3270) is rewritten and its Home/Away pants
+  `FCSMWX_PANTSX_2021_GOLD_big` and away jersey `D1AAMW_JERSEY_2021_WHITE_big` exist nowhere either, so Tuskegee
+  would crash the same way. Added `D1AAMW_Pack0_MixAndMatch.XML` (gold helmet, blue/white 2007 jerseys, gold pants)
+  to tools/uniforms and FCS_DLC_NEC. Both XMLs zlib to ~600 B, so rewriting the archive entries (808 / 2292 B slots)
+  in place stays available as a fallback if the DLC-folder override turns out not to apply to TTYP 1 teams.
+- 17:10 follow-up: the DLC XML loads (no crash) but Wagner showed a West Virginia helmet and an NDSU-looking jersey.
+  Cause found by resolving the names: the archive TOC keys entries by FNV-1a 64 of the UPPER-CASED bigfile name
+  with `_BIG` (e.g. `D1AANW_HELMET_2007_GREEN_BIG` -> entry #1637), and several generic-slot entries in the mod's
+  qkl_fe2ig.ast no longer hold their vanilla art: #1637 "NW green helmet" = WVU gold/navy Flying-WV helmet,
+  #1094 "NW green jersey" = plain dark green, D1AAMW jerseys BLUE/GREEN/WHITE = red / maroon / black, D1AAMW gold
+  helmet = navy, D1AAWX black helmet = Texas "150" white helmet, D1AAEX white pants = purple. The vanilla "FCS
+  Northwest" set survived under the RED-named entries (#1638 gold "NW" helmet, #1095 green "NORTHWEST" jersey)
+  plus #1096 white "NORTHWEST" jersey and #2005 white pants; MW gray helmet (#1636) and the SE white jersey/pants
+  (#1098/#2008) are vanilla too. Textures: 'p3R' containers, FourCC at 0x54 (DXT1/DXT5), pixel data at 0x80
+  (not the 0x7c header-size word); decoded with scratchpad ast/dxt.py + pieces.py (pure Python, PNG previews).
+  XMLs now: D1AANW = the vanilla Northwest set; D1AAMW = gray MW helmet, red jersey (#1091), SE white jersey and
+  pants. Both are placeholders: FloridaMan's intended files (`FBSGEN_{HELMET_2022_BLUE,JERSEY_2022_BLUE,
+  JERSEY_2022_WHITE,PANTSX_2022_WHITE}_big.ast` for the placeholder set; `FCSMWX_PANTSX_2021_GOLD_big.ast` +
+  `D1AAMW_jersey_2021_white_big.ast` for Tuskegee) are on no drive of this PC (nothing named WAGN/MERCY/TUSK/DELTA/
+  WFL either). Once obtained: drop them in a DLC folder and point the XML at them (or delete the XML and put the
+  FBSGEN files loose in USRDIR, where the archive XML looks).
+- 2026-11-02 17:50 FCS Uniform Studio: spike/blaze/tools/uniforms/uniform-studio.html (built from src/ by
+  src/build.mjs) loads, edits and creates uniform assets in the browser: DLC folder scan (File System Access API,
+  works on file://), bigfile entries with previews, DXT1/DXT5 decode/encode with full mip chains (pure JS,
+  ~0.2 s per 1024x2048 texture), DDS export/import for Paint.NET, a paint/recolor/stamp editor, donor-based new
+  sets (same-length slot/year/colour renames + rehash + scene-path patch, generated MixAndMatch XML), an XML
+  editor, and archive extraction by name hash. Format facts learned for it: DLC bigfiles = BGFA 1.05 with 64-byte
+  header (n+1, n, tocOff 64, tocSize, widths 0x04080100/0x404, prefix words 0x78baf565/0x6c233354[/0x8fe5b6d9],
+  name width 64), records {u16 flags (0x11 scene, 0x111/0x211 textures), u64 FNV-1a of the upper-case name, u32
+  off, u32 csize, u32 usize-csize, name[64]}, zlib entries; the game's archives use the same layout with 0-width
+  names; some vanilla bigfiles use 3-byte offset/size fields (widths 0x03080100/0x303). Texture 'p3R': HEIGHT @12,
+  WIDTH @16 (DDS order; corrected 2026-11-05, the studio had them swapped), top-mip bytes @20, mip count @28, FourCC
+  @0x54 (DXT1/DXT5, 3 DXT3), blocks from 0x80, little-endian DXT. Scene (RSF)
+  files reference textures by length-prefixed Maya paths with the slot code in lower case, so renames must keep
+  lengths. src/test-codec.mjs passes on helmet/jersey/pants files (byte-identical rebuild, PSNR 42-91 dB,
+  DDS round trip, rename). Checked in headless Chrome and the extension: open/edit/encode/XML flows work; file://
+  is a secure context with showDirectoryPicker available.
+- 18:30 Uniform Studio reworked team-first after feedback ("load my DLC folder automatically, edit what's attached
+  to each team, edit DDS directly and repackage"): tools/uniforms/serve.mjs (node, 127.0.0.1:8781, RPCS3 root from
+  ~/.ncaa-bridge/config.json; `uniform-studio.cmd` opens it) serves the page and exposes the DLC folder
+  (/api/files, /api/file/<folder>/<name> GET/PUT with a backup per write under %LOCALAPPDATA%/ncaa-bridge/uniforms/
+  backup), the archive (/api/archive/<NAME>[?probe=1], entries by FNV-1a of the upper-cased name; per-slot
+  built-in uniform XMLs are the entries `<SLOT>_MIXANDMATCH`), and a DDS hand-off (/api/dds/open writes the texture
+  as DDS into .../uniforms/work and launches the default DDS app; a 1 s watcher repackages the bigfile when the DDS
+  changes: exact blocks copied when format/size match, mips regenerated when the DDS has fewer, re-encoded from
+  32-bit otherwise; /api/events feeds the page). Page: team list -> uniform rows (Home/Away/alts) with part
+  thumbnails and dropdowns (autosave), parts table (where: folder / other folder / archive / MISSING, used-by,
+  Textures with Edit DDS / Import / Quick edit, Pull into folder, Remove, Add existing part, Clone from another
+  team), Copy-to-DLC-folder for teams on the built-in definition. Verified in headless Chrome against a scratch
+  DLC tree + the real archive: autosave, copy-to-folder (creates FCS_DLC_IVY), DDS open -> modify -> auto
+  repackage (copied blocks, backup kept). Correction: bigfiles resolve from ANY FCS_DLC_* folder (Ivy teams with
+  archive XMLs use art in FCS_DLC_IVY), so the earlier "XML's own folder first" note was too narrow.
+- Supersim missing for the Wagner game: the home/game pages only render the Supersim link for a signed-in site
+  account (`ctx.account`; accounts are per dynasty, migration 0008 UNIQUE(dynasty_id, blaze_id)) and allowedGame
+  needs the member's current-week game; coach1 (DID 8) has no account for efox yet, unlike efoxod1. Fix: an invite
+  for DID 8 (`ncaa-bridge invite --did 8 --persona efox`) and join/sign in on that dynasty's page.
+- 18:35 Supersim vs Wagner refused with "Depth chart missing": the five generic-slot teams (TTYP 1) have NO rows in
+  PLAY or DCHT in the dynasty file (the game generates their players at game time; 126 teams carry the 88-row
+  charts), so the site had neither a roster nor a chart. Fix (worker/src/supersim/generic.ts): a team with no
+  players gets a deterministic 54-man placeholder roster (ids >= 900000, low-60s starters, generated names and
+  faces) and autoDepthChart() builds the 88-slot chart from any roster (best overall by position, then the engine's
+  related-position fallback, then anyone); TeamInput.synthetic marks the side and result.ts sends the console team
+  totals only for it (no B* player rows, no PG* lines, detail.teams[].players = [], synthetic: true), which matches
+  the game keeping no rows for such players. Test added (6 pass). Needs a Worker deploy; the console's acceptance
+  of a game-data set with one roster-less side is untested until the next coach1 advance.
+- 19:45 Recruit locks (`ncaa-bridge od lock --did N --prsi P --tgid T`, `--clear`, no args lists): a commissioner's
+  "make him commit here". The game caps points at 500 per prospect per week (CPU rows reach 600-700 with bonuses,
+  RECB.PPSC is 15 bits) and TEAM.TRPA is the weekly budget (5000 for Holy Cross, 5000-6500 league-wide), so "5000
+  on two prospects" cannot be allocated; instead the lock rides the dynasty-file patch as a recruit edit with
+  lockTgid (dynasty-patch.ts lockInterest): RCPR row by PRSI, the team's PT slot gets PS = max(CMTS, leader) + 600
+  (added at slot 10 if the team is not on the list), slots re-sorted by points. Stored in od-state locks[] and
+  re-applied on every copy until the console's file shows PTCM = team (then dropped; dropped with a warning when
+  he commits elsewhere). First use: DID 8 Destin Fox (1348) and Dewey Fox (958) -> Holy Cross; patch on base 204
+  carries 6040 / 6282. Whether the game commits on "points >= CMTS" at the weekly update is the assumption to
+  watch at the next advance. Also learned: dynasty-tables/<did> is a stale decode (DID 8's showed the vanilla
+  class); the live truth is the newest locker DYNASTY.dynasty for group.id = DID (204 at week index 4).
+- FCS playoff feasibility (asked 19:30): the game's postseason rows in SCHD: week 16 (3 bowls), 18 (4), 19 (10),
+  20 (19), 21 (1, the championship), teams 1023 until the game's own bowl selection after the regular season;
+  rows carry SGNM/SEWT (16, 30, 31, 32, 40), GATG/GHTG, SGID (stadium); BOWL table rows {SGID, BIDX, SEWN, SGNM}
+  (45, names BNME / logos BLGO in the Dynasty Tool's view). The NCAA 14 Dynasty Tool's "PLAYOFF MODULE" (renderer
+  + worker.worker.js: setupPlayoffs / continuePlayoffs / finishPlayoffs) is the modders' manual way: 4/8/12/14-team
+  formats seeded by poll rank (+ confchamps), it rewrites chosen bowl rows' GATG/GHTG/SGID by SGNM+SEWT round by
+  round between weeks, renames those bowls (BNME/BLGO), sets SGIN.SGNM=127 for edited games, and parks unknown
+  slots on TGID 162 renamed "TBD" (162 is Wagner in this mod, so we would use 1023). It never moves rows between
+  weeks, which caps a native bracket at 8 teams (QF in week 18's 4 rows, SF in 19, final in 21); 16 or 24 teams
+  need bowl rows re-weeked (SEWN/SEWT + BOWL.SEWN), untested for bowl rows. Plan if wanted: bridge selects the
+  field at the end of week 14 (auto-bids + poll at-large, FCS seeding, higher seed hosts), writes each round into
+  the copy after the previous round's upload, final into the week-21 row so the game crowns the champion; site
+  Bracket page = projected (polls/conference leaders) then live (postseason rows). Gate: an offline RPCS3 test of
+  re-weeked bowl rows from a week-15 save.
+- 20:05 FCS playoff built (24 teams, the user's pick). Shared logic packages/ncaa14/src/playoff.ts: powerOrder (coaches
+  poll 1-25, then record, media poll, overall), conferenceChampion (conference record, conf pct, overall, polls),
+  selectPlayoffField (auto bids for every real conference with 4+ playing teams: CAA, BS-OVC, MVFC, UAC, SoCon, Ivy,
+  Patriot, Big Sky, SWAC, Southland; Independents/Generic excluded; override by name), bracket24 (R1 pairs 9-24,
+  16-17, 12-21, 13-20, 11-22, 14-19, 10-23, 15-18 so R2 is 8/1/5/4/6/3/7/2 vs those winners), resolveBracket (higher
+  seed hosts; final neutral). bridge/src/playoff.ts owns the file: ROUND_ROWS = the 23 postseason SCHD rows per round
+  (R1 sgnm 0-2 + 23-27 -> week 16, R2 3-6 + 19-22 -> week 18, QF 7-10 (wk 19), SF 17-18 (wk 20), F 36 (wk 21)),
+  re-weeked via SEWN/SEWT (16/30/31/32/40) + BOWL.SEWN/BNME/BMON/BDAY ("FCS Playoffs First Round" ...); games written
+  as GATG/GHTG/SGID (host's stadium) with SGIN rows of edited games detached (SGNM 127, as the Dynasty Tool does);
+  the 14 other bowl rows get playoff teams swapped out for the best remaining teams; playoff rows of rounds not yet
+  known go back to 1023 vs 1023. od.ts pendingPlayoff runs each pass: memo in od-state (year, enabled, autoBidConfs,
+  seeds, games, champion), weeks patch from the start of the season (already published for DIDs 5-8 at 19:59),
+  selection when the game has filled the bowls and R1 is unplayed, next round when the previous round's rows are
+  final, state PUT to /api/bridge/playoff (worker migration 0021 playoff_state; pages/bracket.ts = projected from
+  polls/standings until the state exists, then live; nav "Bracket"). CLI: od playoff --did N [--preview] [--on|--off]
+  [--autobids "A,B"|default] [--reset]. Offline run on a copy of file 204 (scratchpad playoff-sim.mts): re-week,
+  fake selection, 23 games through a faked final, every patch verified on re-read. UNTESTED on the console: whether
+  the game honours re-weeked bowl rows and TBD rows in future weeks; RULE for the postseason: after every advance
+  from week 15 on, go back to the Dynasty hub once (the console downloads the copy with the next round) before
+  advancing again, otherwise a TBD game could reach the sim.
+- 21:30 **The playoff did not run on the console (DID 8, 2025 postseason).** What the files and the server log show:
+  (1) the console never loaded either playoff copy: 224 (R1 written on file 222) was published 20 s before the
+  console's next advance and 227 (on file 225) 21 s before the last one; the console only downloads the dynasty file
+  at a fresh load from the hub (last hub visit 20:27), and the getDynasty it makes *inside* an advance (after
+  RequestAdvanceWeek) reports the new DFID but never fetches it. (2) The game fills every bowl row itself at the
+  advance into week 16 (file 222, all 37 rows with teams = its projection) and AGAIN at the advance into week 18
+  (file 225: rows 23/24/27 re-picked and played in the same advance, the title row re-picked from URI's CCG win), so
+  anything written into bowl rows before week 18 is overwritten. Rows 0-2 of week 16 (SEWT 16) are the mod's three
+  conference championship games (BOWL tie-ins SWAC#1 v SWAC#1, CAA, Big Sky; names still "SEC/ACC/Pac-12
+  Championship"); our first layout had taken them for the first round and renamed them. (3) The console plays the
+  entire bowl season in one advance: at week 18 SGIN listed all 28 remaining CPU games (weeks 18, 19, 20 and the title
+  game; the user's bowl game excluded) and RequestAdvanceWeek went 18 -> 23 (NWWK 23, file 228) in 37 s; the EBOOT
+  strings name the stops "Advancing to Conference Championships", "Advancing to Bowl Season", "Advancing through
+  Bowl Season", "Advancing to National Championship Week", "Advancing to End of Season". The regular season also
+  jumped 5 -> 10 and 12 -> 16 in single advances (RequestAdvanceWeek carries no target; the console decides).
+  So a console-played bracket is impossible: there is no advance between rounds.
+- 22:00 **Redesign: the bracket is played on the site.** bridge/src/playoff.ts: the field is selected from the
+  console's week-18 file (SEAI.SEWN >= 18, bowls filled, no bracket row played); the bracket games are Supersim games
+  on the postseason rows (R1 rows 3-6+19-22 week 18, R2 rows 7-14 week 19, QF 17/18/23/24 and SF 25/26 week 20, final
+  row 36 week 21; layout shared with the site in packages/ncaa14/src/playoff.ts BRACKET_ROWS/BRACKET_WEEKS; rows 0-2
+  never touched, their names and rows 23-27's week restored (ORIGINAL_ROWS)); the watcher reads the site's results
+  (GET /api/bridge/playoff), adds each next round, and when the champion is known builds the copy with all 23 games
+  (teams, GSTA/scores/GFOT, host stadiums, SGIN detached), the other 11 bowls fixed, manifest requireLoad. Phases in
+  the memo: pending -> live -> final -> delivered (the console's upload shows the rows played; matched/total logged)
+  or skipped. The import lays the bracket over the postseason rows (overlayPlayoff: teams, site results, TBD for
+  unknown rounds, records bumped while the console has not played the rows). dod.mjs: CheckAdvanceWeekStatus answers
+  ALLW 0 + THTM/UTM text while web-edits/<did>/ADVANCE.hold.json exists (phase live at week 18) or a requireLoad copy
+  is published that the console has not downloaded (locker download hook -> d.consoleLoadedCid). Worker:
+  playoff-state.ts (merge of bridge state over site results, next rounds resolved on the site too, bracket games
+  written into `games` as source 'playoff', TBD rows for unknown rounds), GET/PUT /api/bridge/playoff, bracket page
+  with phases and Coach/Watch/Sim links. CLI: od playoff --skip "note", --hold "text" / --release (gate test).
+  Offline rehearsal (scratchpad playoff-sim2.mts) on file 222 + layout: selection, five rounds of fake site
+  results, final copy built and read back 23/23, no team twice, CCG rows untouched, names restored. Local Worker:
+  PUT live/skipped/pending states render, site results survive a result-less bridge PUT.
+  UNTESTED on the console: (a) what the console shows for ALLW 0 (od playoff --did N --hold "text" to try it on a
+  test dynasty), (b) whether the bowl-season advance keeps pre-written finals (GSTA 2/3 + scores in SCHD, SGIN rows
+  detached) or simulates those rows again; the watcher logs matched/total after the advance either way, and the
+  site's results stand as the FCS playoff. DID 8's 2025 state: mark skipped (od playoff --did 8 --skip) once the
+  Worker is deployed. The league server must be restarted (restart-league.cmd) for dod.mjs/locker.mjs/supersim.mjs.
+- 22:10 Supersim spectating + member-vs-member check (subagent): `/d/<slug>/supersim/<week>/<game_no>` coaches a named
+  game (yours) or watches it; `/supersim/watch/<week>/<game_no>` always watches; `?game=W:G[&watch=1]` on the data
+  endpoint; payload gains watch/controls/coaches/recent (ring of the last 6 PlayDetails in supersim_live.state_json,
+  ~+35 KB per game)/liveGames; a member with no eligible game gets 200 {noGame, liveGames}. Client watch mode polls
+  every 2.5 s and animates the plays it missed. PvP verified by worker/test/supersim-pvp.test.ts on an in-memory D1
+  fake (worker/test/fake-d1.ts): both members join one live row, each snap resolves on the second call, pending calls
+  survive tempo/timeout bumps, one official row. League server: a member-vs-member Supersim final is now game data
+  for BOTH member teams (supersim.mjs acceptResult), so either console applies it. Bracket games ride the same
+  routes (worker/src/supersim/playoff-games.ts): a member whose team is in an open bracket game coaches it, a game
+  between two CPU teams is "driven" by any member (start/auto/abandon only; public/js/bracket.js runs it from the
+  Bracket page, 12 snaps per request) and its final goes to playoff_state + the schedule row, never to the console
+  outbox. Local check: a CPU-vs-CPU first-round game simmed from the bracket page by the real engine (UC Davis at
+  Lehigh 14-44), the state and the games row updated, the page reloaded with the final.
+
+## 2026-11-03 — playoff rollout: server restarted, DID 8 marked skipped, hold test armed
+- 07:10 restart-league (the console was dropped: it had sat idle at DID 8 for ten hours after its week-23 result
+  pull); all four services back, sync running again (it had stopped after four quick crashes during the half-applied
+  bridge edits). `od playoff --did 8 --skip` -> phase skipped, pushed to the site (the production Worker already took
+  the PUT; the page shows the skipped banner only after the next deploy, which the user runs: `npx wrangler deploy`
+  is refused to the assistant; `d1 migrations list --remote`: nothing to apply, 0021_playoffs is in place).
+  Hold semantics fixed first: the watcher's playoff pass used to `setHold(dir, null)` whenever the playoff was not
+  live, which would have wiped a hand-set hold within one cycle. ADVANCE.hold.json now carries `manual: true` for
+  `--hold`; the watcher only writes or clears its own (non-manual) hold; `--release` clears either. Verified: the
+  watcher's first pass after the restart left `web-edits/6/ADVANCE.hold.json` ("League hold test") in place.
+  Waiting on the console: Advance Week on efoxOD1 (DID 6) should be refused with that text (CheckAdvanceWeekStatus
+  ALLW 0); then `od playoff --did 6 --release`.
+- 07:20 Worker deployed by the user (version ade3a398). The first skip PUT had gone to the old Worker, which stored
+  the state without the phase (the site still read "live"), so `od playoff --did 8 --skip` was re-run after the
+  deploy: site phase skipped, the Bracket page shows "No playoff was played this season". Lesson: pushedKey marks a
+  state as sent even when an older Worker accepted it; re-run --skip/--reset after a deploy that changes the format.
+- 18:30 Real PS3 (CFW 4.90, webMAN MOD 1.47.45) cabled to the PC. Windows Internet Connection Sharing gives the Ethernet
+  port 192.168.137.1 and the PS3 192.168.137.2 (manual settings; its DNS is the PC). Proton VPN blocked every LAN
+  connection ("forbidden by its access permissions") until disconnected. Found on the console: the game as a HDD folder
+  with the five STOCK disc archives, the 1.02 data with a partial older FCS build (4 of 12 FCS_DLC folders, a smaller
+  qkl_patch.ast) plus a CFBR custom DLC folder, no dynasty saves. Mirroring the RPCS3 build over FTP (scratchpad
+  ps3-sync.sh): stock archives renamed *.stock, old DLC pieces moved to DLC_backup_2026-11-03, then the four modded
+  archives (5.9 GB), qkl_patch.ast and the 12 FCS_DLC folders (951 files) uploaded at ~17 MB/s. First attempt at the
+  archives failed with curl "bad range in URL": the brackets in the RPCS3 disc path are URL globbing; -g fixes it.
+  league.mjs gained --lan <ip> (redirector --blaze-host, blaze --qos-addr/--http-host; telemetry/ticker ADRS follow
+  HTTP_HOST); the league now runs with --lan 192.168.137.1. The console's DNS goes through the sharing resolver,
+  which honours the PC's hosts file: gosredirector.ea.com and reports.tools.gos.ea.com -> 192.168.137.1 (the only
+  two names RPCS3's DnsHook ever saw). Saves: PS3 saves carry PARAM.PFD, RPCS3's do not, so the FCS roster save
+  cannot simply be copied. Open: PSN sign-in/ticket on hardware, the All-Conference crash patch as an EBOOT patch.
+- 18:45 Mirror complete: qkl_patch.ast + 951 DLC files (sizes all match), the four archives (boot 6 s, fe2ig 193 s,
+  interface 23 s, stream 111 s; ~18 MB/s). Lesson: never edit a bash script while it runs (bash reads the file as it
+  goes; the first run died with "unexpected EOF" at its verification step after an edit). The PS3 keeps 6.6 GB of
+  replaced files (*.stock in the game folder, DLC_backup_2026-11-03 next to DLC) until someone deletes them. Hosts
+  entries on the PC still pending (gosredirector.ea.com resolved to EA at 18:45). Not changed on the console: the
+  stock EBOOT.BIN (disc 1.00 in the folder, 1.02 in the game data), the CFBR custom DLC folder, the saves.
+- 19:05 PS3 roster: real-console saves are AES-encrypted protected files (USR-DATA had no DB header, HED-DATA 32 bytes
+  of ciphertext) with hashes in PARAM.PFD, so a plain RPCS3 USR-DATA cannot just be dropped in. Used pfdtool 0.2.3
+  (installed with Bruteforce Save Data 4.4.2 and again inside the NCAA 14 Dynasty Tool; games.conf has BLUS31159
+  secure_file_id 0F..0F): `pfdtool -g BLUS31159 -d <dir> USR-DATA HED-DATA` (decrypt; proved the key: DB header
+  appears), copy STABLEV1's USR-DATA + its own 28-byte HED-DATA (the header's last u32 differs per roster), `-e` to
+  encrypt and update the PFD, `-c` all OK, then USR-DATA/HED-DATA/PARAM.PFD uploaded over the console's
+  BLUS31159-ROSTER-I (user 00000006); round-trip hashes match. The original save is backed up in
+  %LOCALAPPDATA%/ncaa-bridge/backups/2026-11-03-ps3-roster-I. Not yet loaded in the game.
+
+## 2026-11-04 — FloridaMan's current FCS build installed on RPCS3 0.0.29 and the PS3 (our patches kept)
+- Source: `Desktop/FCS/FCS` (BLUS31159 game data + `BLUS31159-[NCAA Football 14]` disc folder), left untouched.
+  Compared against the 0.0.29 install (and the 0.0.32 copy, which is the previous build unpatched): qkl_interface,
+  qkl_misc, qkl_stream, qkl_patch.ast and both EBOOTs are byte-identical; the drop's qkl_boot.ast hashes equal to our
+  `backups/qkl_boot.ast.orig` (7adf3714...), so the mod did not change it and our watermark/--vram-copy patched copy
+  stays live (`photo-watermark-patch.mjs check`: all three blocks patched). The real update is (a) a new DLC folder
+  `FCS_DLC_PIONEER` (34 bigfiles: Butler, Dayton, Marist, Morehead State, San Diego, Stetson, Valparaiso 2024 sets),
+  (b) `FCS_DLC_MEAC/BOWLGR_Pack0_MixAndMatch.XML` (2778 -> 2832 B) and (c) qkl_fe2ig.ast 3,572,993,720 B (ours was
+  3,572,993,056): scratchpad astdiff.py (entry-by-entry TOC + sha256) found exactly 7 differing entries, #3247 #3268
+  #3281 #3323 #3344 #3371 #3381 = the seven Pioneer teams' `_MIXANDMATCH` XMLs (placeholder FCSXXX 2042 / MOSTAT sets
+  before), every other entry identical, entry 4664 (RCAT) unchanged. Our own archive differed from the old build in
+  entry 4664 only.
+- RPCS3 0.0.29 (game not running; the emulator window was idle): staged a copy of the new archive, re-applied the
+  Recruit Overhaul RCAT with installRcat (scratchpad install-rcat.mts calling bridge/src/recruit-overhaul.ts, since
+  `od overhaul --install-rcat` refuses while rpcs3.exe exists; second call a no-op), entry 4664 sha after =
+  811a52a0... = the live archive's entry; swapped it in; astdiff live vs drop: only entry 4664 differs. Live
+  qkl_fe2ig.ast sha256 5499ae6d94cf4a5dcf66515a8196f6ea4a15b3a95e2377424ebb45a838235edd. The 4664 backup in
+  `backups/qkl_fe2ig.ast.4664.orig` is still valid (the entry is the same bytes in both builds). FCS_DLC_PIONEER copied
+  (34/34 hashes verified), MEAC XML replaced (old one in `backups/2026-11-04-pre-pioneer/`), our two
+  `FCS_DLC_NEC/D1AA*_Pack0_MixAndMatch.XML` kept. RPCS3 patches (patches/imported_patch.yml, patch_config.yml) and
+  saves untouched. The superseded archive is still beside it as `qkl_fe2ig.ast.prev` (3.57 GB; C: went from 5.2 GB free
+  to ~2.1, and deleting it was refused to the assistant by the auto-mode classifier, so the user deletes it);
+  rollback = that file, the PS3's `qkl_fe2ig.ast.pre-pioneer` (identical) or the 0.0.32 copy + installRcat.
+  0.0.32 / 0.0.43 installs (parked) were not updated.
+- PS3 (webMAN FTP; the game was running at first, so the archive went up as `qkl_fe2ig.ast.new` and the swap waited
+  for the XMB; hdcache/ on the console is empty too): FCS_DLC_PIONEER uploaded (34/34 sizes), archive 3.57 GB in
+  4 min, verified by size + sha256 of the first/last 8 MB and of the RCAT entry range read back; then RNFR/RNTO
+  current -> `qkl_fe2ig.ast.pre-pioneer`, `.new` -> live; MEAC XML replaced. Nothing else on the console changed:
+  the experimental no-PSN EBOOT (12,973,728 B, `EBOOT.BIN.before-np-test` beside it) and PARAM.SFO state from
+  2026-11-03 are as they were, the CFBR custom DLC folder and the `*.stock` archives remain. Finishing script:
+  scratchpad ps3-finish.sh (refuses while webMAN shows a game process, re-runnable).
+- Not yet seen in game: a Pioneer team's uniforms on either machine.
+
+## 2026-11-05 — new online dynasty invisible on the site (empty slug in od-state)
+- Eric created "efoxOD4" (DID 10, file 320, team 64) on RPCS3; the site never showed it. `od import --did 10` by hand:
+  `POST /api/bridge/dynasties -> 400 slug required`. Cause: the watcher's playoff pass (and `od lock`) create the
+  od-state entry `{ fingerprint: '', slug: '', importId: 0 }` before the first import, and odImportOne used
+  `state.slug ?? odSlug(d)`, which keeps the empty string. Fixed with `||` (bridge/src/commands/od.ts). DID 9
+  "test26" (created 09:40, no members) had failed the same way; the watcher imports it after the supervisor reloads
+  the bridge code (it waits for the console to disconnect — do not restart-league while someone plays).
+- After the fix the import committed to /d/efoxod4 (786 schedule rows, 2710 recruits), queued start year 2025 and
+  ran the Recruit Overhaul (2701 renamed) into DYNASTY.patch.bin; dod.mjs publishes it at the console's next hub
+  visit / dynasty load as usual (never mid-session).
+
+## 2026-11-05 — 2026 roster photos, start year 2026 by default, "Nth season" counted from the dynasty's start year
+- Photos: the 2026 roster scrape (`Desktop/FCS/Rosters/2026`: photos/player_photos_manifest.csv + 13,057 raw downloads,
+  normalized/players.csv with tgid + game_first/game_last, assign/assignments.csv with the roster row = tgid + pgid)
+  is packed by the new `tools/photo-pack.py` into `%LOCALAPPDATA%/ncaa-bridge/photos/2026` (160 px JPEGs
+  `2026__<Team>__<Name>.jpg`, 87.5 MB, 33 s; manifest columns + tgid, game_first, game_last, pgid). The bridge now
+  takes several photo sets (config `photosDirs` beside `photosDir`; bridge/src/photos.ts loadPhotoIndex merges them,
+  later sets win) and matches by the game's team id + in-game name first (`byTgid`), team name + name second
+  (`byTeam`); `photos upload` sends every set with the right content type. efoxOD4 (DID 10, on the 2026 roster)
+  re-imported: 8,473 of 8,694 players have a photo (8,411 from the 2026 set, 62 from the old one; the old set alone
+  gave 6,662 on the 2025 roster). Upload of the 13,057 new objects to R2 started 10:39 (~400 files / 35 s).
+- Start year: `od year --default 2026` (config startYear 2026); DID 10 and DID 9 re-queued with `od year --did N
+  --year 2026` (patch rebuilt: SEAI SSYE/SEYR 13) before any console took the 2025 one.
+- "14th season": worker/src/pages/common.ts seasonLabel counted from 2013. Now SeasonInfo carries startYear (SEAI.SSYE
+  + 2013, packages/ncaa14 decode/league.ts), both import paths post `startYear`, the Worker stores
+  `dynasties.start_year` (migration 0022) and seasonLabel counts from it (player and transfer pages pass it along).
+  Needs, in this order: `npx wrangler d1 migrations apply ncaa-online --remote`, `npx wrangler deploy` (both refused to
+  the assistant), then `npx tsx bridge/src/cli.ts od import --force` so every dynasty's start_year is recorded (until
+  then the label still reads from 2013). vitest 19/19, tsc clean (packages/ncaa14 dist rebuilt for the bridge's tsc).
+- 11:05 Upload complete: players/2026__* = 13,057 objects in R2 (one batch per run hit a Cloudflare edge 500 HTML page;
+  photosUpload now retries a batch up to 4 times). The bridge's "already stored" list was short on the second run
+  because /api/bridge/photos listed at most 20 pages and R2 pages came back with ~680 keys, not 1000; the Worker now
+  reads up to 100 pages (needs the deploy). The old set is intact (sample old key served). Roster pages of /d/efoxod4
+  reference the 2026 files.
+- 11:15 Correction: SEAI.SSYE is NOT the start year (it moves with SEYR at every rollover: files 124/311 of DID 6 read
+  0/0 then 1/1, DID 8's 163/172/297 read 0, 12, 13 for both). The decoder change was reverted; the bridge now derives
+  the start year itself (commands/od.ts odStartYear): the year queued by `od year` once a console file carries it,
+  else the year of the dynasty's earliest DYNASTY.dynasty in the locker (trash included; od.ts lockerIndexAll /
+  readLockerBlobAny), cached in od-state as firstYear. After migration 0022 + the user's deploy (version 1bb4f3c3) and
+  `od import --force`: coach1 2026/start 2025 "2nd season", efoxod1 2014/2013 "2nd season", the rest "1st season".
+- Landing page (fcs-mod.online): FloridaMan thank-you banner in a 14 px-radius card under the header
+  (public/img/home/floridaman-thanks.jpg, 1600 px JPEG from the 2172x724 PNG) and the two roster download buttons
+  (download-2025-roster.png / download-2026-roster.png, cropped to the artwork at 1000 px, transparent surround), a
+  2-column grid that stacks (2025 first) under 720 px. Downloads: new route /downloads/<file> (worker/src/api/downloads.ts)
+  streams R2 `downloads/<file>` as an attachment; uploaded with `wrangler r2 object put ncaa-online-saves/downloads/...`:
+  FCS-2025-Roster-STABLEV1.zip (save folder BLUS31159-ROSTER-STABLEV1, identical in the 0.0.29 and 0.0.32 installs)
+  and FCS-2026-Roster.zip (BLUS31159-ROSTER-FCS2026 = Rosters/2026/out, USR-DATA 6acd554d...). These are RPCS3 save
+  folders; a real PS3 needs them resigned (pfdtool, see 2026-11-03). Previewed on `wrangler dev --local --port 8798`;
+  needs `npx wrangler deploy`.
+- Evening: site-wide accounts (migrations 0023-0026, split on 2026-11-06, see there). Eric had to make a separate account per dynasty ("eric" in efoxod1 and
+  coach1, both blaze 1) because accounts and sessions carried a dynasty_id. Now `accounts` is one username + password
+  for the site owning at most one league-server persona (`blaze_id` = the RPCN user id the Blaze stub assigns at
+  ps3Login, stable per RPCN account), `account_members` links it to the member it acts as per dynasty, and sessions
+  have no dynasty. The Worker's member sync (api/bridge.ts upsertOnlineDynasty) links every console member whose
+  persona owns an account and drops links of members who left, so a dynasty created or joined on the console is
+  recognised on the site at the first import with the session already in the browser; session.ts also links lazily.
+  Invites remain for people without any account; the bridge call and "Create invite" link a known persona instead
+  (`{linked:true}`), and /join offers "Join as <username>" to a signed-in browser (web players anywhere, console
+  personas only for an account owning none). Migration: newest row per persona keeps its password, clashing usernames
+  get -<blaze id> / -<dynasty id>, personas linked to every dynasty they are in, sessions dropped (sign in once more).
+  Checked with a sqlite simulation of the production rows plus clash cases, tsc clean, vitest 19/19, and the flows on
+  `wrangler dev --local --port 8799`. Needs `cd worker && npx wrangler d1 migrations apply ncaa-online --remote` then
+  `npx wrangler deploy`; the bridge (invite.ts) only changed its message.
+- Uniform Studio textures looked "low-quality and distorted": codec.cjs read the p3R header as width @12 / height @16
+  but it is HEIGHT @12 / WIDTH @16 (DDS order), so a 1024x2048 jersey decoded as 2048x1024: two squashed copies side
+  by side, and the DDS hand-off carried the same swap into Paint.NET. Only square helmets looked right. Fixed in
+  parseTexture (test-codec still passes, the jersey decodes as one 1024x2048 image, the number decal as 0-9 stacked
+  256x4096); the editor canvas now smooths when zoomed out (pixelated only at >= 100 %) and bigfile thumbnails no
+  longer use nearest-neighbour. uniform-studio.html rebuilt. DDS files exported before the fix have the dimensions
+  swapped: re-export them from the fixed studio before editing.
+
+## 2026-11-06 — the site-accounts migration refused by D1's remote API (7403), split into 0023-0026
+
+- `npx wrangler d1 migrations apply ncaa-online --remote` failed on 0023 with "The given account is not valid or is
+  not authorized to access this service [code: 7403]" from `/d1/database/<id>/query`. Not a token problem: `wrangler
+  whoami` shows `d1 (write)`, `migrations list --remote` and `d1 execute --remote --command "SELECT ..."` work.
+- Probes with harmless statements against a table that does not exist (`UPDATE zz SET a = 1`, `DELETE FROM zz`,
+  `INSERT INTO zz ... SELECT`, `DROP TABLE zz`, `ALTER TABLE zz ADD COLUMN` / `RENAME TO`) all get the same 403, while
+  `DROP TABLE IF EXISTS zz`, any SELECT (CTEs, correlated subqueries, stacked `SELECT; SELECT`), comment lines and the
+  whole migration text inside a string literal pass. Earlier migrations all passed, including ones that create a table
+  and an index on it in one file. So the query API resolves the target table of every INSERT/UPDATE/DELETE/DROP/ALTER
+  against the schema as it stood when the request began and answers 7403 when it is missing; CREATE TABLE / CREATE
+  INDEX are exempt. 0023 was our first migration that created tables and wrote to them in the same file (and dropped
+  `sessions` / `accounts` and recreated or renamed onto them). The local D1 (miniflare) does not check this, which is
+  why last night's local apply and the e2e run were fine.
+- Fix: the same change as four files, each touching only tables that exist before it runs: 0023 creates `accounts_v2`,
+  `account_members` (+ index), `acct_map`; 0024 fills them from the old rows, re-points `invites`, then `DROP TABLE IF
+  EXISTS sessions / acct_map / accounts`; 0025 creates the final `accounts` and `sessions` (+ index); 0026 copies the
+  rows (same ids) from `accounts_v2` into `accounts` and drops the staging table. No RENAME and no CTE, so nothing
+  depends on how that API parses them. The sqlite simulation (migtest2: production rows plus clash cases and a
+  persona whose newest row changed username) passes, a fresh local D1 applies 0001-0026 cleanly, and its
+  `accounts` / `sessions` / `account_members` schema is identical to the one the single-file version produced.
+  The shared local dev DB already had the single-file 0023, so 0024-0026 were recorded there as applied by hand.
+- Rule for future migrations: never create-then-write, drop-then-recreate or drop-then-rename-onto a table in one file.
+  If a file cannot be split, `wrangler d1 execute ncaa-online --remote --file <sql>` goes through D1's transactional
+  import endpoint (file upload, no such check) and the file is then recorded in `d1_migrations` by hand.
+- Still needs, from `worker/`: `npx wrangler d1 migrations apply ncaa-online --remote` (lists 0023-0026) then
+  `npx wrangler deploy`; sign in once as eric afterwards (sessions are dropped).
+- Applied and deployed (migrations 0023-0026 on the remote D1, then `wrangler deploy`): 2 accounts (eric owning blaze
+  1, Dylan), eric linked to efoxod1, efoxcareer and coach1 (the dynasties blaze 1 is a synced member of), 0 sessions.
+  test26 (DID 9) and efoxOD4 (DID 10) have no members on the league server because Eric retired them on the console, so
+  there was nothing to link. Follow-up: `listDynasties` (the landing page's "Browse Dynasties") now hides a league-server
+  dynasty with no members (`od_id` set and no `od_members` rows); offline-save imports (no member list) stay listed and
+  the hidden dynasty's pages stay reachable by URL. Checked on `wrangler dev --port 8802` against a seeded local D1.

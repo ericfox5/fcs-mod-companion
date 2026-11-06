@@ -14,7 +14,11 @@ export async function odInvite(cfg: BridgeConfig, opts: { did?: number; persona:
   if (!opts.persona) throw new Error(`--persona is required (members of ${odName(d)}: ${names})`);
   const m = d.members.find((x) => x.persona.toLowerCase() === opts.persona.toLowerCase());
   if (!m) throw new Error(`no member "${opts.persona}" in ${odName(d)} (members: ${names})`);
-  const res = await new WorkerApi(cfg).json<{ code: string; slug: string; persona: string }>('POST', '/api/bridge/invites', { od: d.id, blazeId: m.blazeId, note: `bridge invite for ${m.persona}` });
+  const res = await new WorkerApi(cfg).json<{ code: string; slug: string; persona: string; linked?: boolean; username?: string }>('POST', '/api/bridge/invites', { od: d.id, blazeId: m.blazeId, note: `bridge invite for ${m.persona}` });
+  if (res.linked) { // the persona already owns a site account (from another dynasty): the Worker linked it instead
+    console.log(`${res.persona} (blaze ${m.blazeId}) already has the site account "${res.username}"; it is now linked to ${odName(d)} [${res.slug}]. No invite needed: sign in with that account.`);
+    return;
+  }
   const joinUrl = `${cfg.workerUrl.replace(/\/+$/, '')}/d/${res.slug}/join?code=${encodeURIComponent(res.code)}`;
   console.log(`invite for ${res.persona} (blaze ${m.blazeId}) in ${odName(d)} [${res.slug}]: ${res.code}`);
   console.log(`join link: ${joinUrl}`);

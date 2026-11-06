@@ -13,9 +13,9 @@ npx tsx tools/playbooks-extract.mts --usrdir "<…>/PS3_GAME/USRDIR" --out worke
 
 Header `BGFA1.05`; u32 entry count at 0x08; u32 TOC offset at 0x10 (0x40); u32 TOC size at 0x18; u32 prefix words at
 0x28; u32 name width at 0x2C (0 on the disc archives, 64 in the FCS DLC archives). The TOC is `prefixWords*4` bytes
-followed by records `{u16 flags, u64 hash, u32 offset, u32 compressedSize, u32 size, char name[nameWidth]}`. Entries
-are zlib streams (`78 da`). Several entries are EA DB files (the same format as the saves, parsed by `@ncaa/tdb`),
-sometimes wrapped: the extractor looks for the `DB\0\x08` magic in the first 4 KB.
+followed by records `{u16 flags, u64 hash, u32 offset, u32 compressedSize, u32 size - compressedSize,
+char name[nameWidth]}`. Entries are zlib streams (`78 da`). Several entries are EA DB files (the same format as the
+saves, parsed by `@ncaa/tdb`), sometimes wrapped: the extractor looks for the `DB\0\x08` magic in the first 4 KB.
 
 | Archive / entry | Tables | Role |
 |---|---|---|
@@ -72,9 +72,39 @@ shares (field goal, kneel, spike, kick/punt returns, FG block, onside) are appen
 ## How Supersim uses it (`worker/src/supersim/coach/`)
 
 - `books.ts` loads a book from the Worker's assets once per isolate; `teamBooks()` maps a team's `TOPB`/`TDPB`.
-- `engine.ts` resolves one snap: lineup from the depth chart by slot (`EPos`/`DPos`), play family from `PLYT` and
-  kinds, pass protection vs rush, man matchups by proximity, zone density by route depth, run box count vs blockers,
-  special teams, penalties, clock, overtime; it also writes the animation script (22 paths + ball) from the art.
+- `field.ts` (engine 3, 2026-11-02) plays every scrimmage snap and every kick return out on a 2D field at 20 ticks a
+  second; nothing is decided before the snap and the animation is the recorded movement.
+  - Movement: top speed, acceleration and agility from `PSPD`/`PACC`/`PAGI` shape how players get going and cut.
+  - Assignments from the art: routes, run and pass blocks, rush lanes, man coverage (trailing reaction from `PMCV` vs
+    `PRTR`), zone drops (landmarks clamped to 4..10 / 13..21 yards) that match the receiver in their area.
+  - Protection and run blocking are assigned at the snap (inside-out, by lane). Block against shed:
+    `PPBK`/`PPBS`/`PPBF` vs `PPMV`/`PFMV`; `PRBK`/`PRBS`/`PBFW`/`PIBL` vs `PBSH`/`PSTR`. Holding is flagged when a
+    beaten blocker is near the ball; discipline `PDIS` is a 0..7 field, not a 0..99 rating.
+  - The QB works his progression (`PLPD` order; read speed from `PAWR`) and throws on time to an open man. He feels
+    pressure (blind-side rushers only sometimes), takes the hot read against an unblocked rusher, scrambles, or
+    throws it away. Delivery takes ~0.2 s; ball speed is from `PTHP`, placement error from `PTHA` and distance.
+  - At the catch: reach from `SPCT`/`PJMP`, hands `PCTH`, traffic `TRAF` vs the nearest defender's coverage.
+    Defenders break on the ball (`PZCV`/`PMCV`, `PAWR`), and the man in coverage hits as it arrives.
+  - The ball carrier picks lanes by vision (`PBCV`), and his moves (`PJMV`, `PSMV`, `PSAR`, `PTRK` + `PBTK`) face
+    the tackle (`PTAK`, `PHIT`, `PSTR`), the angle and dives. Pursuit uses angles to where he is going (`PPRS`); box
+    defenders read run fast (`PPRC`). Fumbles use `PCAR` vs `PHIT`.
+- `engine.ts` keeps everything around the snap: lineup from the depth chart by slot (`EPos`/`DPos`), play family
+  from `PLYT` and kinds, field goals/kickoffs/punts (the returns run through `field.ts`), pre-snap penalties, the
+  clock, downs, overtime, stats and the play text. Each detail carries the board before the snap and after the play
+  (`pre`/`post`) so the browser never shows an outcome before the animation is over. The play clock is real against
+  the CPU (`state.pc` 25/40, `state.huddle`, `expirePlayClock` for a delay of game); a formation sub from the site
+  (`TeamInput.fsubs`) takes a slot before the depth chart.
 - `cpu.ts` picks the other sideline's play: situational run/pass/kick mix, weighted by the `ai` usage tables.
 - `routes.ts` is the HTTP API; `supersim_live` holds the game; the final goes to `supersim_games` unchanged for the
-  league server poller (`spike/blaze/server/supersim.mjs`).
+  league server poller (`spike/blaze/server/supersim.mjs`). A snap costs about 3 ms of CPU, so "sim" requests carry
+  at most 12 snaps.
+- Browser: `public/js/supersim/coach.js` plays the keyframes back. `celebrate.js` is the score/win overlay (team color,
+  logo, the scorer's or player of the game's photo, confetti).
+- Calibration (synthetic rosters shaped like the league's real ratings, `tools/supersim-diag-roster.mts`):
+  - `npx tsx tools/supersim-diag.mts [snaps]`: single snaps from 1st & 10. It reports completion, sacks, time to
+    throw, separation at the catch, air yards and YAC, yards per carry and its distribution, and tackle success.
+  - `npx tsx tools/supersim-sim.mts [games]`: whole CPU-vs-CPU games.
+  - `npx tsx tools/supersim-trace.mts pass|run [seed]`: one snap, every player every 0.5 s (`MINX=20` picks a big
+    play).
+  - On 2026-11-02 whole games averaged about 30 points, 62% completions, 3.6 yards a carry, 4.5 sacks and 0.15
+    safeties per team.

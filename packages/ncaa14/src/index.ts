@@ -10,4 +10,6 @@ export * from './decode/awards.js';
 export * from './decode/stats.js';
 export * from './decode/depth.js';
 export * from './decode/recruiting.js';
+export * from './decode/transfers.js';
 export { exportDynasty, type DynastyExport } from './export.js';
+export * from './playoff.js';

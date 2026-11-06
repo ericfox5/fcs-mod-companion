@@ -12,7 +12,10 @@ export interface BookIndex { generated: string; books: { id: number; bgid: numbe
 
 // ---- game input (rosters) ----
 export interface PlayerInput { id: number; name: string; number: number; pos: number; overall: number; ratings: Record<string, number>; photoUrl?: string }
-export interface TeamInput { id: number; name: string; abbr: string; logo: string; color?: string; offBook: number; defBook: number; players: PlayerInput[]; depthChart: { pos: number; depth: number; pgid: number }[] }
+// fsubs: formation subs from the site's depth chart page, "<side>:<set id>:<slot>" -> pgid (a player for one slot of one set)
+// synthetic: the game keeps no roster for this team (generic FCS slot); the players are generated placeholders and
+// nothing about them goes back to the console (team totals only)
+export interface TeamInput { id: number; name: string; abbr: string; logo: string; color?: string; offBook: number; defBook: number; players: PlayerInput[]; depthChart: { pos: number; depth: number; pgid: number }[]; fsubs?: Record<string, number>; synthetic?: boolean }
 export interface GameInput {
   dynasty: string; dynastyId: number; season: number; week: number; gameNo: number; gameId: string; snapshot: number | null; ownedTeamId: number;
   quarterSeconds: number; teams: [TeamInput, TeamInput]; backUrl: string; home: number; away: number;
@@ -58,7 +61,13 @@ export interface GameState {
   sc?: ScoreEv[];
   toss?: Toss; h2?: Side; // h2: the team receiving the second-half kickoff
   subs?: [Record<string, number[]>, Record<string, number[]>]; // per side: depth-chart position -> player order (substitutions)
+  // the play clock before the next snap: 40 after a play by the same offense, 25 after a stoppage (score, change of
+  // possession, penalty, timeout, kick, new quarter). huddle: when it started on the server (ms epoch), the seconds the
+  // browser needs to play the previous plays back before it starts counting, and for a CPU offense the reading it snaps at.
+  pc?: number; huddle?: { at: number; allow: number; cpuAt: number | null };
 }
+// the game as it stood at the snap / after the play, for the scoreboard while a play is animated
+export interface SnapState { phase: Phase; off: Side; kicking?: Side; ball: number; down: number; toGo: number; q: number; clock: number; score: [number, number]; to: [number, number]; running: boolean; patTeam?: Side; freeKick?: boolean; pc?: number; final?: boolean }
 
 // ---- play detail (returned to the browser; the last one is also kept in the state for reloads) ----
 export interface Actor { s: 'o' | 'd'; i: number; id: number; num: number; pos: number; k: string; path: number[][] } // path: [t, x (yards downfield from the LOS), y (yards right)]
@@ -69,7 +78,9 @@ export interface Anim { dur: number; los: number; fd: number; off: Side; dir: 1 
 export interface PlayDetail {
   n: number; headline: string; text: string; kind: string; yards: number; off: Side; offPlay: { id: number; n: string; set: string; form: string }; defPlay: { id: number; n: string; set: string; form: string };
   anim: Anim; score: [number, number]; q: number; clock: number; drive?: Drive; scoring?: string; people: { id: number; side: Side; role: string }[]; penalty?: string;
-  // clocks: game clock before the between-play runoff, at the snap, play clock left at the snap; the quarter of the snap and
-  // whether the field ends were flipped for it (Q2/Q4 and even overtimes)
-  clk0?: number; snap?: number; pc?: number; pq?: number; flip?: boolean;
+  // clocks: game clock before the between-play runoff, at the snap, play clock left at the snap (of pcLen seconds); the
+  // quarter of the snap and whether the field ends were flipped for it (Q2/Q4 and even overtimes)
+  clk0?: number; snap?: number; pc?: number; pcLen?: number; pq?: number; flip?: boolean;
+  // the board before the snap and after the play: the browser shows pre while the play runs and post once it is over
+  pre?: SnapState; post?: SnapState;
 }

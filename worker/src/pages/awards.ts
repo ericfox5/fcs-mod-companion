@@ -2,9 +2,11 @@ import type { PageCtx } from '../index.js';
 import { html, type Raw } from '../html.js';
 import { layout, box } from '../layout.js';
 import { getTeams, getHeisman, getAllAmericans, getPlayersByIds, getConferences, getSeasonStatsFor, teamMap, type PlayerRow, type TeamRow } from '../db/queries.js';
-import { playerLink, pos, cls, teamLink, headshot, teamLogo, confLogo } from './common.js';
+import { playerLink, pos, cls, teamLink, headshot, teamLogo, confLogo, seasonLabel } from './common.js';
 
-const HEISMAN_LOGO = 'https://upload.wikimedia.org/wikipedia/en/8/8e/Heisman_Trophy_Logo.png';
+// The national player-of-the-year race (the game's HEIS table) is headed by the league's own Walter Payton Award banner
+// (public/img/awards, cropped from the commissioner's artwork); the header strip continues in the banner's black.
+const AWARD_BANNER = '/img/awards/walter-payton-award.png';
 type Stats = Map<string, Record<string, number>>; // kind (PSOF, PSDE, PSKI, PSKP, PSOL) -> season line
 
 // Three headline numbers per position, from the season stat lines (codes as on the Stats page).
@@ -47,11 +49,11 @@ export async function awardsPage(ctx: PageCtx) {
   const teamCell = (p: PlayerRow | undefined, t: TeamRow | undefined) => html`<td class="team-cell">${p ? html`${teamLogo(t, 'xs')}${teamLink(dyn.slug, t)}` : ''}</td>`;
 
   const watch = heis.map((h) => ({ ...h, pts: Number((JSON.parse(h.raw_json || '{}') as Record<string, number>).PCAP ?? 0) })).sort((a, b) => b.pts - a.pts);
-  const heisTitle = html`<span class="heisman-title"><img class="heisman-logo" src="${HEISMAN_LOGO}" alt="Heisman" height="26"> Watch</span>`;
-  const heisBox = box(heisTitle, heis.length ? html`<table class="list awards"><tr><th class="rk">RK</th><th>Player</th><th>Pos</th><th>Team</th><th>Season</th><th class="num">Pts</th><th class="num">LW</th></tr>${watch.map((h, i) => {
+  const heisBody = (heis.length ? html`<table class="list awards"><tr><th class="rk">RK</th><th>Player</th><th>Pos</th><th>Team</th><th>Season</th><th class="num">Pts</th><th class="num">LW</th></tr>${watch.map((h, i) => {
     const p = players.get(h.pgid);
     return html`<tr><td class="rk">${i + 1}</td><td>${p ? headshot(p) : ''} ${playerLink(dyn.slug, p)}</td><td>${p ? pos(p.pos) : ''}</td>${teamCell(p, p ? tm.get(p.tgid) : undefined)}${p ? keyCell(p.pos, stats.get(p.pgid)) : html`<td></td>`}<td class="num">${h.pts}</td><td class="num muted">${h.rank >= 15 ? 'NR' : h.rank + 1}</td></tr>`;
-  })}</table><p class="muted">Ordered by Heisman points; LW = last week's slot.</p>` : html`<p class="muted">No Heisman race yet.</p>`);
+  })}</table><p class="muted">Ordered by award points; LW = last week's slot.</p>` : html`<p class="muted">No award race yet.</p>`);
+  const heisBox = html`<section class="box award-box"><h3 class="award-banner"><img src="${AWARD_BANNER}" alt="Walter Payton Award" width="229" height="120"><span class="ab-sub">Award watch · ${seasonLabel(dyn)}</span></h3><div class="box-body">${heisBody}</div></section>`;
 
   const teamTable = (type: number, label: string) => {
     const rows = confRows.filter((a) => a.team_type === type).sort((a, b) => a.pos - b.pos);

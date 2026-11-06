@@ -1,10 +1,15 @@
 import type { PageCtx } from '../index.js';
 import { html, type Raw } from '../html.js';
 import { layout, box } from '../layout.js';
-import { getTeams, getTeam, getRecruits, getBoard, getUserTeams, getGames, teamMap, getWebBoard, upsertWebBoard, deleteWebBoard, type BoardRow, type RecruitRow, type TeamRow, type WebBoardRow, getCommittedPrsis } from '../db/queries.js';
+import { getTeams, getTeam, getRecruits, getBoard, getUserTeams, getGames, teamMap, getWebBoard, upsertWebBoard, deleteWebBoard, type BoardRow, type RecruitRow, type TeamRow, type WebBoardRow, getCommittedPrsis, listPendingRecruitEditPrsis, getLatestOverhaulRequest } from '../db/queries.js';
 import { getTeamVisits, getWebVisits, upsertWebVisits, deleteWebVisits, type VisitRow } from '../db/visits.js';
 import { redirect } from '../session.js';
 import { teamLink, teamLogo, pos, heightFt, headshot, interestStack, weekLabel } from './common.js';
+import { classBox, isCommissioner } from './recruit-edit.js';
+
+// a prospect's name links to his card (/recruit/<prsi>, with the editor for those who may edit him); a site edit the
+// console has not taken yet is tagged
+const prospectName = (slug: string, r: RecruitRow, pending: Set<number>) => html`<a class="pr-link" href="/d/${slug}/recruit/${r.prsi}">${r.first_name} ${r.last_name}</a>${pending.has(r.prsi) ? html` <span class="tag pending" title="Edited on the site; applied when the dynasty next loads on the console">EDIT</span>` : ''}`;
 
 const MAX_PER_PROSPECT = 500; // the game's cap per prospect per week
 const MAX_SCOUT = 1000;
@@ -45,7 +50,8 @@ async function recruitingCtx(ctx: PageCtx) {
   const myTeam = member?.tgid && member.tgid !== 1023 ? member.tgid : undefined;
   const tgid = url.searchParams.get('team') ? Number(url.searchParams.get('team')) : (myTeam ?? userTeams[0]?.tgid);
   const team = tgid !== undefined ? tm.get(tgid) : undefined;
-  const canEdit = !!team && myTeam === team.tgid;
+  // a web-only member (migration 0014) has no console: the CPU recruits for their team at the advance, so no board edits
+  const canEdit = !!team && myTeam === team.tgid && member?.web_only !== 1;
   return { teams, tm, userTeams, myTeam, tgid, team, canEdit };
 }
 const top300Badge = (slug: string) => html`<a class="top300" href="/d/${slug}/recruiting/top300" title="Top 300 prospects"><span class="t-top">TOP</span><span class="t-num">300</span></a>`;
@@ -87,6 +93,8 @@ export async function recruitingPage(ctx: PageCtx) {
     return html`<select class="visit-sel" name="visit_${prsi}"><option value="">No visit</option>${homeWeeks.map((w) => html`<option value="${w.week}" ${v?.RCWK === w.week ? 'selected' : ''}>Wk ${w.week + 1} vs ${w.opp}</option>`)}</select>`;
   };
   const flash = url.searchParams.get('saved') ? html`<p class="flash">Board saved. The console picks it up the next time the dynasty loads (refresh or resume), and it stays until the console confirms it.</p>` : url.searchParams.get('err') ? html`<p class="flash err">${url.searchParams.get('err')}</p>` : html``;
+  const pendingEdits = await listPendingRecruitEditPrsis(db, d, y);
+  const classCard = isCommissioner(member) ? classBox(ctx, await getLatestOverhaulRequest(db, d, y)) : html``;
   const picker = html`<form class="inline" method="get"><select name="team" onchange="this.form.submit()">${teams.map((t) => html`<option value="${t.tgid}" ${t.tgid === tgid ? 'selected' : ''}>${t.name}${userTeams.some((u) => u.tgid === t.tgid) ? ' (user)' : ''}</option>`)}</select></form>`;
   const header = html`<div class="rec-head"><h2>Recruiting · ${weekLabel(week)}</h2>${top300Badge(dyn.slug)}${picker}</div>`;
 
@@ -103,7 +111,7 @@ export async function recruitingPage(ctx: PageCtx) {
   const controls = (r: WebBoardRow) => html`<button class="btn icon" name="move" value="${r.PRSI}:up" title="Move up">&#9650;</button><button class="btn icon" name="move" value="${r.PRSI}:down" title="Move down">&#9660;</button><button class="btn sm danger" name="remove" value="${r.PRSI}">Remove</button>`;
   const prospect = (r: WebBoardRow, i: number) => {
     const rec = recruitOf(r.PRSI);
-    const name = rec ? `${rec.first_name} ${rec.last_name}` : `Prospect ${r.PRSI}`;
+    const name = rec ? prospectName(dyn.slug, rec, pendingEdits) : html`Prospect ${r.PRSI}`;
     const done = !!rec?.committed, ours = done && rec!.committed_tgid === tgid;
     const tag = done ? (ours ? html` <span class="tag commit">&#10003; COMMITTED</span>` : html` <span class="tag gone">COMMITTED ${tm.get(rec!.committed_tgid ?? -1)?.abbr ?? 'ELSEWHERE'}</span>`) : html``;
     const locked = html`<span class="st-f st-done">${ours ? html`&#10003; Committed to ${team?.abbr ?? 'you'}` : html`Committed to ${tm.get(rec!.committed_tgid ?? -1)?.name ?? 'another school'}`}</span>`;
@@ -148,10 +156,10 @@ export async function recruitingPage(ctx: PageCtx) {
   const onBoard = new Set(desired.rows.map((r) => r.PRSI));
   const matches = canEdit && q ? (await getRecruits(db, d, { limit: 5000 })).filter((r) => !r.committed && !onBoard.has(r.prsi) && `${r.first_name} ${r.last_name}`.toLowerCase().includes(q.toLowerCase())).slice(0, 15) : [];
   const addBox = canEdit ? box('Add a prospect', html`<form class="addbox" method="get"><input type="hidden" name="team" value="${team!.tgid}"><input type="text" name="q" value="${q}" placeholder="Search by name" inputmode="search"> <button class="btn light">Search</button> <span class="muted">or browse the</span> ${top300Badge(dyn.slug)}${desired.rows.length >= BOARD_SLOTS ? html` <span class="muted">Board is full.</span>` : ''}</form>
-      ${matches.length ? html`<div class="prlist t300">${t300Head()}${matches.map((r, i) => t300Row(dyn.slug, tm, r, i, canEdit && team ? { tgid: team.tgid, week, full: desired.rows.length >= BOARD_SLOTS, onBoard: false, back: `/d/${dyn.slug}/recruiting?team=${team.tgid}&q=${encodeURIComponent(q)}` } : null))}</div>` : q ? html`<p class="muted">No uncommitted prospect matches "${q}".</p>` : html``}`) : html``;
+      ${matches.length ? html`<div class="prlist t300">${t300Head()}${matches.map((r, i) => t300Row(dyn.slug, tm, r, i, canEdit && team ? { tgid: team.tgid, week, full: desired.rows.length >= BOARD_SLOTS, onBoard: false, back: `/d/${dyn.slug}/recruiting?team=${team.tgid}&q=${encodeURIComponent(q)}` } : null, pendingEdits))}</div>` : q ? html`<p class="muted">No uncommitted prospect matches "${q}".</p>` : html``}`) : html``;
 
-  const who = !member && (ctx.locked || (members?.length ?? 0) > 1) ? html`<p class="flash err">${ctx.locked ? 'Sign in from the top bar to edit your board.' : 'Pick who you are in the top bar to edit your board.'}</p>` : member && !canEdit && team ? html`<p class="muted">Viewing ${team.name}'s board. ${myTeam ? html`<a href="?team=${myTeam}">Go to your board</a>.` : 'You have no team yet.'}</p>` : html``;
-  const body = html`${header}${flash}${who}${box(html`${teamLogo(team, 'sm')}${team ? `${team.name} recruiting board` : 'Recruiting board'}`, html`${budgetBar}${desired.rows.length ? form : html`<p class="muted">Nothing on the board.</p>`}`)}${addBox}`;
+  const who = !member && (ctx.locked || (members?.length ?? 0) > 1) ? html`<p class="flash err">${ctx.locked ? 'Sign in from the top bar to edit your board.' : 'Pick who you are in the top bar to edit your board.'}</p>` : member?.web_only === 1 && myTeam === team?.tgid ? html`<p class="muted">${team!.name} is a CPU team to the console, so its recruiting runs there; web players coach Supersim games only.</p>` : member && !canEdit && team ? html`<p class="muted">Viewing ${team.name}'s board. ${myTeam ? html`<a href="?team=${myTeam}">Go to your board</a>.` : 'You have no team yet.'}</p>` : html``;
+  const body = html`${header}${flash}${who}${classCard}${box(html`${teamLogo(team, 'sm')}${team ? `${team.name} recruiting board` : 'Recruiting board'}`, html`${budgetBar}${desired.rows.length ? form : html`<p class="muted">Nothing on the board.</p>`}`)}${addBox}`;
   return layout({ strip: ctx.strip, member, members, path: url.pathname + url.search, title: 'Recruiting', siteName: env.SITE_NAME, dyn, section: 'recruiting', body, wide: true });
 }
 
@@ -161,12 +169,12 @@ const addButton = (slug: string, tgid: number, week: number, prsi: number, full:
 // Top 300 / search rows: rank, prospect, pos, stars, ht, wt, scouted OVR, interest or commitment, add.
 interface AddCtx { tgid: number; week: number; full: boolean; onBoard: boolean; back: string }
 const t300Head = () => html`<div class="pr-head desk-only t300"><span class="pr-rk">${sortBtn('rank', 'Rk', 'National rank')}</span><span></span><span class="pr-name">${sortBtn('name', 'Prospect')}</span><span class="pr-col c-pos">${sortBtn('pos', 'Pos')}</span><span class="pr-col c-stars">${sortBtn('stars', 'Stars')}</span><span class="pr-col c-ht">${sortBtn('ht', 'Ht')}</span><span class="pr-col c-wt">${sortBtn('wt', 'Wt')}</span><span class="pr-col c-ovr">${sortBtn('ovr', 'OVR', 'Scouted overall (rises as scouting completes)')}</span><span class="pr-col c-int">Interest</span><span class="pr-col c-add"></span></div>`;
-function t300Row(slug: string, tm: Map<number, TeamRow>, r: RecruitRow, i: number, add: AddCtx | null): Raw {
+function t300Row(slug: string, tm: Map<number, TeamRow>, r: RecruitRow, i: number, add: AddCtx | null, pending: Set<number> = new Set()): Raw {
   const committed = r.committed ? html`${teamLogo(tm.get(r.committed_tgid ?? -1), 'xs')}${teamLink(slug, tm.get(r.committed_tgid ?? -1), 'Committed')}` : interestStack(tm, r.teams_json);
   return html`<div class="pr t300" ${dataAttrs(r, i)}>
     <div class="pr-sum static t300">
       <span class="pr-rk">${r.rank}</span>${headshot(r)}
-      <span class="pr-name"><span class="pr-n">${r.first_name} ${r.last_name}${add?.onBoard ? html` <span class="tag">ON BOARD</span>` : ''}</span><span class="pr-meta mob-only">${pos(r.pos)} · <span class="stars">${stars(r.stars)}</span> · ${heightFt(r.height)} ${r.weight} lb · OVR ${r.pre_scout_overall}</span></span>
+      <span class="pr-name"><span class="pr-n">${prospectName(slug, r, pending)}${add?.onBoard ? html` <span class="tag">ON BOARD</span>` : ''}</span><span class="pr-meta mob-only">${pos(r.pos)} · <span class="stars">${stars(r.stars)}</span> · ${heightFt(r.height)} ${r.weight} lb · OVR ${r.pre_scout_overall}</span></span>
       <span class="pr-col c-pos">${pos(r.pos)}</span>
       <span class="pr-col c-stars stars">${stars(r.stars)}</span>
       <span class="pr-col c-ht">${heightFt(r.height)}</span>
@@ -189,7 +197,8 @@ export async function top300Page(ctx: PageCtx) {
   const full = (desired?.rows.length ?? 0) >= BOARD_SLOTS;
   const flash = url.searchParams.get('saved') ? html`<p class="flash">Added to your board. The console picks it up the next time the dynasty loads.</p>` : url.searchParams.get('err') ? html`<p class="flash err">${url.searchParams.get('err')}</p>` : html``;
   const back = `/d/${dyn.slug}/recruiting/top300`;
-  const rows = all.map((r, i) => t300Row(dyn.slug, tm, r, i, canEdit && team ? { tgid: team.tgid, week, full, onBoard: onBoard.has(r.prsi), back } : null));
+  const pendingEdits = await listPendingRecruitEditPrsis(db, d, y);
+  const rows = all.map((r, i) => t300Row(dyn.slug, tm, r, i, canEdit && team ? { tgid: team.tgid, week, full, onBoard: onBoard.has(r.prsi), back } : null, pendingEdits));
   const body = html`<div class="rec-head"><h2>Top 300 prospects</h2>${top300Badge(dyn.slug)}<a class="btn light" href="/d/${dyn.slug}/recruiting">Back to the board</a></div>${flash}
     ${box(`${all.length} prospects by national rank`, html`${tools(all)}<div class="prlist t300">${t300Head()}${rows}</div>${showAll ? html`` : html`<div class="board-actions"><a class="btn light" href="?all=1">Show all 300</a><span class="muted">Showing the top 100; sorting and filters apply to the rows shown.</span></div>`}`)}`;
   return layout({ strip: ctx.strip, member, members, path: url.pathname + url.search, title: 'Top 300', siteName: env.SITE_NAME, dyn, section: 'recruiting', body, wide: true });
@@ -203,6 +212,7 @@ export async function boardAction(ctx: PageCtx, form: FormData): Promise<Respons
   const backTo = String(form.get('back') ?? '');
   const base = backTo.startsWith('/') ? backTo : `/d/${dyn.slug}/recruiting?team=${tgid}`;
   const back = (extra: string) => redirect(base + (base.includes('?') ? '&' : '?') + extra.replace(/^&/, ''));
+  if (member?.web_only === 1) return back(`err=${encodeURIComponent('The console CPU recruits for a web player team.')}`);
   if (!member || member.tgid !== tgid) return back(`err=${encodeURIComponent('You can only edit your own board.')}`);
   if (num(form.get('week'), -1) !== week) return back(`err=${encodeURIComponent('The dynasty advanced while you were editing; the board was reloaded.')}`);
   const team = await getTeam(db, d, tgid);

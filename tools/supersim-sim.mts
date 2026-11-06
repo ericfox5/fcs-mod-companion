@@ -1,24 +1,18 @@
 // Offline smoke test for the coaching engine: plays whole games CPU-vs-CPU with real playbooks and synthetic rosters,
 // then prints the box score and aggregate sanity numbers.   npx tsx tools/supersim-sim.mts [games] [offBook] [defBook]
 import { readFileSync } from 'node:fs';
-import { newGame, runPlay, mulberry32, POS } from '../worker/src/supersim/coach/engine.ts';
+import { newGame, runPlay, mulberry32 } from '../worker/src/supersim/coach/engine.ts';
 import { cpuOffense, cpuDefense } from '../worker/src/supersim/coach/cpu.ts';
 import { buildResult, buildEnvelope } from '../worker/src/supersim/coach/result.ts';
-import type { Book, GameInput, PlayerInput, TeamInput, GameState } from '../worker/src/supersim/coach/types.ts';
+import type { Book, GameInput, GameState } from '../worker/src/supersim/coach/types.ts';
+import { roster as shaped } from './supersim-diag-roster.mts';
 
 const games = Number(process.argv[2] ?? 3), offId = Number(process.argv[3] ?? 236), defId = Number(process.argv[4] ?? 109);
 const book = (id: number) => JSON.parse(readFileSync(`worker/public/data/playbooks/${id}.json`, 'utf8')) as Book;
 const books = new Map<number, Book>(); for (const id of [offId, defId, 105, 112]) books.set(id, book(id));
 const rng = mulberry32(Number(process.env.SEED ?? 7));
-const KEYS = ['PSPD', 'PACC', 'PAGI', 'PSTR', 'PAWR', 'PCTH', 'PCAR', 'PBTK', 'PTHA', 'PTHP', 'PPBK', 'PRBK', 'PTAK', 'PBSH', 'PPMV', 'PFMV', 'PMCV', 'PZCV', 'PPRS', 'PRTR', 'PKAC', 'PKPR', 'PBCV', 'PHIT'];
-function roster(tgid: number, quality: number): TeamInput {
-  const counts: Record<number, number> = { 0: 3, 1: 4, 2: 2, 3: 6, 4: 3, 5: 2, 6: 2, 7: 2, 8: 2, 9: 2, 10: 2, 11: 2, 12: 4, 13: 2, 14: 3, 15: 2, 16: 5, 17: 2, 18: 2, 19: 1, 20: 1 };
-  const players: PlayerInput[] = []; let id = tgid * 1000; const depth: TeamInput['depthChart'] = [];
-  for (const [pos, n] of Object.entries(counts)) for (let d = 0; d < n; d++) { const ovr = Math.round(quality - d * 6 + (rng() - 0.5) * 8); const ratings: Record<string, number> = {}; for (const k of KEYS) ratings[k] = Math.max(30, Math.min(99, Math.round(ovr + (rng() - 0.5) * 20))); if (Number(pos) >= 5 && Number(pos) <= 9) ratings['PSPD'] = 50; if (Number(pos) === 3 || Number(pos) === 16) ratings['PSPD'] = Math.min(99, ratings['PSPD']! + 8); players.push({ id: ++id, name: `${POS[Number(pos)]} ${d + 1} T${tgid}`, number: 1 + Math.floor(rng() * 98), pos: Number(pos), overall: ovr, ratings }); depth.push({ pos: Number(pos), depth: d, pgid: id }); }
-  // KR/PR/KO/LS from existing players
-  const fastest = players.filter((p) => p.pos === 3).sort((a, b) => b.ratings['PSPD']! - a.ratings['PSPD']!)[0]!; depth.push({ pos: 21, depth: 0, pgid: fastest.id }, { pos: 22, depth: 0, pgid: fastest.id }, { pos: 23, depth: 0, pgid: players.find((p) => p.pos === 19)!.id }, { pos: 24, depth: 0, pgid: players.find((p) => p.pos === 7)!.id });
-  return { id: tgid, name: `Team ${tgid}`, abbr: `T${tgid}`, logo: '', offBook: tgid === 1 ? offId : 105, defBook: tgid === 1 ? defId : 112, players, depthChart: depth };
-}
+// position-shaped synthetic rosters (tools/supersim-diag-roster.mts)
+const roster = (tgid: number, quality: number) => shaped(tgid, quality, tgid === 1 ? offId : 105, tgid === 1 ? defId : 112, rng);
 const totals = { plays: 0, pass: 0, comp: 0, passYds: 0, int: 0, sack: 0, rush: 0, rushYds: 0, pts: 0, fga: 0, fgm: 0, punts: 0, fum: 0, pen: 0, td: 0, ot: 0, maxPlays: 0, minutes: 0 };
 for (let g = 0; g < games; g++) {
   const input: GameInput = { dynasty: 'Test', dynastyId: 1, season: 2013, week: 3, gameNo: 1, gameId: `t:${g}`, snapshot: 1, ownedTeamId: 1, quarterSeconds: 15 * 60, teams: [roster(1, 72 + rng() * 10), roster(2, 72 + rng() * 10)], backUrl: '/', home: 2, away: 1 };

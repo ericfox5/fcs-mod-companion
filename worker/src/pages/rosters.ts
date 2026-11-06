@@ -1,10 +1,8 @@
 import type { PageCtx } from '../index.js';
-import { html, notFound } from '../html.js';
-import { layout, box, two } from '../layout.js';
-import { getTeams, getTeam, getPlayers, getPlayer, getPlayerSeasonStats, teamMap, getPendingPlayerEdit, listPendingPlayerEditPgids } from '../db/queries.js';
-import { playerEditCard, canEditPlayer } from './player-edit.js';
-import { teamLink, playerLink, pos, cls, heightFt, headshot } from './common.js';
-import { fieldName, POSITIONS } from '@ncaa/ncaa14';
+import { html } from '../html.js';
+import { layout, box } from '../layout.js';
+import { getTeams, getPlayers, listPendingPlayerEditPgids } from '../db/queries.js';
+import { playerLink, pos, cls, heightFt, headshot } from './common.js';
 
 export async function rostersPage(ctx: PageCtx, tgid?: number) {
   const { env, dyn } = ctx;
@@ -21,21 +19,3 @@ export async function rostersPage(ctx: PageCtx, tgid?: number) {
   return layout({ strip: ctx.strip, member: ctx.member, members: ctx.members, path: ctx.url.pathname, title: 'Rosters', siteName: env.SITE_NAME, dyn, section: 'rosters', body });
 }
 
-export async function playerPage(ctx: PageCtx, pgid: number) {
-  const { env, dyn } = ctx;
-  const db = env.DB, d = dyn.id, y = dyn.season_year;
-  const p = await getPlayer(db, d, pgid);
-  if (!p) return notFound('No such player');
-  const team = await getTeam(db, d, p.tgid);
-  const pending = await getPendingPlayerEdit(db, d, pgid, y, dyn.week ?? 0);
-  const editCard = canEditPlayer(ctx.member, p) ? playerEditCard(ctx, p, pending) : html``;
-  const ratings: Record<string, number> = JSON.parse(p.ratings_json || '{}');
-  const KEY = ['PSPD', 'PSTR', 'PAGI', 'PACC', 'PAWR', 'PBTK', 'PTRK', 'PELU', 'PBCV', 'PSMV', 'PJMV', 'PCAR', 'PCTH', 'PSPC', 'PCIT', 'PRTE', 'PJMP', 'PTHP', 'PTHA', 'PTAK', 'PHIT', 'PPMV', 'PFMV', 'PBSH', 'PPUR', 'PPRC', 'PMCV', 'PZCV', 'PPRS', 'PRLS', 'PPBK', 'PPBF', 'PPBS', 'PRBK', 'PRBF', 'PRBS', 'PIBL', 'PKPR', 'PKAC', 'PRET', 'PSTM', 'PINJ', 'PTGH'];
-  const shown = KEY.filter((k) => k in ratings);
-  const stats = await Promise.all(['PSOF', 'PSDE', 'PSKI', 'PSKP', 'PSOL'].map(async (k) => [k, (await getPlayerSeasonStats(db, d, y, k)).find((s) => s.pgid === pgid)] as const));
-  const left = html`<div class="box player-card">${headshot(p, 'lg')}<h2>${p.first_name} ${p.last_name}${pending ? html` <span class="tag pending" title="Edited on the site; applied when the dynasty next loads on the console">PENDING</span>` : ''}</h2><p>${pos(p.pos)} · ${cls(p)} · #${p.jersey} · ${heightFt(p.height)} ${p.weight} lb · ${teamLink(dyn.slug, team ?? undefined)} · OVR <strong>${p.overall}</strong></p></div>
-    ${box('Ratings', html`<table class="list ratings">${shown.map((k) => html`<tr><td>${fieldName(k)}</td><td class="bar"><span style="width:${ratings[k]}%"></span></td><td class="ovr">${ratings[k]}</td></tr>`)}</table>`)}`;
-  const right = html`${editCard}${stats.filter(([, s]) => s).map(([k, s]) => box(`Season stats (${k})`, html`<table class="list">${Object.entries(JSON.parse(s!.stats_json)).filter(([f]) => !['PGID', 'SEYR', 'STKF', 'kind'].includes(f)).map(([f, v]) => html`<tr><td>${fieldName(f)}</td><td>${v as number}</td></tr>`)}</table>`))}
-    ${box('Position', html`<p>${POSITIONS[p.pos] ?? p.pos}</p>`)}`;
-  return layout({ strip: ctx.strip, member: ctx.member, members: ctx.members, path: ctx.url.pathname, title: `${p.first_name} ${p.last_name}`, siteName: env.SITE_NAME, dyn, section: 'rosters', body: two(left, right) });
-}

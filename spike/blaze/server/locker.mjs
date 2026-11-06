@@ -11,6 +11,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import crypto from 'node:crypto';
+import { canReadContent, canReadSharedContent } from './league-auth.mjs';
 import { fileURLToPath } from 'node:url';
 import { T } from './tdf.mjs';
 import { log } from './log.mjs';
@@ -28,7 +30,9 @@ export const LOCKER_COMMANDS = {
 export const LOCKER_ERR_CONTENT_NOT_FOUND = 14;
 
 // ---- persistent content store: private/locker/index.json + private/locker/<cid>.bin (gitignored) ----
-const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'private', 'locker');
+const DIR = path.join(process.env.NCAA_PRIVATE
+  ? path.resolve(process.env.NCAA_PRIVATE)
+  : path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'private'), 'locker');
 const INDEX = path.join(DIR, 'index.json');
 fs.mkdirSync(DIR, { recursive: true });
 const load = () => { try { return JSON.parse(fs.readFileSync(INDEX, 'utf8')); } catch { return { nextId: 1, contents: {} }; } };
@@ -43,43 +47,96 @@ const num = (v, dflt = 0) => (typeof v === 'number' ? v : typeof v === 'bigint' 
 const items = (v) => (v && Array.isArray(v.items) ? v.items : []);
 
 let baseUrl = 'http://127.0.0.1:17503';
-const uploadUrl = (c) => `${baseUrl}/locker/upload?cid=${c.cid}`;     // the client appends "&pers=<persona>"
-const downloadUrl = (c) => `${baseUrl}/locker/download?cid=${c.cid}`;
+let security = null;
+const capabilities = new Map();
+export const configureLockerAuth = options => { security = options; };
+export const getContent = cid => find(cid);
+function capability(c, session, mode) {
+  if (!security) return '';
+  const allowed = mode === 'download' ? canReadSharedContent(c,session,security.dynasties) : canReadContent(c,session,security.dynasties);
+  if (!session || !security.isActive(session) || !allowed || (mode === 'upload' && c.owner !== session.userId)) return '&cap=denied';
+  const now = Date.now();
+  for (const [key, value] of capabilities) if (value.expires < now || !value.session.active) capabilities.delete(key);
+  const token = crypto.randomBytes(24).toString('hex');
+  capabilities.set(token,{ cid:c.cid, mode, session, expires:now+30*60*1000 });
+  return `&cap=${token}`;
+}
+const uploadUrl = (c,s) => `${baseUrl}/locker/upload?cid=${c.cid}${capability(c,s,'upload')}`;
+const downloadUrl = (c,s) => `${baseUrl}/locker/download?cid=${c.cid}${capability(c,s,'download')}`;
 
 // Blaze::Locker::ContentInfo, members in tag order. BOID/GPID (object ids) and HIDE are left out: the client keeps their defaults.
-function contentInfo(w, c) {
+function contentInfo(w, c, session) {
   w.list('ATTR', T.STRUCT, c.attrs ?? [], (x, a) => { x.str('NAME', str(a.NAME)); x.str('VALU', str(a.VALU)); x.push(0); });
   w.str('CCAT', c.ccat); w.int('CDAT', c.cdat); w.int('CID', c.cid); w.int('COID', c.coid); w.str('DESC', c.desc); w.str('DFMT', '');
-  w.int('EDAT', c.edat); w.int('EID', c.owner); w.str('ENAM', c.persona); w.str('GURL', downloadUrl(c)); w.str('NAME', c.name); w.int('PERM', c.perm);
+  w.int('EDAT', c.edat); w.int('EID', c.owner); w.str('ENAM', c.persona); w.str('GURL', downloadUrl(c,session)); w.str('NAME', c.name); w.int('PERM', c.perm);
   w.int('RATE', 0); w.int('RCNT', 0); w.int('SIZE', c.size); w.int('STTS', c.status);
   w.map('SUBL', T.STRING, T.STRUCT, [], () => {}, () => {});
   w.list('TAGS', T.STRUCT, c.tags ?? [], (x, t) => { x.str('TAG', str(t.TAG)); x.int('TGID', num(t.TGID)); x.push(0); });
-  w.int('UCNT', c.ucnt ?? 0); w.int('UDAT', c.udat); w.str('UURL', uploadUrl(c)); w.str('XID', '');
+  w.int('UCNT', c.ucnt ?? 0); w.int('UDAT', c.udat); w.str('UURL', uploadUrl(c,session)); w.str('XID', '');
 }
-const infoReply = (c) => (w) => w.struct('INFO', (x) => contentInfo(x, c));
-const listReply = (list) => (w) => { w.list('LKRS', T.STRUCT, list, (x, c) => { contentInfo(x, c); x.push(0); }); w.int('MSIZ', 0); w.int('TCNT', list.length); };
+const infoReply = (c,s) => (w) => w.struct('INFO', (x) => contentInfo(x, c,s));
+const listReply = (list,s) => (w) => { w.list('LKRS', T.STRUCT, list, (x, c) => { contentInfo(x, c,s); x.push(0); }); w.int('MSIZ', 0); w.int('TCNT', list.length); };
 const find = (cid) => store.contents[String(cid)];
 const summary = (c) => `CID ${c.cid} "${c.name}" (${c.ccat}, ${c.size} bytes, status ${c.status})`;
+
+// Newest confirmed file in a dynasty's storage whose name ends with `suffix` and that was created at or after `since`
+// (unix seconds): the coaching carousel's .contract packages (dod.mjs). A file without an owner group counts when one
+// of `owners` (the dynasty's members) created it.
+export function latestContent({ group, suffix, since = 0, owners = [] }) {
+  return Object.values(store.contents)
+    .filter((c) => c.confirmed && c.name.endsWith(suffix) && c.cdat >= since && (c.group ? c.group.id === group : owners.includes(c.owner)))
+    .sort((a, b) => b.cid - a.cid)[0] ?? null;
+}
+
+// A file the league server publishes itself: a console's dynasty file with site edits written in (dod.mjs refreshPatch).
+// Stored like an upload and listed with the metadata of the file it stands in for (name, category, owner, group).
+// called with the content record after every successful download (dod.mjs: the console's current dynasty file)
+let downloadHook = null;
+export const setDownloadHook = (fn) => { downloadHook = fn; };
+export function publishContent(likeCid, bytes) {
+  const like = find(likeCid);
+  if (!like) return null;
+  const cid = store.nextId++;
+  fs.writeFileSync(blobPath(cid), bytes);
+  const c = { ...JSON.parse(JSON.stringify(like)), cid, cdat: now(), udat: now(), size: bytes.length, status: 1, confirmed: true, uploadedBy: 'league', basedOn: like.cid };
+  store.contents[cid] = c; save();
+  return c;
+}
 
 export function handleLocker({ p, body, session, reply, replyError }) {
   const name = LOCKER_COMMANDS[p.command] ?? `cmd${p.command}`;
   const note = (extra = '') => `(Locker ${name}${extra})`;
   const owner = session?.userId ?? 0, persona = session?.onlineId ?? 'Player';
+  if (security) {
+    if (!session?.leagueAuthenticated || !security.isActive(session)) return replyError(0x4000,'unauthenticated Locker request');
+    const ids = p.command === 5 ? items(body.CIDS).map(Number) : [Number(body.CID ?? body.INFO?.CID)].filter(Number.isFinite);
+    if (![1,3,4,5,8,9,13,14,16,20].includes(p.command)) return replyError(0x4000,'unreviewed Locker command');
+    for (const id of ids) {
+      const c = find(id);
+      const allowed = [8,13].includes(p.command) ? canReadSharedContent(c,session,security.dynasties) : canReadContent(c,session,security.dynasties);
+      if (!allowed || (![8,13].includes(p.command) && c.owner !== owner))
+        return replyError(0x4000,'Locker ownership mismatch');
+    }
+    if (p.command === 14) {
+      const d = security.dynasties[Number(body.GPID?.id)], m = d?.members.find(m => m.blazeId === owner);
+      if (!m || (find(body.CID)?.name.endsWith('.dynasty') && !m.commissioner)) return replyError(0x4000,'Locker dynasty membership mismatch');
+    }
+  }
   switch (p.command) {
     case 1: { // createContent
       const cid = store.nextId++;
       const c = {
-        cid, ccat: str(body.CCAT), name: str(body.NAME), desc: str(body.DESC), perm: num(body.PERM), coid: num(body.COID) || owner,
+        cid, ccat: str(body.CCAT), name: str(body.NAME), desc: str(body.DESC), perm: num(body.PERM), coid: security ? owner : num(body.COID) || owner,
         owner, persona, attrs: items(body.ATTR), tags: items(body.TAGS), edat: num(body.EDAT), cdat: now(), udat: now(), size: 0, status: 0, ucnt: 0, confirmed: false,
       };
       store.contents[cid] = c; save();
-      return reply(infoReply(c), note(`: ${summary(c)} -> upload to ${uploadUrl(c)}`));
+      return reply(infoReply(c,session), note(`: ${summary(c)}`));
     }
     case 3: { // confirmUpload {INFO, STST}
       const c = find(num(body.INFO?.CID, -1));
       if (!c) return replyError(LOCKER_ERR_CONTENT_NOT_FOUND, note(`: unknown CID ${body.INFO?.CID}`));
       c.confirmed = true; c.status = 1; c.size = blobSize(c.cid); c.udat = now(); c.stst = num(body.STST); save();
-      return reply(infoReply(c), note(`: ${summary(c)} STST ${body.STST}`));
+      return reply(infoReply(c,session), note(`: ${summary(c)} STST ${body.STST}`));
     }
     case 4: { // updateContentInfo {ATTR, CCAT, CID, COID, DESC, EDAT, NAME, PERM, SIZE, TAGS}
       const c = find(num(body.CID, -1));
@@ -91,7 +148,7 @@ export function handleLocker({ p, body, session, reply, replyError }) {
       if (body.ATTR) c.attrs = items(body.ATTR);
       if (body.TAGS) c.tags = items(body.TAGS);
       c.udat = now(); save();
-      return reply(infoReply(c), note(`: ${summary(c)}`));
+      return reply(infoReply(c,session), note(`: ${summary(c)}`));
     }
     case 5: { // deleteContent {CCAT, CIDS}: records go to index trash and blobs to private/locker/trash/ (run 22 lost a dynasty this way)
       const ids = items(body.CIDS).map((x) => num(x, -1));
@@ -103,7 +160,7 @@ export function handleLocker({ p, body, session, reply, replyError }) {
     case 8: { // getContentInfo {CCAT, CID, CVSF}
       const c = find(num(body.CID, -1));
       if (!c) return replyError(LOCKER_ERR_CONTENT_NOT_FOUND, note(`: unknown CID ${body.CID}`));
-      return reply(infoReply(c), note(`: ${summary(c)}`));
+      return reply(infoReply(c,session), note(`: ${summary(c)}`));
     }
     case 9: case 16: case 20: { // listContent / listContentForUsers / listContentForTag
       // Filters seen from the console: EID (owner, 0 = any), GPID (owner group = the dynasty objid set by setOwnerGroup, id 0 = any),
@@ -112,7 +169,8 @@ export function handleLocker({ p, body, session, reply, replyError }) {
       const eids = (p.command === 16 ? items(body.EID).map((x) => num(x, -1)) : (body.EID !== undefined ? [num(body.EID)] : [])).filter((x) => x > 0);
       const gid = num(body.GPID?.id, 0); const pendingOnly = num(body.PEND) === 1;
       const list = Object.values(store.contents).filter((c) => (!ccat || c.ccat === ccat) && (eids.length ? eids.includes(c.owner) : true) && (gid ? c.group?.id === gid : true) && (pendingOnly ? !c.confirmed : true));
-      return reply(listReply(list), note(`: ${list.length} item(s) in "${ccat}" (owner ${eids.join('/') || 'any'}, group ${gid || 'any'}${pendingOnly ? ', pending only' : ''})`));
+      const visible = security ? list.filter(c => canReadContent(c,session,security.dynasties)) : list;
+      return reply(listReply(visible,session), note(`: ${visible.length} visible item(s)`));
     }
     case 14: { // setOwnerGroup {CCAT, CID, GPID objid}: ties the file to the dynasty
       const c = find(num(body.CID, -1));
@@ -143,7 +201,13 @@ export function startLockerHttp({ port, host = '127.0.0.1' }) {
       const url = new URL(req.url, baseUrl);
       const q = Object.fromEntries(url.searchParams);
       const c = find(q.cid);
-      log('locker-http', `${req.socket.remoteAddress}:${req.socket.remotePort} ${req.method} ${url.pathname}`, { query: q, headers: req.headers, bytes: data.length, head: data.subarray(0, 48).toString('hex') });
+      log('locker-http', `${req.socket.remoteAddress}:${req.socket.remotePort} ${req.method} ${url.pathname}`, { query: { ...q, cap:q.cap ? '[redacted]' : undefined }, bytes: data.length });
+      if (security) {
+        const cap = capabilities.get(q.cap), mode = url.pathname === '/locker/upload' ? 'upload' : 'download';
+        if (!cap || cap.cid !== c?.cid || cap.mode !== mode || cap.expires < Date.now() || !security.isActive(cap.session)
+            || !(mode === 'download' ? canReadSharedContent(c,cap.session,security.dynasties) : canReadContent(c,cap.session,security.dynasties)) || (mode === 'upload' && c.owner !== cap.session.userId))
+          return sendText(res,403,xmlErr(0x4000,'LEAGUE_AUTH_REQUIRED'));
+      }
       if (url.pathname === '/locker/upload' && (req.method === 'POST' || req.method === 'PUT')) {
         if (!c) return sendText(res, 404, xmlErr(14, 'LOCKER_ERR_CONTENT_NOT_FOUND'));
         try { fs.writeFileSync(blobPath(c.cid), data); } catch (e) { log('locker-http', `write failed: ${e.message}`); return sendText(res, 500, xmlErr(9, 'LOCKER_ERR_MAX_SIZE')); }
@@ -156,7 +220,9 @@ export function startLockerHttp({ port, host = '127.0.0.1' }) {
         const bytes = fs.readFileSync(blobPath(c.cid));
         log('locker-http', `-> sending ${summary(c)} (${bytes.length} bytes)`);
         res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.length });
-        return res.end(bytes);
+        res.end(bytes);
+        try { downloadHook?.(c); } catch (e) { log('locker-http', `download hook failed: ${e.message}`); }
+        return undefined;
       }
       return sendText(res, 404, xmlErr(14, 'LOCKER_ERR_CONTENT_NOT_FOUND'));
     });

@@ -122,6 +122,19 @@ export class TdbTable {
     for (let i = 0; i < this.header.currentRecords; i++) yield this.row(i);
   }
 
+  // Remove a record: the last populated record moves into its slot (record order is not meaningful to the game's
+  // keyed lookups; tables with an index are refused). Grow-on-demand storage shrinks with the count.
+  removeRecord(i: number): void {
+    const h = this.header;
+    if (i < 0 || i >= h.currentRecords) throw new RangeError(`table ${this.name}: record ${i} out of range (${h.currentRecords} populated)`);
+    if (h.indexCount > 0 || hasExtraData(h)) throw new Error(`table ${this.name}: removing records from indexed or extra-data tables not supported`);
+    const L = h.lengthBytes, lastIdx = h.currentRecords - 1;
+    if (i !== lastIdx) this.data.copyWithin(i * L, lastIdx * L, (lastIdx + 1) * L);
+    this.data.fill(0, lastIdx * L, (lastIdx + 1) * L);
+    h.currentRecords = lastIdx;
+    if (this.storedRecords !== h.maxRecords) this.data = this.data.slice(0, lastIdx * L);
+  }
+
   // Append a record and return its index. Fixed-allocation tables need a free slot; grow-on-demand
   // tables get their storage extended and the "written" flag set, as the game does (BTES 26 -> 30).
   appendRecord(values: Record<string, FieldValue> = {}): number {

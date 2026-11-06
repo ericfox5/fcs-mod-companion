@@ -7,7 +7,8 @@ import { decodeCoaches, type Coach } from './decode/coaches.js';
 import { decodeStories, type Story } from './decode/stories.js';
 import { decodeHeisman, decodeAllAmericans, type HeismanCandidate, type AllAmerican } from './decode/awards.js';
 import { decodeTeamSeasonStats, decodeTeamHistory, decodePlayerSeasonStats, decodeGameLogs, type Row } from './decode/stats.js';
-import { decodeDepthChart, type DepthChartEntry } from './decode/depth.js';
+import { decodeDepthChart, decodeFormationSubs, type DepthChartEntry, type FormationSubEntry } from './decode/depth.js';
+import { decodeTransfers, type Transfer } from './decode/transfers.js';
 import { decodeRecruits, decodeRecruitInterest, decodeRecruitingBoard, decodeRecruitVisits, type Recruit, type RecruitInterest, type BoardEntry, type RecruitVisit } from './decode/recruiting.js';
 
 export interface DynastyExport {
@@ -23,6 +24,7 @@ export interface DynastyExport {
   players: Player[];
   coaches: Coach[];
   depthChart: DepthChartEntry[];
+  formationSubs: FormationSubEntry[];
   stories: Story[];
   heisman: HeismanCandidate[];
   allAmericans: AllAmerican[];
@@ -34,6 +36,7 @@ export interface DynastyExport {
   recruitInterest: RecruitInterest[];
   recruitingBoard: BoardEntry[];
   recruitVisits: RecruitVisit[];
+  transfers: Transfer[];
 }
 
 // Conference records: played games between two teams of the same conference (the TEAM table has no such field).
@@ -66,6 +69,7 @@ export function exportDynasty(file: TdbFile): DynastyExport {
     players: decodePlayers(file),
     coaches: decodeCoaches(file),
     depthChart: decodeDepthChart(file),
+    formationSubs: decodeFormationSubs(file),
     stories: decodeStories(file),
     heisman: decodeHeisman(file),
     allAmericans: decodeAllAmericans(file),
@@ -77,5 +81,6 @@ export function exportDynasty(file: TdbFile): DynastyExport {
     recruitInterest: decodeRecruitInterest(file),
     recruitingBoard: decodeRecruitingBoard(file),
     recruitVisits: decodeRecruitVisits(file),
+    transfers: decodeTransfers(file),
   };
 }

@@ -12,7 +12,8 @@ export function buildResult(st: GameState, input: GameInput) {
   return { version: ENGINE_VERSION, seed: st.seed, complete: st.final, winner: st.winner, score: st.score, overtime, quarters, plays: st.n, teams: [away.id, home.id], drives: st.drives, events: st.log, stats: st.stats, teamStats: st.team, finishedAt: new Date().toISOString() };
 }
 
-export function buildEnvelope(st: GameState, input: GameInput, { runId, blazeId, odId }: { runId: string; blazeId: number; odId: number }) {
+// webMember: the run was started by a web-only member (migration 0014), whose team the console runs as a CPU team
+export function buildEnvelope(st: GameState, input: GameInput, { runId, blazeId, odId, webMember = false }: { runId: string; blazeId: number; odId: number; webMember?: boolean }) {
   if (!st.final || st.winner === null) throw new Error('Incomplete games cannot be committed.');
   const r = buildResult(st, input); const [away, home] = input.teams;
   const gameResult: Record<string, number> = { ATID: away.id, HTID: home.id, ATSC: st.score[0], HTSC: st.score[1], GMWK: input.week, OTFL: r.overtime ? 1 : 0, TMID: input.ownedTeamId, CRCT: 0, STCT: 0, FLID: 0 };
@@ -23,6 +24,7 @@ export function buildEnvelope(st: GameState, input: GameInput, { runId, blazeId,
     const tgid = input.teams[side].id; const t = st.team[side]; const players = Object.entries(st.stats[side]) as [string, PStat][];
     const sum = (k: keyof PStat) => players.reduce((n, [, p]) => n + p[k], 0);
     boxScores.push({ kind: 'BTES', pgid: tgid, tgid, stats: { ts1d: t.fd, tsoy: t.yds, tsop: t.py, tsor: t.ry, tspc: t.pc, tspa: t.pa, tsra: t.ra, ts3d: t.t3a, ts3c: t.t3c, tspi: sum('pi'), tsfl: sum('fum'), tspe: t.pen, tsPy: t.peny } });
+    if (input.teams[side].synthetic) continue; // placeholder players: the console has no rows for them, team totals only
     for (const [id, p] of players) {
       const pgid = Number(id), base = { pgid, tgid };
       if (p.pa || p.ra || p.rec) boxScores.push({ ...base, kind: 'BOFF', stats: { gaat: p.pa, gacm: p.pc, gaya: p.py, gatd: p.ptd, gain: p.pi, guat: p.ra, guya: p.ry, gutd: p.rtd, gufu: p.fum, gcca: p.rec, gcya: p.rey, gctd: p.retd, galN: p.lp, gulN: p.lr, gcrL: p.lc } });
@@ -31,7 +33,7 @@ export function buildEnvelope(st: GameState, input: GameInput, { runId, blazeId,
       if (p.int) defensiveReturns.push({ tgid, pgid, interceptions: p.int, returnYards: p.iry, touchdowns: p.dtd });
     }
   }
-  return { version: 3, engineVersion: ENGINE_VERSION, runId, dynastyId: input.dynastyId, odId, seasonYear: input.season, week: input.week, gameNo: input.gameNo, snapshot: input.snapshot, ownedTeamId: input.ownedTeamId, blazeId, seed: st.seed, gameResult, boxScores, defensiveReturns, detail: gameDetail(st, input, r.quarters) };
+  return { version: 3, engineVersion: ENGINE_VERSION, runId, dynastyId: input.dynastyId, odId, seasonYear: input.season, week: input.week, gameNo: input.gameNo, snapshot: input.snapshot, ownedTeamId: input.ownedTeamId, blazeId, webMember, seed: st.seed, gameResult, boxScores, defensiveReturns, detail: gameDetail(st, input, r.quarters) };
 }
 
 // Everything the league server needs to build the console's per-game tables (GINF, TSGA, PG*, UWQS) for this game:
@@ -43,8 +45,8 @@ function gameDetail(st: GameState, input: GameInput, quarters: [number[], number
     const T = input.teams[side]; const starters = new Set(T.depthChart.filter((d) => d.depth < (STARTERS[d.pos] ?? 0)).map((d) => d.pgid));
     const ids = new Set([...Object.keys(st.stats[side]).map(Number), ...T.players.map((p) => p.id).filter((id) => (st.usage[String(id)] ?? 0) > 0)]);
     const pos = new Map(T.players.map((p) => [p.id, p.pos]));
-    const players = [...ids].map((pgid) => ({ pgid, pos: pos.get(pgid) ?? -1, snaps: st.usage[String(pgid)] ?? 0, starter: starters.has(pgid) ? 1 : 0, ...(st.stats[side][String(pgid)] ?? {}) }));
-    return { tgid: T.id, stats: st.team[side], players };
+    const players = T.synthetic ? [] : [...ids].map((pgid) => ({ pgid, pos: pos.get(pgid) ?? -1, snaps: st.usage[String(pgid)] ?? 0, starter: starters.has(pgid) ? 1 : 0, ...(st.stats[side][String(pgid)] ?? {}) }));
+    return { tgid: T.id, stats: st.team[side], players, ...(T.synthetic ? { synthetic: true } : {}) };
   });
   // v2: player positions, the PStat detail fields and the scoring summary (engine ScoreEv rows, side = team index)
   return { v: 2, overtime: st.ot ? st.ot.period : 0, quarters, teams, scoring: (st.sc ?? []).map((e) => ({ ...e, tgid: input.teams[e.side].id })) };

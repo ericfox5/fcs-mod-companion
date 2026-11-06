@@ -78,8 +78,10 @@ export async function scoreStrip(env: Env, dyn: Dynasty): Promise<Raw> {
   const label = (w: number) => (w === week && dyn.week_type === 151 ? 'Preseason' : weekLabel(w));
   return html`<div class="scorestrip"><div class="wrap st-inner"><div class="st-label"><span class="st-weekwrap"><select class="st-select" aria-label="Week" data-url="/d/${dyn.slug}/strip">${opts.map((w) => html`<option value="${w}" ${w === week ? 'selected' : ''}>${label(w)}</option>`)}</select></span><span class="st-sub">${seasonLabel(dyn)}</span></div><div class="st-scroll" data-week="${week}">${tiles}</div></div></div>`;
 }
-// Seasons are counted from the dynasty's first year (the save's base year 2013): "1st season", "2nd season" ...
+// Seasons are counted from the dynasty's first year (dynasties.start_year = SEAI.SSYE + 2013, the hub's "Year N";
+// 2013 for saves imported before it was recorded): "1st season", "2nd season" ... A dynasty moved to 2026 by the
+// Year Changer is in its 1st season, not its 14th.
 export const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
-export const seasonLabel = (d: { season_year: number | null }) => `${ordinal(Math.max(1, (d.season_year ?? 2013) - 2012))} season`;
+export const seasonLabel = (d: { season_year: number | null; start_year?: number | null }) => `${ordinal(Math.max(1, (d.season_year ?? 2013) - (d.start_year ?? 2013) + 1))} season`;
 
 export const weekLabel = (w: number) => (w === 0 ? 'Week 1' : w >= 15 ? `Postseason ${w - 14}` : `Week ${w + 1}`);

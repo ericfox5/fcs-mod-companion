@@ -7,6 +7,8 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": true,
+  // fcs-mod.online is a Workers custom domain (zone on this account); listed here so a deploy keeps it attached
+  "routes": [{ "pattern": "fcs-mod.online", "custom_domain": true }],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",

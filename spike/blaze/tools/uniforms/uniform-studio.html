@@ -1,0 +1,1449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FCS Uniform Studio</title>
+<meta name="description" content="Edit what each FCS mod team wears in NCAA 14: uniform parts, their textures (DDS), and new uniform sets. Runs locally.">
+<style>
+:root{
+  --bg:#ececec;--panel:#ffffff;--panel-2:#f6f6f6;--ink:#121212;--muted:#5f6368;--line:#d9d9d9;--line-2:#c4c4c4;
+  --red:#c8102e;--red-dk:#8f0b21;--black:#101010;--black-2:#1f1f1f;--gold:#ffb81c;--green:#1b7f3b;--blue:#0b5ed7;
+  --cond:"Bahnschrift Condensed","Bahnschrift SemiCondensed","Bahnschrift","Barlow Condensed","Arial Narrow",Impact,sans-serif;--sans:"Segoe UI","Barlow",Arial,Helvetica,sans-serif;
+  --mono:Consolas,"Cascadia Mono",Menlo,monospace;--radius:3px;--shadow:0 1px 2px rgba(0,0,0,.12);
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#121212;--panel:#1b1b1b;--panel-2:#232323;--ink:#f1f1f1;--muted:#a3a3a3;--line:#333;--line-2:#444;--shadow:0 1px 2px rgba(0,0,0,.6)}}
+:root[data-theme="dark"]{--bg:#121212;--panel:#1b1b1b;--panel-2:#232323;--ink:#f1f1f1;--muted:#a3a3a3;--line:#333;--line-2:#444;--shadow:0 1px 2px rgba(0,0,0,.6)}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans);display:flex;flex-direction:column;min-height:100vh}
+h1,h2,h3,h4,.cond{font-family:var(--cond);text-transform:uppercase;letter-spacing:.02em}
+h2{font-size:22px;font-weight:700;margin:0 0 8px}
+h3{font-size:17px;font-weight:600;margin:0 0 6px;color:var(--muted)}
+a{color:var(--blue)}
+button,.btn{font:600 13px/1 var(--sans);text-transform:uppercase;letter-spacing:.04em;border:1px solid var(--black-2);background:var(--black-2);color:#fff;padding:8px 12px;border-radius:var(--radius);cursor:pointer;min-height:34px}
+button:hover{filter:brightness(1.15)}
+button.primary{background:var(--red);border-color:var(--red)}
+button.ghost{background:transparent;color:var(--ink);border-color:var(--line-2)}
+button.small{padding:4px 8px;min-height:26px;font-size:11px}
+button:disabled{opacity:.45;cursor:not-allowed;filter:none}
+input[type=text],input[type=number],select,textarea{font:14px var(--sans);color:var(--ink);background:var(--panel);border:1px solid var(--line-2);border-radius:var(--radius);padding:6px 8px;min-height:34px}
+select.small{min-height:26px;padding:2px 6px;font-size:12px}
+input[type=color]{width:40px;height:34px;padding:2px;border:1px solid var(--line-2);background:var(--panel)}
+input[type=range]{accent-color:var(--red)}
+label.f{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+label.f>*{font-size:14px;text-transform:none;letter-spacing:0;font-weight:400;color:var(--ink)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.row.tight{gap:6px;align-items:center}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px;margin-bottom:14px}
+.card.flush{padding:0;overflow:hidden}
+.muted{color:var(--muted)}
+.mono{font-family:var(--mono);font-size:12px}
+.pill{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;background:var(--panel-2);border:1px solid var(--line-2);color:var(--muted);white-space:nowrap}
+.pill.ok{background:#e4f5e9;border-color:#9cd5ad;color:#136a30}.pill.warn{background:#fff3cd;border-color:#ffd97a;color:#7a5200}.pill.bad{background:#fde3e6;border-color:#f3a6b0;color:#8f0b21}.pill.red{background:var(--red);border-color:var(--red);color:#fff}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .pill.ok{background:#15321f;color:#9be0b1}:root:not([data-theme="light"]) .pill.warn{background:#3d3010;color:#ffd97a}:root:not([data-theme="light"]) .pill.bad{background:#3f1218;color:#f3a6b0}}
+header.top{background:var(--black);color:#fff;display:flex;align-items:stretch;position:sticky;top:0;z-index:10;box-shadow:0 2px 6px rgba(0,0,0,.35)}
+.brand{display:flex;align-items:center;gap:10px;padding:0 16px;border-right:1px solid #333}
+.brand .mark{background:var(--red);color:#fff;font:800 20px/1 var(--cond);padding:9px 10px;letter-spacing:.06em;transform:skewX(-8deg)}
+.brand .title{font:700 20px/1 var(--cond);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
+nav.tabs{display:flex;flex:1;overflow-x:auto}
+nav.tabs button{background:transparent;border:0;border-bottom:3px solid transparent;border-radius:0;color:#cfcfcf;font:600 14px/1 var(--cond);letter-spacing:.06em;padding:0 14px;min-height:52px;white-space:nowrap}
+nav.tabs button:hover{color:#fff;filter:none;background:#1c1c1c}
+nav.tabs button.active{color:#fff;border-bottom-color:var(--red)}
+nav.tabs .sep{align-self:center;color:#555;font:600 10px var(--cond);letter-spacing:.1em;padding:0 10px;border-left:1px solid #333;margin-left:6px}
+.top-right{display:flex;align-items:center;gap:10px;padding:0 16px;font-size:12px;color:#bdbdbd;white-space:nowrap}
+.top-right .dot{width:9px;height:9px;border-radius:50%;background:#777;display:inline-block;margin-right:5px}
+.top-right .dot.on{background:#2ecc71}.top-right .dot.warn{background:var(--gold)}
+.top-right button{color:#ddd;border-color:#444}
+main{flex:1;padding:16px;max-width:1500px;width:100%;margin:0 auto}
+section.tab{display:none}section.tab.active{display:block}
+.strip{height:4px;background:linear-gradient(90deg,var(--red) 0 60%,var(--gold) 60% 100%);margin:-16px -16px 14px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{font:600 12px var(--cond);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:left;padding:8px 10px;border-bottom:2px solid var(--line-2);background:var(--panel-2)}
+.scroll th{position:sticky;top:0;z-index:1}
+td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr.click{cursor:pointer}tr.click:hover td{background:var(--panel-2)}
+tr.sel td{background:rgba(200,16,46,.08)}
+tr.sub td{background:var(--panel-2);padding:4px 10px 8px 24px}
+.scroll{max-height:62vh;overflow:auto}
+.thumb{height:72px;width:auto;max-width:200px;image-rendering:auto;background:repeating-conic-gradient(#bbb 0 25%,#eee 0 50%) 0 0/12px 12px;border:1px solid var(--line-2)}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+/* team view */
+.teamview{display:grid;grid-template-columns:290px 1fr;gap:14px;align-items:start}
+.teamlist{position:sticky;top:68px}
+.teamlist .list{max-height:calc(100vh - 230px);overflow:auto;margin:8px -16px -14px;border-top:1px solid var(--line)}
+.tl{padding:7px 14px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;border-left:3px solid transparent}
+.tl:hover{background:var(--panel-2)}
+.tl.sel{background:rgba(200,16,46,.08);border-left-color:var(--red)}
+.tl .n{font-weight:600}.tl .s{font:12px var(--mono);color:var(--muted)}
+.team-head{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.team-head h2{font-size:30px;margin:0;line-height:1}
+.team-head .meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted)}
+.uni-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.uni-card{border:1px solid var(--line-2);border-radius:var(--radius);overflow:hidden;background:var(--panel)}
+.uni-card h4{margin:0;padding:8px 10px;background:var(--black);color:#fff;font:700 15px/1 var(--cond);text-transform:uppercase;letter-spacing:.08em;display:flex;justify-content:space-between;align-items:center}
+.uni-card h4 .idx{color:#999;font-size:11px}
+.uni-part{display:grid;grid-template-columns:56px 1fr;gap:10px;padding:6px 10px;border-top:1px solid var(--line);align-items:center}
+.uni-part canvas{width:56px;height:56px;object-fit:contain;image-rendering:auto;background:repeating-conic-gradient(#bbb 0 25%,#eee 0 50%) 0 0/8px 8px;border:1px solid var(--line-2)}
+.uni-part .ph{width:56px;height:56px;border:1px dashed var(--line-2);border-radius:2px}
+.uni-part .pt{font:600 11px var(--cond);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.uni-part select{width:100%}
+.part-row canvas.thumb{height:56px}
+.tex-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px;padding:8px 0}
+.tex{border:1px solid var(--line-2);border-radius:var(--radius);padding:8px;background:var(--panel);display:grid;grid-template-columns:72px 1fr;gap:8px;align-items:center}
+.tex canvas{width:72px;height:72px;object-fit:contain;background:repeating-conic-gradient(#bbb 0 25%,#eee 0 50%) 0 0/8px 8px;border:1px solid var(--line-2)}
+.tex .tn{font:12px var(--mono);word-break:break-all}
+.tex .ta{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.tex .st{font-size:11px;color:var(--muted);margin-top:3px}
+.status-strip{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px}
+/* editor */
+.editor{display:grid;grid-template-columns:230px 1fr 260px;gap:12px;min-height:60vh}
+.editor .tools{display:flex;flex-direction:column;gap:8px}
+.tools .tool{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.tools .tool button{padding:6px 4px;font-size:11px}
+.tools .tool button.active{background:var(--red);border-color:var(--red)}
+.stage{position:relative;overflow:auto;background:repeating-conic-gradient(#b9b9b9 0 25%,#e6e6e6 0 50%) 0 0/16px 16px;border:1px solid var(--line-2);min-height:60vh;max-height:78vh}
+.stage canvas{display:block;image-rendering:pixelated;cursor:crosshair}
+.stage .stamp{position:absolute;border:2px dashed var(--gold);background:rgba(255,184,28,.08);cursor:move;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
+.stage .stamp .h{position:absolute;right:-6px;bottom:-6px;width:12px;height:12px;background:var(--gold);cursor:nwse-resize;border:1px solid #000}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12px}
+.kv dt{color:var(--muted);text-transform:uppercase;font-weight:600;letter-spacing:.04em}
+.kv dd{margin:0;font-family:var(--mono);word-break:break-all}
+.swatch{display:inline-block;width:22px;height:22px;border:1px solid #000;vertical-align:middle;border-radius:2px}
+footer.log{border-top:2px solid var(--red);background:var(--black);color:#ddd}
+footer .log-head{display:flex;align-items:center;gap:10px;padding:4px 12px;font:600 12px var(--cond);text-transform:uppercase;letter-spacing:.08em;color:#aaa}
+footer pre{margin:0;padding:6px 12px 10px;max-height:150px;overflow:auto;font:12px/1.4 var(--mono);white-space:pre-wrap}
+footer pre .err{color:#ff7b8a}footer pre .ok{color:#8ce0a5}footer pre .warn{color:#ffd97a}
+details summary{cursor:pointer;font-weight:600}
+code{font-family:var(--mono);font-size:12px;background:var(--panel-2);padding:1px 4px;border-radius:2px}
+.help p,.help li{max-width:80ch}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.toast{position:fixed;right:16px;bottom:190px;background:var(--black);color:#fff;padding:10px 14px;border-left:4px solid var(--green);border-radius:3px;box-shadow:0 4px 14px rgba(0,0,0,.4);font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20;max-width:420px}
+.toast.show{opacity:1}.toast.err{border-left-color:var(--red)}
+@media (max-width:1000px){.teamview{grid-template-columns:1fr}.teamlist{position:static}.teamlist .list{max-height:40vh}.editor{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="mark">FCS</span><span class="title">Uniform Studio</span></div>
+  <nav class="tabs" id="tabs">
+    <button data-tab="teams" class="active">Teams</button>
+    <button data-tab="texture">Texture editor</button>
+    <button data-tab="newset">New set</button>
+    <span class="sep">Advanced</span>
+    <button data-tab="folder">Files</button>
+    <button data-tab="bigfile">Bigfile</button>
+    <button data-tab="xml">XML</button>
+    <button data-tab="archive">Archive</button>
+    <button data-tab="help">Help</button>
+  </nav>
+  <div class="top-right"><span><span class="dot" id="fsa-dot"></span><span id="fsa-text">starting</span></span><button class="small ghost" id="theme-btn" title="toggle theme">Theme</button></div>
+</header>
+<main>
+  <section class="tab active" id="tab-teams">
+    <div class="strip"></div>
+    <div class="card" id="source-card"><div class="status-strip" id="source-strip"><span class="muted">starting…</span></div></div>
+    <div class="teamview">
+      <aside class="card teamlist">
+        <div class="row tight"><input type="text" id="team-search" placeholder="Find a team, slot or conference" style="flex:1"></div>
+        <div class="row tight" style="margin-top:6px"><select id="team-conf" class="small" style="flex:1"><option value="">all conferences</option></select><select id="team-xml" class="small"><option value="">all</option><option value="yes">own uniform file</option><option value="no">archive only</option></select></div>
+        <div class="list" id="team-list"></div>
+      </aside>
+      <div class="teampane" id="teampane"><div class="card empty">Pick a team on the left.</div></div>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-folder">
+    <div class="strip"></div>
+    <div class="card">
+      <div class="row">
+        <button class="primary" id="open-folder">Open a DLC folder…</button>
+        <button class="ghost" id="rescan-folder" disabled>Rescan</button>
+        <label class="f">Filter<input type="text" id="folder-filter" placeholder="slot, team, file name"></label>
+        <span class="muted" id="folder-info"></span>
+      </div>
+    </div>
+    <div class="card flush"><div class="scroll"><table id="folder-table"><thead><tr><th>Slot</th><th>Team(s)</th><th>File</th><th>Kind</th><th>Size</th><th></th></tr></thead><tbody></tbody></table></div></div>
+  </section>
+
+  <section class="tab" id="tab-bigfile">
+    <div class="strip"></div>
+    <div class="card">
+      <div class="row">
+        <button class="ghost" id="open-big-file">Open a bigfile…</button>
+        <button class="primary" id="big-save" disabled>Save bigfile</button>
+        <button id="big-save-as" disabled>Save as…</button>
+        <span id="big-title" class="cond" style="font-size:18px;font-weight:700"></span>
+        <span class="muted" id="big-info"></span>
+      </div>
+    </div>
+    <div class="card flush"><div class="scroll"><table id="big-table"><thead><tr><th>Preview</th><th>Entry</th><th>Kind</th><th>Format</th><th>Size</th><th>Flags</th><th>Actions</th></tr></thead><tbody></tbody></table></div></div>
+    <div class="card" id="big-scene" hidden><h3>Scene references</h3><pre class="mono" id="big-scene-text"></pre></div>
+  </section>
+
+  <section class="tab" id="tab-texture">
+    <div class="strip"></div>
+    <div class="card">
+      <div class="row">
+        <span id="tex-title" class="cond" style="font-size:18px;font-weight:700">No texture open</span>
+        <span class="muted" id="tex-info">Pick a team, open a part's textures and choose Quick edit.</span>
+        <span style="flex:1"></span>
+        <button id="tex-undo" disabled>Undo</button><button id="tex-redo" disabled>Redo</button>
+        <button id="tex-revert" disabled>Revert</button>
+        <button id="tex-export-png" disabled>Export PNG</button>
+        <button id="tex-export-dds" disabled>Export DDS</button>
+        <button id="tex-import" disabled>Import image / DDS…</button>
+        <button class="primary" id="tex-apply" disabled>Apply &amp; save</button>
+      </div>
+    </div>
+    <div class="editor">
+      <div class="tools card">
+        <h3>Tool</h3>
+        <div class="tool" id="tool-buttons">
+          <button data-tool="brush" class="active">Brush</button><button data-tool="eraser">Eraser</button><button data-tool="fill">Fill</button>
+          <button data-tool="picker">Picker</button><button data-tool="recolor">Recolor</button><button data-tool="pan">Pan</button>
+        </div>
+        <label class="f">Colour<span class="row tight"><input type="color" id="tool-color" value="#c8102e"><input type="text" id="tool-hex" value="#c8102e" style="width:92px"></span></label>
+        <label class="f">Size <span id="tool-size-v">24</span> px<input type="range" id="tool-size" min="1" max="256" value="24"></label>
+        <label class="f">Opacity <span id="tool-opacity-v">100</span>%<input type="range" id="tool-opacity" min="1" max="100" value="100"></label>
+        <label class="f">Tolerance <span id="tool-tol-v">32</span><input type="range" id="tool-tol" min="0" max="200" value="32"></label>
+        <div id="recolor-box" hidden>
+          <h3>Recolor</h3>
+          <div class="row tight"><span>From</span><span class="swatch" id="recolor-src"></span><span class="mono" id="recolor-src-hex">click the texture</span></div>
+          <p class="muted" style="font-size:12px;margin:6px 0">Pixels within the tolerance of the picked colour take the tool colour's hue and saturation; their shading is kept.</p>
+          <button class="primary" id="recolor-apply" disabled>Apply recolor</button>
+        </div>
+        <h3>View</h3>
+        <div class="row tight"><button class="small ghost" data-zoom="fit">Fit</button><button class="small ghost" data-zoom="1">1:1</button><button class="small ghost" data-zoom="-">−</button><button class="small ghost" data-zoom="+">+</button><span class="mono" id="zoom-v"></span></div>
+        <label class="f"><span class="row tight"><input type="checkbox" id="view-alpha" checked> show transparency as checkerboard</span></label>
+      </div>
+      <div class="stage" id="stage"><canvas id="tex-canvas" width="16" height="16"></canvas><div class="stamp" id="stamp" hidden><div class="h"></div></div></div>
+      <div class="card">
+        <h3>Texture</h3>
+        <dl class="kv" id="tex-kv"></dl>
+        <div id="stamp-box" hidden>
+          <h3>Placed image</h3>
+          <div class="row tight"><label class="f">X<input type="number" id="stamp-x" style="width:80px"></label><label class="f">Y<input type="number" id="stamp-y" style="width:80px"></label></div>
+          <div class="row tight"><label class="f">W<input type="number" id="stamp-w" style="width:80px"></label><label class="f">H<input type="number" id="stamp-h" style="width:80px"></label></div>
+          <label class="f"><span class="row tight"><input type="checkbox" id="stamp-lock" checked> keep aspect</span></label>
+          <div class="row tight"><button class="primary" id="stamp-place">Place</button><button class="ghost" id="stamp-cancel">Cancel</button></div>
+        </div>
+        <h3>Mip levels</h3>
+        <div class="muted" style="font-size:12px">All mip levels are regenerated from the edited top level when you apply.</div>
+        <div id="tex-mips" class="row tight" style="margin-top:6px"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-newset">
+    <div class="strip"></div>
+    <div class="grid2">
+      <div class="card">
+        <h2>Target</h2>
+        <div class="row">
+          <label class="f">Team<select id="ns-team"><option value="">pick a team (fills the slot)</option></select></label>
+          <label class="f">Slot code (6)<input type="text" id="ns-slot" maxlength="6" style="width:110px;text-transform:uppercase"></label>
+          <label class="f">Year (4)<input type="text" id="ns-year" maxlength="4" value="2025" style="width:80px"></label>
+          <label class="f">Pack<input type="number" id="ns-pack" min="0" max="9" value="0" style="width:70px"></label>
+        </div>
+        <p class="muted" style="font-size:12px">Donor bigfiles are copied and renamed to <code>SLOT_PART_YEAR_COLOR</code>. Slot and year are replaced inside the scene file too, so every replacement must keep its length: six letters for the slot, four digits for the year, and a colour token exactly as long as the donor's.</p>
+        <h3>Official uniforms</h3>
+        <div class="row tight"><input type="text" id="ns-officials" value="Home, Away" style="flex:1"><span class="muted">comma separated</span></div>
+      </div>
+      <div class="card">
+        <h2>Donor parts</h2>
+        <div class="row">
+          <label class="f" style="flex:1">Add a bigfile (any team's, or one pulled from the archive)<select id="ns-donor"><option value="">no files loaded</option></select></label>
+          <button id="ns-add">Add</button>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:6px">A jersey donor brings its number and name decals and kerning table along.</div>
+      </div>
+    </div>
+    <div class="card flush"><table id="ns-table"><thead><tr><th>Part</th><th>Donor</th><th>Donor colour</th><th>New colour (same length)</th><th>Officials</th><th>New name</th><th></th></tr></thead><tbody></tbody></table><div class="empty" id="ns-empty">No donor parts yet.</div></div>
+    <div class="card"><div class="row"><button class="primary" id="ns-generate" disabled>Generate files</button><span class="muted" id="ns-status"></span></div></div>
+  </section>
+
+  <section class="tab" id="tab-xml">
+    <div class="strip"></div>
+    <div class="card">
+      <div class="row">
+        <button class="ghost" id="xml-open">Open an XML…</button>
+        <button class="primary" id="xml-save" disabled>Save XML</button>
+        <button id="xml-save-as" disabled>Save as…</button>
+        <span id="xml-title" class="cond" style="font-size:18px;font-weight:700"></span>
+        <span class="muted" id="xml-info"></span>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h3>Official uniform types</h3>
+        <div id="xml-officials" class="row tight"></div>
+        <div class="row tight" style="margin-top:8px"><input type="text" id="xml-new-official" placeholder="e.g. Alt #1" style="flex:1"><button class="small" id="xml-add-official">Add</button></div>
+        <p class="muted" style="font-size:12px">TEAM.TUHO / TUAW pick the home and away rows by index (0 and 1 for every team in this league), so keep "Home" first and "Away" second.</p>
+      </div>
+      <div class="card">
+        <h3>Add a part</h3>
+        <div class="row"><label class="f" style="flex:1">Bigfile<select id="xml-part-big"></select></label><label class="f">Label<input type="text" id="xml-part-name" placeholder="White" style="width:110px"></label><button id="xml-part-add" class="small">Add part</button></div>
+        <p class="muted" style="font-size:12px">The part type comes from the bigfile name (HELMET, JERSEY, PANTSX, SOCKSX, SHOESX, GLOVES).</p>
+      </div>
+    </div>
+    <div class="card flush"><div class="scroll"><table id="xml-table"><thead><tr><th>Type</th><th>Label</th><th>Bigfile</th><th>Scene</th><th>Where</th><th>Officials</th><th></th></tr></thead><tbody></tbody></table></div></div>
+    <details class="card"><summary>Raw XML</summary><textarea id="xml-raw" rows="18" style="width:100%;font-family:var(--mono);font-size:12px"></textarea><div class="row" style="margin-top:8px"><button class="small" id="xml-raw-apply">Use edited text</button></div></details>
+  </section>
+
+  <section class="tab" id="tab-archive">
+    <div class="strip"></div>
+    <div class="card">
+      <div class="row">
+        <button class="primary" id="arc-open">Open qkl_fe2ig.ast…</button>
+        <span class="muted" id="arc-info">With the local server the archive is already connected; this button is for the file-only mode.</span>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h3>Find an entry by bigfile name</h3>
+        <div class="row"><input type="text" id="arc-name" placeholder="D1AANW_HELMET_2007_RED_big" style="flex:1;text-transform:uppercase"><button id="arc-find" disabled>Find</button></div>
+        <div id="arc-result" class="kv" style="margin-top:8px"></div>
+        <div class="row" style="margin-top:8px"><button id="arc-extract" disabled>Extract to DLC folder</button><button id="arc-download" class="ghost" disabled>Download</button><button id="arc-open-big" class="ghost" disabled>Open in Bigfile tab</button></div>
+      </div>
+      <div class="card">
+        <h3>Generic FCS slots (vanilla 2007 art still in the archive)</h3>
+        <p class="muted" style="font-size:12px">Contents verified by decoding: the ones marked are not what their names say.</p>
+        <div id="arc-generic"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab help" id="tab-help">
+    <div class="strip"></div>
+    <div class="card">
+      <h2>Start</h2>
+      <p>Run <code>uniform-studio.cmd</code> (or <code>node serve.mjs --open</code>) in this folder. It finds your RPCS3 install from the bridge config, opens this page, and connects it to <code>USRDIR\DLC</code> and to <code>qkl_fe2ig.ast</code>. Every save keeps a backup under <code>%LOCALAPPDATA%\ncaa-bridge\uniforms\backup</code>.</p>
+      <h2>Editing a team</h2>
+      <ol>
+        <li>Pick the team. Its uniforms (Home, Away, alternates) show which helmet, jersey, pants, socks and shoes they use; change any of them with the dropdowns. Teams that still use the game's built-in definition get a <strong>Copy to DLC folder</strong> button first.</li>
+        <li>Under <strong>Parts</strong>, open a part's textures. <strong>Edit DDS</strong> writes the texture as a DDS and opens it in your DDS editor (Paint.NET with its DDS plugin). Save it there and the bigfile is repackaged within a second or two; the log confirms it. <strong>Import</strong> takes a DDS or PNG you already have; <strong>Quick edit</strong> opens the in-page editor for recolours and touch-ups.</li>
+        <li>Parts that live inside the game archive get a <strong>Pull into folder</strong> button; after that they are editable like any other.</li>
+        <li><strong>New set</strong> clones another team's pieces into this team's slot (same-length names) and writes the uniform file; <strong>Clone part</strong> on a team does the same for one piece.</li>
+      </ol>
+      <h2>How the files fit together</h2>
+      <p>Every team sits on a six-letter asset slot (<code>TEAM.CSAT</code>). At game load the game looks in every <code>FCS_DLC_*</code> folder for <code>SLOT_Pack0_MixAndMatch.XML</code>; without one it uses the definition baked into <code>qkl_fe2ig.ast</code> (entry <code>SLOT_MIXANDMATCH</code>). The XML lists parts, each naming a bigfile and the scene inside it, and says which official uniforms use it; <code>TEAM.TUHO</code>/<code>TUAW</code> are the home and away rows. Bigfiles are found by name in any <code>FCS_DLC_*</code> folder, then in the archive by a hash of the name, then loose in <code>USRDIR</code>; a name that resolves nowhere crashes the game at load.</p>
+      <h2>Rules</h2>
+      <ul>
+        <li>A texture keeps its size, format (DXT1/DXT5) and mip count; the full mip chain is regenerated from your edit. Save DDS files as BC1/DXT1 or BC3/DXT5 (with or without mipmaps) or 32-bit uncompressed; same size as the original.</li>
+        <li>Renames keep lengths: slot 6 characters, year 4 digits, colour token as long as the donor's.</li>
+        <li>Close the game, or sit at its menu, while saving into the game folder. Every league member needs the same DLC files.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+<footer class="log"><div class="log-head"><span>Log</span><button class="small ghost" id="log-clear" style="color:#ddd;border-color:#444">clear</button></div><pre id="log"></pre></footer>
+<input type="file" id="pick-folder" webkitdirectory multiple hidden>
+<input type="file" id="pick-image" accept=".png,.jpg,.jpeg,.webp,.gif,.bmp,.dds" hidden>
+<input type="file" id="pick-big" accept=".ast,.AST,.big" hidden>
+<input type="file" id="pick-xml" accept=".xml,.XML" hidden>
+<input type="file" id="pick-archive" accept=".ast,.AST" hidden>
+<script>// codec.js — NCAA 14 (PS3) uniform asset codec: BGFA 1.05 bigfiles, "p3R" DXT textures, DDS, scene renaming.
+// Pure functions over Uint8Array; no DOM. Shared by the Uniform Studio page and the Node test harness.
+'use strict';
+
+const FNV_OFFSET = 0xcbf29ce484222325n;
+const FNV_PRIME = 0x100000001b3n;
+const MASK64 = (1n << 64n) - 1n;
+
+function fnv1a64(str) {
+  let h = FNV_OFFSET;
+  for (const c of new TextEncoder().encode(str)) { h ^= BigInt(c); h = (h * FNV_PRIME) & MASK64; }
+  return h;
+}
+const hex64 = (h) => h.toString(16).padStart(16, '0');
+
+function ascii(u8, a, b) { let s = ''; for (let i = a; i < b; i++) s += String.fromCharCode(u8[i]); return s; }
+function isZlib(u8) { return u8.length > 2 && u8[0] === 0x78 && (u8[1] === 0xda || u8[1] === 0x9c || u8[1] === 0x01 || u8[1] === 0x5e); }
+
+async function streamBytes(u8, stream) {
+  const w = stream.writable.getWriter();
+  w.write(u8); w.close();
+  return new Uint8Array(await new Response(stream.readable).arrayBuffer());
+}
+const zlibInflate = (u8) => streamBytes(u8, new DecompressionStream('deflate'));
+const zlibDeflate = (u8) => streamBytes(u8, new CompressionStream('deflate'));
+
+// ---------- BGFA 1.05 container (bigfiles and the qkl_*.ast archives share the layout) ----------
+// header (64 B): 'BGFA1.05', u32 n+1, u32 n, u32 tocOff(64), u32 0, u32 tocSize, u32 0, u32 widths(0x04080100), u32 widths2(0x404),
+// u32 prefixWords, u32 nameWidth(64), 4 x u32 0. TOC: prefixWords x u32, then records
+// {u16 flags, u64 fnv1a64(name), u32 off, u32 csize, u32 usize-csize, char name[nameWidth]}. Entry bytes are zlib streams.
+function parseBigfile(u8, label = '') {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  if (ascii(u8, 0, 8) !== 'BGFA1.05') throw new Error(`${label || 'file'}: not a BGFA 1.05 container`);
+  const tocOff = dv.getUint32(16, true), tocSize = dv.getUint32(24, true);
+  const w8 = dv.getUint32(32, true), w9 = dv.getUint32(36, true), pw = dv.getUint32(40, true), nw = dv.getUint32(44, true);
+  const widths = { offW: (w8 >>> 24) & 255, hashW: (w8 >>> 16) & 255, csW: (w9 >>> 8) & 255, usW: w9 & 255, nw };
+  const rec = 2 + widths.hashW + widths.offW + widths.csW + widths.usW + nw;
+  const prefix = [];
+  for (let i = 0; i < pw; i++) prefix.push(dv.getUint32(tocOff + i * 4, true));
+  const entries = [];
+  const readN = (p, n) => { let v = 0n; for (let i = n - 1; i >= 0; i--) v = (v << 8n) | BigInt(u8[p + i]); return v; };
+  for (let p = tocOff + pw * 4; p + rec <= tocOff + tocSize; p += rec) {
+    let q = p;
+    const flags = dv.getUint16(q, true); q += 2;
+    const hash = readN(q, widths.hashW); q += widths.hashW;
+    const off = Number(readN(q, widths.offW)); q += widths.offW;
+    const csize = Number(readN(q, widths.csW)); q += widths.csW;
+    const delta = Number(readN(q, widths.usW)); q += widths.usW;
+    let name = ''; for (let i = 0; i < nw && u8[q + i]; i++) name += String.fromCharCode(u8[q + i]);
+    entries.push({ flags, hash, name, off, csize, delta, raw: u8.subarray(off, off + csize), data: null, dirty: false });
+  }
+  return { label, header: u8.slice(0, 64), prefix, widths, entries, dataStart: tocOff + tocSize, size: u8.length };
+}
+
+async function loadEntry(e) {
+  if (!e.data) e.data = isZlib(e.raw) ? await zlibInflate(e.raw) : e.raw.slice();
+  return e.data;
+}
+
+async function buildBigfile(big) {
+  const n = big.entries.length, nw = 64, rec = 2 + 8 + 4 + 4 + 4 + nw;
+  const tocOff = 64, tocSize = big.prefix.length * 4 + rec * n;
+  const blobs = [];
+  for (const e of big.entries) {
+    if (e.dirty || !e.raw || !isZlib(e.raw)) { if (!e.data) await loadEntry(e); blobs.push({ comp: await zlibDeflate(e.data), usize: e.data.length }); }
+    else blobs.push({ comp: e.raw, usize: e.csize + e.delta });
+  }
+  const total = tocOff + tocSize + blobs.reduce((s, b) => s + b.comp.length, 0);
+  const out = new Uint8Array(total); const dv = new DataView(out.buffer);
+  out.set(big.header.subarray(0, 64), 0);
+  dv.setUint32(8, n + 1, true); dv.setUint32(12, n, true); dv.setUint32(16, tocOff, true); dv.setUint32(20, 0, true);
+  dv.setUint32(24, tocSize, true); dv.setUint32(28, 0, true); dv.setUint32(32, 0x04080100, true); dv.setUint32(36, 0x404, true);
+  dv.setUint32(40, big.prefix.length, true); dv.setUint32(44, nw, true);
+  let p = tocOff;
+  for (const w of big.prefix) { dv.setUint32(p, w >>> 0, true); p += 4; }
+  let off = tocOff + tocSize;
+  big.entries.forEach((e, i) => {
+    const b = blobs[i];
+    dv.setUint16(p, e.flags, true); p += 2;
+    let h = e.hash; for (let k = 0; k < 8; k++) { out[p + k] = Number(h & 0xffn); h >>= 8n; } p += 8;
+    dv.setUint32(p, off, true); p += 4; dv.setUint32(p, b.comp.length, true); p += 4; dv.setUint32(p, (b.usize - b.comp.length) >>> 0, true); p += 4;
+    for (let k = 0; k < nw; k++) out[p + k] = k < e.name.length ? e.name.charCodeAt(k) : 0; p += nw;
+    out.set(b.comp, off); off += b.comp.length;
+  });
+  return out;
+}
+
+function entryKind(name) {
+  const m = /_(COL|NORM|DECAL|NAME|PRIDE|SPEC|MASK|ALPHA)$/.exec(name);
+  if (!m) return 'scene';
+  return m[1] === 'NAME' ? 'kerning' : 'texture';
+}
+
+// ---------- "p3R" textures ----------
+// 128-byte header: 'p3R'\x02, u32 0x7c, u32 0x000a1007, u32 HEIGHT @12, u32 WIDTH @16 (DDS order: a 1024-wide x 2048-tall
+// jersey stores 0x800 then 0x400; read the other way round, every texture decodes as two squashed copies side by side),
+// u32 topMipBytes @20, u32 1 @24, u32 mipCount @28, ..., u32 0x20 @0x4c, u32 4 @0x50, fourcc @0x54, ..., u32 @0x6c;
+// DXT blocks (top mip first, then the chain) from 0x80.
+const BLOCK_BYTES = { DXT1: 8, DXT3: 16, DXT5: 16 };
+function parseTexture(u8, name = '') {
+  if (ascii(u8, 0, 3) !== 'p3R') throw new Error(`${name}: not a p3R texture`);
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const fourcc = ascii(u8, 84, 88);
+  if (!BLOCK_BYTES[fourcc]) throw new Error(`${name}: unsupported texture format ${JSON.stringify(fourcc)}`);
+  const height = dv.getUint32(12, true), width = dv.getUint32(16, true), mips = dv.getUint32(28, true) || 1;
+  const t = { name, header: u8.slice(0, 128), fourcc, width, height, mips, data: u8.subarray(128), trailer: new Uint8Array(0) };
+  const need = chainBytes(width, height, mips, fourcc);
+  if (t.data.length > need) { t.trailer = t.data.slice(need); t.data = t.data.subarray(0, need); }
+  return t;
+}
+const mipDims = (w, h, level) => [Math.max(1, w >> level), Math.max(1, h >> level)];
+const mipBytes = (w, h, fourcc) => Math.max(1, Math.ceil(w / 4)) * Math.max(1, Math.ceil(h / 4)) * BLOCK_BYTES[fourcc];
+function chainBytes(w, h, mips, fourcc) { let s = 0; for (let i = 0; i < mips; i++) { const [mw, mh] = mipDims(w, h, i); s += mipBytes(mw, mh, fourcc); } return s; }
+function mipOffset(t, level) { let s = 0; for (let i = 0; i < level; i++) { const [mw, mh] = mipDims(t.width, t.height, i); s += mipBytes(mw, mh, t.fourcc); } return s; }
+
+function c565(v) { return [((v >> 11) & 31) * 255 / 31, ((v >> 5) & 63) * 255 / 63, (v & 31) * 255 / 31]; }
+function to565(r, g, b) { return ((Math.round(r * 31 / 255) & 31) << 11) | ((Math.round(g * 63 / 255) & 63) << 5) | (Math.round(b * 31 / 255) & 31); }
+
+function decodeDXT(data, w, h, fourcc) {
+  const out = new Uint8ClampedArray(w * h * 4);
+  const bw = Math.max(1, Math.ceil(w / 4)), bh = Math.max(1, Math.ceil(h / 4)), bs = BLOCK_BYTES[fourcc];
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const alpha = new Uint8Array(16);
+  for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+    const p = (by * bw + bx) * bs, cp = fourcc === 'DXT1' ? p : p + 8;
+    if (fourcc === 'DXT5') {
+      const a0 = data[p], a1 = data[p + 1];
+      let bits = 0n; for (let i = 7; i >= 2; i--) bits = (bits << 8n) | BigInt(data[p + i]);
+      for (let i = 0; i < 16; i++) {
+        const k = Number((bits >> BigInt(3 * i)) & 7n);
+        alpha[i] = k === 0 ? a0 : k === 1 ? a1 : a0 > a1 ? Math.round(((8 - k) * a0 + (k - 1) * a1) / 7) : k < 6 ? Math.round(((6 - k) * a0 + (k - 1) * a1) / 5) : k === 6 ? 0 : 255;
+      }
+    } else if (fourcc === 'DXT3') {
+      for (let i = 0; i < 16; i++) { const v = (data[p + (i >> 1)] >> ((i & 1) * 4)) & 15; alpha[i] = v * 17; }
+    } else alpha.fill(255);
+    const c0 = dv.getUint16(cp, true), c1 = dv.getUint16(cp + 2, true), idx = dv.getUint32(cp + 4, true);
+    const [r0, g0, b0] = c565(c0), [r1, g1, b1] = c565(c1);
+    const pal = (fourcc === 'DXT1' && c0 <= c1)
+      ? [[r0, g0, b0, 255], [r1, g1, b1, 255], [(r0 + r1) / 2, (g0 + g1) / 2, (b0 + b1) / 2, 255], [0, 0, 0, 0]]
+      : [[r0, g0, b0, 255], [r1, g1, b1, 255], [(2 * r0 + r1) / 3, (2 * g0 + g1) / 3, (2 * b0 + b1) / 3, 255], [(r0 + 2 * r1) / 3, (g0 + 2 * g1) / 3, (b0 + 2 * b1) / 3, 255]];
+    for (let py = 0; py < 4; py++) for (let px = 0; px < 4; px++) {
+      const x = bx * 4 + px, y = by * 4 + py; if (x >= w || y >= h) continue;
+      const i = py * 4 + px, c = pal[(idx >>> (2 * i)) & 3], o = (y * w + x) * 4;
+      out[o] = c[0]; out[o + 1] = c[1]; out[o + 2] = c[2]; out[o + 3] = fourcc === 'DXT1' ? c[3] : alpha[i];
+    }
+  }
+  return out;
+}
+
+function decodeMip(t, level = 0) {
+  const [w, h] = mipDims(t.width, t.height, level);
+  const o = mipOffset(t, level), n = mipBytes(w, h, t.fourcc);
+  return { width: w, height: h, rgba: decodeDXT(t.data.subarray(o, o + n), w, h, t.fourcc) };
+}
+
+// Color block encoder: bounding box + least-squares refinement (after stb_dxt). Returns [c0, c1, indices].
+function encodeColorBlock(px, w4, alphaMode) {
+  // px: 16 x [r,g,b,a]; alphaMode: DXT1 with transparent pixels -> 3-color mode
+  const opaque = px.filter((p) => !alphaMode || p[3] >= 128);
+  if (opaque.length === 0) return [0, 0, 0xffffffff];
+  let mn = [255, 255, 255], mx = [0, 0, 0];
+  for (const p of opaque) for (let c = 0; c < 3; c++) { if (p[c] < mn[c]) mn[c] = p[c]; if (p[c] > mx[c]) mx[c] = p[c]; }
+  for (let c = 0; c < 3; c++) { const ins = (mx[c] - mn[c]) / 16; mn[c] = Math.min(255, mn[c] + ins); mx[c] = Math.max(0, mx[c] - ins); }
+  let c0 = to565(mx[0], mx[1], mx[2]), c1 = to565(mn[0], mn[1], mn[2]);
+  const fit = (c0v, c1v) => {
+    const e0 = c565(c0v), e1 = c565(c1v);
+    const pal = alphaMode ? [e0, e1, [(e0[0] + e1[0]) / 2, (e0[1] + e1[1]) / 2, (e0[2] + e1[2]) / 2]]
+      : [e0, e1, [(2 * e0[0] + e1[0]) / 3, (2 * e0[1] + e1[1]) / 3, (2 * e0[2] + e1[2]) / 3], [(e0[0] + 2 * e1[0]) / 3, (e0[1] + 2 * e1[1]) / 3, (e0[2] + 2 * e1[2]) / 3]];
+    let idx = 0, err = 0;
+    for (let i = 0; i < 16; i++) {
+      const p = px[i];
+      if (alphaMode && p[3] < 128) { idx |= 3 << (2 * i); continue; }
+      let best = 0, bd = Infinity;
+      for (let k = 0; k < pal.length; k++) { const d = (p[0] - pal[k][0]) ** 2 + (p[1] - pal[k][1]) ** 2 + (p[2] - pal[k][2]) ** 2; if (d < bd) { bd = d; best = k; } }
+      idx |= best << (2 * i); err += bd;
+    }
+    return [idx >>> 0, err];
+  };
+  let [idx, err] = fit(c0, c1);
+  // refinement: least squares over the current index assignment (4-colour mode only)
+  if (!alphaMode) for (let iter = 0; iter < 2; iter++) {
+    const W = [1, 0, 2 / 3, 1 / 3]; let a00 = 0, a01 = 0, a11 = 0; const b0 = [0, 0, 0], b1 = [0, 0, 0];
+    for (let i = 0; i < 16; i++) { const k = (idx >>> (2 * i)) & 3, wA = W[k], wB = 1 - wA; a00 += wA * wA; a01 += wA * wB; a11 += wB * wB; for (let c = 0; c < 3; c++) { b0[c] += wA * px[i][c]; b1[c] += wB * px[i][c]; } }
+    const det = a00 * a11 - a01 * a01; if (Math.abs(det) < 1e-6) break;
+    const n0 = [0, 0, 0], n1 = [0, 0, 0];
+    for (let c = 0; c < 3; c++) { n0[c] = Math.max(0, Math.min(255, (a11 * b0[c] - a01 * b1[c]) / det)); n1[c] = Math.max(0, Math.min(255, (a00 * b1[c] - a01 * b0[c]) / det)); }
+    const nc0 = to565(n0[0], n0[1], n0[2]), nc1 = to565(n1[0], n1[1], n1[2]);
+    if (nc0 === c0 && nc1 === c1) break;
+    const [ni, ne] = fit(nc0, nc1);
+    if (ne < err) { c0 = nc0; c1 = nc1; idx = ni; err = ne; } else break;
+  }
+  if (alphaMode) { if (c0 > c1) { [c0, c1] = [c1, c0]; [idx] = fit(c0, c1); } }
+  else if (c0 < c1) { [c0, c1] = [c1, c0]; [idx] = fit(c0, c1); }
+  else if (c0 === c1) { idx = 0; }
+  return [c0, c1, idx];
+}
+
+function encodeDXT(rgba, w, h, fourcc) {
+  const bw = Math.max(1, Math.ceil(w / 4)), bh = Math.max(1, Math.ceil(h / 4)), bs = BLOCK_BYTES[fourcc];
+  const out = new Uint8Array(bw * bh * bs); const dv = new DataView(out.buffer);
+  const px = Array.from({ length: 16 }, () => [0, 0, 0, 255]);
+  for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+    for (let py = 0; py < 4; py++) for (let px_ = 0; px_ < 4; px_++) {
+      const x = Math.min(w - 1, bx * 4 + px_), y = Math.min(h - 1, by * 4 + py), o = (y * w + x) * 4, p = px[py * 4 + px_];
+      p[0] = rgba[o]; p[1] = rgba[o + 1]; p[2] = rgba[o + 2]; p[3] = rgba[o + 3];
+    }
+    const p = (by * bw + bx) * bs;
+    let cp = p;
+    if (fourcc === 'DXT5') {
+      let a0 = 0, a1 = 255; for (const q of px) { if (q[3] > a0) a0 = q[3]; if (q[3] < a1) a1 = q[3]; }
+      out[p] = a0; out[p + 1] = a1; let bits = 0n;
+      for (let i = 0; i < 16; i++) {
+        let k = 0;
+        if (a0 > a1) { const t = Math.round(7 * (a0 - px[i][3]) / (a0 - a1)); k = t === 0 ? 0 : t === 7 ? 1 : t + 1; }
+        bits |= BigInt(k) << BigInt(3 * i);
+      }
+      for (let i = 2; i < 8; i++) { out[p + i] = Number(bits & 0xffn); bits >>= 8n; }
+      cp = p + 8;
+    } else if (fourcc === 'DXT3') {
+      for (let i = 0; i < 16; i += 2) out[p + (i >> 1)] = (Math.round(px[i][3] / 17) & 15) | ((Math.round(px[i + 1][3] / 17) & 15) << 4);
+      cp = p + 8;
+    }
+    const alphaMode = fourcc === 'DXT1' && px.some((q) => q[3] < 128);
+    const [c0, c1, idx] = encodeColorBlock(px, w, alphaMode);
+    dv.setUint16(cp, c0, true); dv.setUint16(cp + 2, c1, true); dv.setUint32(cp + 4, idx >>> 0, true);
+  }
+  return out;
+}
+
+function downsample(rgba, w, h) {
+  const nw = Math.max(1, w >> 1), nh = Math.max(1, h >> 1), out = new Uint8ClampedArray(nw * nh * 4);
+  for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) {
+    const acc = [0, 0, 0, 0]; let n = 0;
+    for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+      const sx = Math.min(w - 1, x * 2 + dx), sy = Math.min(h - 1, y * 2 + dy), o = (sy * w + sx) * 4;
+      for (let c = 0; c < 4; c++) acc[c] += rgba[o + c]; n++;
+    }
+    const o = (y * nw + x) * 4; for (let c = 0; c < 4; c++) out[o + c] = acc[c] / n;
+  }
+  return { rgba: out, width: nw, height: nh };
+}
+
+// Re-encode a texture from full-size RGBA, keeping the template's dimensions, format, mip count, header and trailer.
+function encodeTexture(template, rgba) {
+  const t = template; const parts = []; let cur = { rgba, width: t.width, height: t.height };
+  for (let i = 0; i < t.mips; i++) {
+    if (i > 0) cur = downsample(cur.rgba, cur.width, cur.height);
+    parts.push(encodeDXT(cur.rgba, cur.width, cur.height, t.fourcc));
+  }
+  const data = new Uint8Array(parts.reduce((s, p) => s + p.length, 0)); let o = 0; for (const p of parts) { data.set(p, o); o += p.length; }
+  const out = new Uint8Array(128 + data.length + t.trailer.length);
+  out.set(t.header, 0); out.set(data, 128); out.set(t.trailer, 128 + data.length);
+  return { ...t, header: out.slice(0, 128), data: out.subarray(128, 128 + data.length), trailer: out.slice(128 + data.length), bytes: out };
+}
+function textureBytes(t) {
+  const out = new Uint8Array(128 + t.data.length + t.trailer.length); out.set(t.header, 0); out.set(t.data, 128); out.set(t.trailer, 128 + t.data.length); return out;
+}
+
+// ---------- DDS ----------
+function toDDS(t) {
+  const h = new Uint8Array(128); const dv = new DataView(h.buffer);
+  h.set([0x44, 0x44, 0x53, 0x20], 0); dv.setUint32(4, 124, true);
+  dv.setUint32(8, 0x1 | 0x2 | 0x4 | 0x1000 | 0x80000 | (t.mips > 1 ? 0x20000 : 0), true);
+  dv.setUint32(12, t.height, true); dv.setUint32(16, t.width, true); dv.setUint32(20, mipBytes(t.width, t.height, t.fourcc), true);
+  dv.setUint32(28, t.mips, true);
+  dv.setUint32(76, 32, true); dv.setUint32(80, 0x4, true); for (let i = 0; i < 4; i++) h[84 + i] = t.fourcc.charCodeAt(i);
+  dv.setUint32(108, 0x1000 | (t.mips > 1 ? 0x400000 | 0x8 : 0), true);
+  const out = new Uint8Array(128 + t.data.length); out.set(h, 0); out.set(t.data, 128); return out;
+}
+// Returns {fourcc, width, height, mips, data} for DXT files or {rgba, width, height} for 32-bit uncompressed ones.
+function fromDDS(u8) {
+  if (ascii(u8, 0, 4) !== 'DDS ') throw new Error('not a DDS file');
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const height = dv.getUint32(12, true), width = dv.getUint32(16, true), mips = Math.max(1, dv.getUint32(28, true));
+  const pfFlags = dv.getUint32(80, true); let fourcc = ascii(u8, 84, 88); let body = u8.subarray(128);
+  if (pfFlags & 0x4) {
+    if (fourcc === 'DX10') {
+      const fmt = dv.getUint32(128, true); body = u8.subarray(148);
+      fourcc = { 71: 'DXT1', 72: 'DXT1', 74: 'DXT3', 75: 'DXT3', 77: 'DXT5', 78: 'DXT5' }[fmt];
+      if (!fourcc) { if (fmt === 28 || fmt === 87 || fmt === 88) return rgbaFromDDS(body, width, height, fmt === 28 ? 'rgba' : 'bgra'); throw new Error(`DDS DXGI format ${fmt} not supported`); }
+    }
+    if (!BLOCK_BYTES[fourcc]) throw new Error(`DDS format ${fourcc} not supported (use DXT1, DXT3 or DXT5, or 32-bit uncompressed)`);
+    return { fourcc, width, height, mips, data: body };
+  }
+  const bpp = dv.getUint32(88, true);
+  if (bpp !== 32) throw new Error(`DDS ${bpp}-bit uncompressed not supported`);
+  const rm = dv.getUint32(92, true), bm = dv.getUint32(100, true);
+  return rgbaFromDDS(body, width, height, rm === 0xff ? 'rgba' : bm === 0xff ? 'bgra' : 'bgra', pfFlags & 0x1);
+}
+function rgbaFromDDS(body, width, height, order) {
+  const out = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    const o = i * 4;
+    if (order === 'rgba') { out[o] = body[o]; out[o + 1] = body[o + 1]; out[o + 2] = body[o + 2]; out[o + 3] = body[o + 3]; }
+    else { out[o] = body[o + 2]; out[o + 1] = body[o + 1]; out[o + 2] = body[o]; out[o + 3] = body[o + 3]; }
+  }
+  return { rgba: out, width, height };
+}
+
+// Build replacement texture bytes for an entry from an imported image: a DDS ({fourcc,width,height,mips,data}) with the same
+// format and size is copied block-for-block (mips regenerated if it has too few), anything else is decoded/resampled and re-encoded.
+function textureFromImport(template, imp, resample) {
+  const t = template;
+  if (imp.fourcc && imp.fourcc === t.fourcc && imp.width === t.width && imp.height === t.height) {
+    const need = chainBytes(t.width, t.height, t.mips, t.fourcc);
+    if (imp.mips >= t.mips && imp.data.length >= need) {
+      const out = new Uint8Array(128 + need + t.trailer.length); out.set(t.header, 0); out.set(imp.data.subarray(0, need), 128); out.set(t.trailer, 128 + need);
+      return { bytes: out, mode: 'copied blocks' };
+    }
+    const top = decodeDXT(imp.data.subarray(0, mipBytes(t.width, t.height, t.fourcc)), t.width, t.height, t.fourcc);
+    return { bytes: encodeTexture(t, top).bytes, mode: 'copied top level, mips regenerated' };
+  }
+  let rgba = imp.rgba, w = imp.width, h = imp.height;
+  if (!rgba) rgba = decodeDXT(imp.data.subarray(0, mipBytes(w, h, imp.fourcc)), w, h, imp.fourcc);
+  if (w !== t.width || h !== t.height) {
+    if (!resample) throw new Error(`image is ${w}x${h} but the texture is ${t.width}x${t.height}`);
+    rgba = resample(rgba, w, h, t.width, t.height);
+  }
+  return { bytes: encodeTexture(t, rgba).bytes, mode: `re-encoded as ${t.fourcc}` };
+}
+// nearest/box resample without a canvas (used by the server)
+function resampleRGBA(src, sw, sh, dw, dh) {
+  const out = new Uint8ClampedArray(dw * dh * 4);
+  for (let y = 0; y < dh; y++) for (let x = 0; x < dw; x++) {
+    const x0 = Math.floor(x * sw / dw), x1 = Math.max(x0 + 1, Math.floor((x + 1) * sw / dw)), y0 = Math.floor(y * sh / dh), y1 = Math.max(y0 + 1, Math.floor((y + 1) * sh / dh));
+    const acc = [0, 0, 0, 0]; let n = 0;
+    for (let yy = y0; yy < y1 && yy < sh; yy++) for (let xx = x0; xx < x1 && xx < sw; xx++) { const o = (yy * sw + xx) * 4; for (let c = 0; c < 4; c++) acc[c] += src[o + c]; n++; }
+    const o = (y * dw + x) * 4; for (let c = 0; c < 4; c++) out[o + c] = acc[c] / (n || 1);
+  }
+  return out;
+}
+
+// ---------- Names and renaming ----------
+// <SLOT6>_<PART6>_<YEAR4>_<COLOR> ; the scene file refers to textures by lower-case Maya paths, the TOC by upper-case names.
+function splitName(name) {
+  const m = /^([A-Z0-9]{6})_([A-Z0-9]{6})_(\d{4})_([A-Z0-9]+?)(?:_(COL|NORM|DECAL|NAME|PRIDE|SPEC|MASK|ALPHA|[A-Z]+))?$/i.exec(name);
+  if (!m) return null;
+  return { slot: m[1], part: m[2], year: m[3], color: m[4], suffix: m[5] || '' };
+}
+function caseLike(src, dst) { return src === src.toUpperCase() ? dst.toUpperCase() : src === src.toLowerCase() ? dst.toLowerCase() : dst; }
+function replaceBytesCI(data, from, to) {
+  if (from.length !== to.length) throw new Error(`replacement must keep the length (${from} -> ${to})`);
+  const out = data.slice(); const f = from.toLowerCase(); let count = 0;
+  for (let i = 0; i + f.length <= out.length; i++) {
+    let ok = true;
+    for (let k = 0; k < f.length; k++) { const c = String.fromCharCode(out[i + k]).toLowerCase(); if (c !== f[k]) { ok = false; break; } }
+    if (!ok) continue;
+    const seg = ascii(out, i, i + f.length), rep = caseLike(seg, to);
+    for (let k = 0; k < rep.length; k++) out[i + k] = rep.charCodeAt(k);
+    count++; i += f.length - 1;
+  }
+  return [out, count];
+}
+// map: [{from, to}] (equal lengths). Renames entry names, rehashes, and patches scene/kerning text; textures are untouched.
+async function renameBigfile(big, map) {
+  const log = [];
+  for (const e of big.entries) {
+    let name = e.name;
+    for (const { from, to } of map) { const [n] = replaceBytesCI(new TextEncoder().encode(name), from, to); name = new TextDecoder().decode(n); }
+    if (name !== e.name) { log.push(`${e.name} -> ${name}`); e.name = name; e.hash = fnv1a64(name); }
+    if (entryKind(e.name) === 'scene') {
+      await loadEntry(e); let d = e.data, total = 0;
+      for (const { from, to } of map) { const [n, c] = replaceBytesCI(d, from, to); d = n; total += c; }
+      if (total) { e.data = d; e.dirty = true; log.push(`${e.name}: ${total} path reference(s) patched`); }
+    }
+  }
+  return log;
+}
+
+// ---------- Mix-and-match XML ----------
+const PART_TYPES = ['helmet', 'jersey', 'pants', 'socks', 'shoes', 'gloves'];
+function partTemplate(type, name, bigfile, scene) {
+  if (type === 'jersey') return `  <part name="${name}" shade="dark" type="jersey">
+    <bigfile name="${bigfile}"/>
+    <scene name="${scene}"/>
+    <kerningTable name="${scene}_NAME"/>
+    <fontColorTexture name="${scene}_NAME_DECAL"/>
+    <numberColorTexture name="${scene}_NUMS_DECAL"/>
+    <nameScaleAtMin value="1.0"/>
+    <nameMinWidth value="0.6"/>
+    <nameMaxWidth value="0.6"/>
+    <numberSpacingOne value="0.3"/>
+    <uvSet value="2"/>
+  <decalUV value="-0.1400000006,0.2399999946,0.0700000003,0.03500000015"/></part>`;
+  return `  <part name="${name}" type="${type}">
+    <bigfile name="${bigfile}"/>
+    <scene name="${scene}"/>
+  </part>`;
+}
+function xmlForSet(officials, parts) {
+  // parts: [{type, name, bigfile, scene, officials:[...]}]
+  const lines = ['<?xml version="1.0" ?><root>'];
+  for (const t of PART_TYPES.slice(0, 5)) lines.push(`  <partType name="${t}"/>`);
+  lines.push('');
+  for (const o of officials) lines.push(`  <officialType name="${o}"/>`);
+  lines.push('');
+  for (const p of parts) {
+    let x = partTemplate(p.type, p.name, p.bigfile, p.scene);
+    const offs = p.officials.map((o) => `    <official name="${o}"/>`).join('\n');
+    x = x.replace(/\n(  <decalUV|  <\/part>)/, offs ? `\n${offs}\n$1` : '\n$1');
+    lines.push(x, '');
+  }
+  lines.push('</root>', '');
+  return lines.join('\n');
+}
+
+const Codec = { fnv1a64, hex64, ascii, isZlib, zlibInflate, zlibDeflate, parseBigfile, loadEntry, buildBigfile, entryKind,
+  parseTexture, decodeMip, decodeDXT, encodeDXT, encodeTexture, textureBytes, downsample, mipDims, mipBytes, chainBytes, mipOffset,
+  toDDS, fromDDS, textureFromImport, resampleRGBA, splitName, replaceBytesCI, renameBigfile, xmlForSet, partTemplate, PART_TYPES, BLOCK_BYTES };
+if (typeof module !== 'undefined') module.exports = Codec;
+if (typeof globalThis !== 'undefined') globalThis.Codec = Codec;
+</script>
+<script id="fcs-mapping" type="application/json">{"generated":"2026-11-02T22:24:35.459Z","folders":["FCS_DLC_BIGSKY","FCS_DLC_BSOVC","FCS_DLC_CAA","FCS_DLC_IVY","FCS_DLC_MEAC","FCS_DLC_MVFC","FCS_DLC_NEC","FCS_DLC_PATRIOT","FCS_DLC_SOCON","FCS_DLC_SOUTHLAND","FCS_DLC_SWAC","FCS_DLC_UAC"],"teams":[{"tgid":105,"name":"Abilene Christian","nick":"Wildcats","abbr":"ACU","slot":"UTEPXX","cgid":3,"conf":"UAC","xml":["FCS_DLC_UAC/UTEPXX_Pack0_MixAndMatch.xml"]},{"tgid":91,"name":"Alabama A&M","nick":"Bulldogs","abbr":"AAMU","slot":"TENNES","cgid":11,"conf":"SWAC","xml":[]},{"tgid":27,"name":"Alabama State","nick":"Hornets","abbr":"ALST","slot":"FLORID","cgid":11,"conf":"SWAC","xml":[]},{"tgid":30,"name":"Alcorn State","nick":"Braves","abbr":"ALCN","slot":"GEORGA","cgid":11,"conf":"SWAC","xml":["FCS_DLC_SWAC/GEORGA_Pack0_MixAndMatch.XML"]},{"tgid":33,"name":"Austin Peay","nick":"Governors","abbr":"PEAY","slot":"HOUSTO","cgid":3,"conf":"UAC","xml":["FCS_DLC_UAC/HOUSTO_Pack0_MixAndMatch.XML"]},{"tgid":56,"name":"Bethune-Cookman","nick":"Wildcats","abbr":"COOK","slot":"MISSOU","cgid":11,"conf":"SWAC","xml":["FCS_DLC_SWAC/MISSOU_Pack0_MixAndMatch.XML"]},{"tgid":40,"name":"Brown","nick":"Bears","abbr":"BRWN","slot":"KANSST","cgid":7,"conf":"Ivy League","xml":[]},{"tgid":93,"name":"Bryant","nick":"Bulldogs","abbr":"BRY","slot":"TEXAAM","cgid":0,"conf":"CAA","xml":["FCS_DLC_CAA/TEXAAM_Pack0_MixAndMatch.XML"]},{"tgid":80,"name":"Bucknell","nick":"Bison","abbr":"BUCK","slot":"RUTGER","cgid":9,"conf":"Patriot","xml":["FCS_DLC_PATRIOT/RUTGER_Pack0_MixAndMatch.XML"]},{"tgid":23,"name":"Butler","nick":"Bulldogs","abbr":"BUT","slot":"COLOST","cgid":5,"conf":"Independents","xml":[]},{"tgid":75,"name":"Cal Poly","nick":"Mustangs","abbr":"CP","slot":"OREGST","cgid":10,"conf":"Big Sky","xml":[]},{"tgid":31,"name":"Campbell","nick":"Fighting Camels","abbr":"CAMP","slot":"GATECH","cgid":0,"conf":"CAA","xml":[]},{"tgid":232,"name":"Central Arkansas","nick":"Bears","abbr":"UCA","slot":"UTSAXX","cgid":3,"conf":"UAC","xml":["FCS_DLC_UAC/UTSAXX_Pack0_MixAndMatch.XML"]},{"tgid":66,"name":"Central Connecticut","nick":"Blue Devils","abbr":"CCSU","slot":"NILLIN","cgid":5,"conf":"Independents","xml":[]},{"tgid":16,"name":"Charleston Southern","nick":"Buccaneers","abbr":"CHSO","slot":"BYUXXX","cgid":1,"conf":"BS-OVC","xml":["FCS_DLC_BSOVC/BYUXXX_Pack0_MixAndMatch.XML"]},{"tgid":235,"name":"Chattanooga","nick":"Mocs","abbr":"CHAT","slot":"SALBAM","cgid":4,"conf":"SoCon","xml":[]},{"tgid":144,"name":"Colgate","nick":"Raiders","abbr":"COLG","slot":"USFXXX","cgid":9,"conf":"Patriot","xml":["FCS_DLC_PATRIOT/USFXXX_Pack0_MixAndMatch.XML"]},{"tgid":71,"name":"Columbia","nick":"Lions","abbr":"CLMB","slot":"OKLAHO","cgid":7,"conf":"Ivy League","xml":[]},{"tgid":39,"name":"Cornell","nick":"Big Red","abbr":"COR","slot":"KANSAS","cgid":7,"conf":"Ivy League","xml":[]},{"tgid":89,"name":"Dartmouth","nick":"Big Green","abbr":"DART","slot":"TCUXXX","cgid":7,"conf":"Ivy League","xml":[]},{"tgid":115,"name":"Davidson","nick":"Wildcats","abbr":"DAV","slot":"WYOMIN","cgid":5,"conf":"Independents","xml":[]},{"tgid":60,"name":"Dayton","nick":"Flyers","abbr":"DAY","slot":"NEWMEX","cgid":5,"conf":"Independents","xml":[]},{"tgid":69,"name":"Delaware State","nick":"Hornets","abbr":"DSU","slot":"OHIOXX","cgid":5,"conf":"Independents","xml":["FCS_DLC_MEAC/OHIOXX_Pack0_MixAndMatch.XML"]},{"tgid":164,"name":"Delta State","nick":"Statesmen","abbr":"DSU","slot":"D1AASE","cgid":17,"conf":"Generic","xml":[]},{"tgid":12,"name":"Drake","nick":"Bulldogs","abbr":"DRKE","slot":"BOISES","cgid":5,"conf":"Independents","xml":[]},{"tgid":10,"name":"Duquesne","nick":"Duke","abbr":"DUQ","slot":"BALLST","cgid":5,"conf":"Independents","xml":[]},{"tgid":233,"name":"East Tennessee State","nick":"Buccaneers","abbr":"ETSU","slot":"GEORST","cgid":4,"conf":"SoCon","xml":["FCS_DLC_SOCON/GEORST_Pack0_MixAndMatch.XML"]},{"tgid":20,"name":"Eastern Illinois","nick":"Panthers","abbr":"EIU","slot":"CINCIN","cgid":1,"conf":"BS-OVC","xml":["FCS_DLC_BSOVC/CINCIN_Pack0_MixAndMatch.XML"]},{"tgid":97,"name":"Eastern Kentucky","nick":"Colonels","abbr":"EKU","slot":"TULSAX","cgid":3,"conf":"UAC","xml":["FCS_DLC_UAC/TULSAX_Pack0_MixAndMatch.xml"]},{"tgid":87,"name":"Eastern Washington","nick":"Eagles","abbr":"EWU","slot":"STANFO","cgid":10,"conf":"Big Sky","xml":["FCS_DLC_BIGSKY/STANFO_Pack0_MixAndMatch.XML","FCS_DLC_BIGSKY/STANFO_Pack2_MixAndMatch.XML"]},{"tgid":49,"name":"Elon","nick":"Phoenix","abbr":"ELON","slot":"MIAMFL","cgid":0,"conf":"CAA","xml":[]},{"tgid":84,"name":"Florida A&M","nick":"Rattlers","abbr":"FAMU","slot":"SCAROL","cgid":11,"conf":"SWAC","xml":[]},{"tgid":90,"name":"Fordham","nick":"Rams","abbr":"FOR","slot":"TEMPLE","cgid":9,"conf":"Patriot","xml":["FCS_DLC_PATRIOT/TEMPLE_Pack0_MixAndMatch.XML"]},{"tgid":218,"name":"Furman","nick":"Paladins","abbr":"FUR","slot":"TXSTXX","cgid":4,"conf":"SoCon","xml":[]},{"tgid":57,"name":"Gardner Webb","nick":"Runnin' Bulldogs","abbr":"WEBB","slot":"NAVYXX","cgid":1,"conf":"BS-OVC","xml":["FCS_DLC_BSOVC/NAVYXX_Pack0_MixAndMatch.XML"]},{"tgid":83,"name":"Georgetown","nick":"Hoyas","abbr":"GTWN","slot":"SMUXXX","cgid":9,"conf":"Patriot","xml":["FCS_DLC_PATRIOT/SMUXXX_Pack0_MixAndMatch.XML"]},{"tgid":73,"name":"Grambling State","nick":"Tigers","abbr":"GRAM","slot":"OLEMIS","cgid":11,"conf":"SWAC","xml":[]},{"tgid":34,"name":"Hampton","nick":"Pirates","abbr":"HAMP","slot":"IDAHOX","cgid":0,"conf":"CAA","xml":[]},{"tgid":72,"name":"Harvard","nick":"Crimson","abbr":"HARV","slot":"OKLAST","cgid":7,"conf":"Ivy League","xml":[]},{"tgid":18,"name":"Holy Cross","nick":"Crusaders","abbr":"HC","slot":"UCFXXX","cgid":9,"conf":"Patriot","xml":["FCS_DLC_PATRIOT/UCFXXX_Pack0_MixAndMatch.XML"]},{"tgid":229,"name":"Houston Christian","nick":"Huskies","abbr":"HCU","slot":"FAUXXX","cgid":13,"conf":"Southland","xml":["FCS_DLC_SOUTHLAND/FAUXXX_Pack0_MixAndMatch.XML"]},{"tgid":2,"name":"Howard","nick":"Bison","abbr":"HOW","slot":"AKRONX","cgid":5,"conf":"Independents","xml":["FCS_DLC_MEAC/AKRONX_Pack0_MixAndMatch.XML"]},{"tgid":17,"name":"Idaho","nick":"Vandals","abbr":"IDHO","slot":"CALXXX","cgid":10,"conf":"Big Sky","xml":[]},{"tgid":110,"name":"Idaho State","nick":"Bengals","abbr":"IDST","slot":"WASHIN","cgid":10,"conf":"Big Sky","xml":[]},{"tgid":76,"name":"Illinois State","nick":"Redbirds","abbr":"ILST","slot":"PENNST","cgid":2,"conf":"MVFC","xml":["FCS_DLC_MVFC/PENNST_Pack0_MixAndMatch.XML"]},{"tgid":53,"name":"Incarnate Word","nick":"Cardinals","abbr":"UIW","slot":"MIDTEN","cgid":13,"conf":"Southland","xml":["FCS_DLC_SOUTHLAND/MIDTEN_Pack0_MixAndMatch.XML","FCS_DLC_SOUTHLAND/MIDTEN_Pack1_MixandMatch.XML"]},{"tgid":35,"name":"Indiana State","nick":"Sycamores","abbr":"INST","slot":"ILLINO","cgid":2,"conf":"MVFC","xml":["FCS_DLC_MVFC/ILLINO_Pack0_MixAndMatch.XML"]},{"tgid":55,"name":"Jackson State","nick":"Tigers","abbr":"JKST","slot":"MISSST","cgid":11,"conf":"SWAC","xml":["FCS_DLC_SWAC/MISSST_Pack0_MixAndMatch.XML"]},{"tgid":94,"name":"Lafayette","nick":"Leopards","abbr":"LAF","slot":"TXTECH","cgid":9,"conf":"Patriot","xml":["FCS_DLC_PATRIOT/TXTECH_Pack0_MixAndMatch.XML"]},{"tgid":234,"name":"Lamar","nick":"Cardinals","abbr":"LAMAR","slot":"OLDDOM","cgid":13,"conf":"Southland","xml":["FCS_DLC_SOUTHLAND/OLDDOM_Pack0_MixAndMatch.XML"]},{"tgid":112,"name":"Lehigh","nick":"Mountain Hawks","abbr":"LEH","slot":"WVIRGI","cgid":9,"conf":"Patriot","xml":["FCS_DLC_PATRIOT/WVIRGI_Pack0_MixAndMatch.XML"]},{"tgid":108,"name":"Lindenwood","nick":"Lions","abbr":"LIND","slot":"VATECH","cgid":1,"conf":"BS-OVC","xml":["FCS_DLC_BSOVC/VATECH_Pack0_MixAndMatch.XML"]},{"tgid":95,"name":"Long Island","nick":"Sharks","abbr":"LIU","slot":"TOLEDO","cgid":5,"conf":"Independents","xml":[]},{"tgid":28,"name":"Maine","nick":"Black Bears","abbr":"MAINE","slot":"FLORST","cgid":0,"conf":"CAA","xml":[]},{"tgid":104,"name":"Marist","nick":"Red Foxes","abbr":"MRST","slot":"UTAHST","cgid":5,"conf":"Independents","xml":[]},{"tgid":85,"name":"Mcneese State","nick":"Cowboys","abbr":"MCNS","slot":"SMISSI","cgid":13,"conf":"Southland","xml":["FCS_DLC_SOUTHLAND/SMISSI_Pack0_MixAndMatch.XML"]},{"tgid":65,"name":"Mercer","nick":"Bears","abbr":"MER","slot":"ULMONR","cgid":4,"conf":"SoCon","xml":[]},{"tgid":160,"name":"Mercyhurst","nick":"Lakers","abbr":"MU","slot":"D1AAEX","cgid":17,"conf":"Generic","xml":[]},{"tgid":26,"name":"Merrimack","nick":"Warriors","abbr":"MERR","slot":"EMICHI","cgid":5,"conf":"Independents","xml":[]},{"tgid":6,"name":"Miss Valley State","nick":"Delta Devils","abbr":"MVSU","slot":"ARKANS","cgid":11,"conf":"SWAC","xml":[]},{"tgid":88,"name":"Monmouth","nick":"Hawks","abbr":"MONM","slot":"SYRACU","cgid":0,"conf":"CAA","xml":[]},{"tgid":74,"name":"Montana","nick":"Grizzlies","abbr":"MONT","slot":"OREGON","cgid":10,"conf":"Big Sky","xml":["FCS_DLC_BIGSKY/OREGON_Pack0_MixAndMatch.XML"]},{"tgid":106,"name":"Montana State","nick":"Bobcats","abbr":"MTST","slot":"VANDER","cgid":10,"conf":"Big Sky","xml":["FCS_DLC_BIGSKY/VANDER_Pack0_MixAndMatch.XML"]},{"tgid":1,"name":"Morehead State","nick":"Eagles","abbr":"MORE","slot":"AIRFOR","cgid":5,"conf":"Independents","xml":[]},{"tgid":41,"name":"Morgan State","nick":"Bears","abbr":"MORG","slot":"KENTXX","cgid":5,"conf":"Independents","xml":["FCS_DLC_MEAC/KENTXX_Pack0_MixAndMatch.XML"]},{"tgid":52,"name":"Murray State","nick":"Racers","abbr":"MURR","slot":"MICHST","cgid":2,"conf":"MVFC","xml":["FCS_DLC_MVFC/MICHST_Pack0_MixAndMatch.XML"]},{"tgid":47,"name":"New Hampshire","nick":"Wildcats","abbr":"UNH","slot":"MARYLA","cgid":0,"conf":"CAA","xml":[]},{"tgid":25,"name":"Nicholls","nick":"Colonels","abbr":"NICH","slot":"ECUXXX","cgid":13,"conf":"Southland","xml":["FCS_DLC_SOUTHLAND/ECUXXX_Pack0_MixAndMatch.XML"]},{"tgid":14,"name":"Norfolk State","nick":"Spartans","abbr":"NORF","slot":"BOWLGR","cgid":5,"conf":"Independents","xml":["FCS_DLC_MEAC/BOWLGR_Pack0_MixAndMatch.XML"]},{"tgid":8,"name":"North Alabama","nick":"Lions","abbr":"NOAL","slot":"ARMYXX","cgid":3,"conf":"UAC","xml":["FCS_DLC_UAC/ARMYXX_Pack0_MixAndMatch.xml"]},{"tgid":62,"name":"North Carolina A&T","nick":"Aggies","abbr":"NCAT","slot":"NCAROL","cgid":0,"conf":"CAA","xml":[]},{"tgid":15,"name":"North Carolina Central","nick":"Eagles","abbr":"NCCU","slot":"BUFFAL","cgid":5,"conf":"Independents","xml":["FCS_DLC_MEAC/BUFFAL_Pack0_MixAndMatch.XML"]},{"tgid":36,"name":"North Dakota","nick":"Fighting Hawks","abbr":"NDAK","slot":"INDIAN","cgid":2,"conf":"MVFC","xml":["FCS_DLC_MVFC/INDIAN_Pack0_MixAndMatch.XML"]},{"tgid":78,"name":"North Dakota State","nick":"Bison","abbr":"NDSU","slot":"PURDUE","cgid":2,"conf":"MVFC","xml":["FCS_DLC_MVFC/PURDUE_Pack0_MixAndMatch.XML","FCS_DLC_MVFC/PURDUE_Pack1_MixAndMatch.XML"]},{"tgid":111,"name":"Northern Arizona","nick":"Lumberjacks","abbr":"NAU","slot":"WASHST","cgid":10,"conf":"Big Sky","xml":["FCS_DLC_BIGSKY/WASHST_Pack0_MixAndMatch.XML"]},{"tgid":5,"name":"Northern Colorado","nick":"Bears","abbr":"UNCO","slot":"AZSTAT","cgid":10,"conf":"Big Sky","xml":[]},{"tgid":70,"name":"Northern Iowa","nick":"Panthers","abbr":"UNI","slot":"OHIOST","cgid":2,"conf":"MVFC","xml":["FCS_DLC_MVFC/OHIOST_Pack0_MixAndMatch.XML"]},{"tgid":230,"name":"Northwestern State","nick":"Demons","abbr":"NWST","slot":"FIUXXX","cgid":13,"conf":"Southland","xml":["FCS_DLC_SOUTHLAND/FIUXXX_Pack0_MixAndMatch.XML"]},{"tgid":38,"name":"Penn","nick":"Quakers","abbr":"PENN","slot":"IOWAST","cgid":7,"conf":"Ivy League","xml":[]},{"tgid":102,"name":"Portland State","nick":"Vikings","abbr":"PSU","slot":"USCXXX","cgid":10,"conf":"Big Sky","xml":[]},{"tgid":9,"name":"Prarie View A&M","nick":"Panthers","abbr":"PVAMU","slot":"AUBURN","cgid":11,"conf":"SWAC","xml":["FCS_DLC_SWAC/AUBURN_Pack0_MixAndMatch.XML"]},{"tgid":32,"name":"Presbyterian","nick":"Blue Hose","abbr":"PRESB","slot":"HAWAII","cgid":5,"conf":"Independents","xml":[]},{"tgid":11,"name":"Princeton","nick":"Tigers","abbr":"PRIN","slot":"BAYLOR","cgid":7,"conf":"Ivy League","xml":[]},{"tgid":63,"name":"Rhode Island","nick":"Rams","abbr":"URI","slot":"NCSTAT","cgid":0,"conf":"CAA","xml":[]},{"tgid":61,"name":"Richmond","nick":"Spiders","abbr":"RICH","slot":"NMEXST","cgid":9,"conf":"Patriot","xml":[]},{"tgid":68,"name":"Robert Morris","nick":"Colonials","abbr":"RMU","slot":"NOTDAM","cgid":5,"conf":"Independents","xml":[]},{"tgid":22,"name":"Sacramento State","nick":"Hornets","abbr":"SAC","slot":"COLORA","cgid":10,"conf":"Big Sky","xml":[]},{"tgid":19,"name":"Sacred Heart","nick":"Pioneers","abbr":"SHU","slot":"CMICHI","cgid":5,"conf":"Independents","xml":[]},{"tgid":113,"name":"Saint Francis (PA)","nick":"Red Flash","abbr":"SFU","slot":"WMICHI","cgid":5,"conf":"Independents","xml":[]},{"tgid":143,"name":"Samford","nick":"Bulldogs","abbr":"SAM","slot":"TROYST","cgid":4,"conf":"SoCon","xml":[]},{"tgid":82,"name":"San Diego","nick":"Toreros","abbr":"USD","slot":"SANJOS","cgid":5,"conf":"Independents","xml":[]},{"tgid":50,"name":"South Carolina State","nick":"Bulldogs","abbr":"SCST","slot":"MIAMOH","cgid":5,"conf":"Independents","xml":["FCS_DLC_MEAC/MIAMOH_Pack0_MixAndMatch.XML"]},{"tgid":37,"name":"South Dakota","nick":"Coyotes","abbr":"SDAK","slot":"IOWAXX","cgid":2,"conf":"MVFC","xml":["FCS_DLC_MVFC/IOWAXX_Pack0_MixAndMatch.XML"]},{"tgid":51,"name":"South Dakota State","nick":"Jackrabbits","abbr":"SDSU","slot":"MICHIG","cgid":2,"conf":"MVFC","xml":["FCS_DLC_MVFC/MICHIG_Pack0_MixAndMatch.XML"]},{"tgid":44,"name":"Southeast Missouri St","nick":"Redhawks","abbr":"SEMO","slot":"LOUISV","cgid":1,"conf":"BS-OVC","xml":["FCS_DLC_BSOVC/LOUISV_Pack0_MixAndMatch.XML"]},{"tgid":46,"name":"Southeastern Louisiana","nick":"Lions","abbr":"SELA","slot":"MARSHA","cgid":13,"conf":"Southland","xml":["FCS_DLC_SOUTHLAND/MARSHA_Pack0_MixAndMatch.XML"]},{"tgid":3,"name":"Southern","nick":"Jaguars","abbr":"SOU","slot":"ALBAMA","cgid":11,"conf":"SWAC","xml":["FCS_DLC_SWAC/ALBAMA_Pack0_MixAndMatch.XML"]},{"tgid":54,"name":"Southern Illinois","nick":"Salukis","abbr":"SIU","slot":"MINNES","cgid":2,"conf":"MVFC","xml":["FCS_DLC_MVFC/MINNES_Pack0_MixAndMatch.XML"]},{"tgid":99,"name":"Southern Utah","nick":"Thunderbirds","abbr":"SUU","slot":"UCLAXX","cgid":3,"conf":"UAC","xml":["FCS_DLC_UAC/UCLAXX_Pack0_MixAndMatch.xml"]},{"tgid":101,"name":"St. Thomas(MN)","nick":"Tommies","abbr":"UST","slot":"UNLVXX","cgid":5,"conf":"Independents","xml":[]},{"tgid":64,"name":"Stephen F. Austin","nick":"Lumberjacks","abbr":"SFA","slot":"NTEXAS","cgid":13,"conf":"Southland","xml":["FCS_DLC_SOUTHLAND/NTEXAS_Pack0_MixAndMatch.XML"]},{"tgid":29,"name":"Stetson","nick":"Hatters","abbr":"STET","slot":"FRESNO","cgid":5,"conf":"Independents","xml":[]},{"tgid":21,"name":"Stonehill","nick":"Skyhawks","abbr":"SHU","slot":"CLEMSO","cgid":5,"conf":"Independents","xml":[]},{"tgid":109,"name":"Stony Brook","nick":"Seawolves","abbr":"STON","slot":"WAKEFO","cgid":0,"conf":"CAA","xml":[]},{"tgid":79,"name":"Tarleton State","nick":"Texans","abbr":"TARL","slot":"RICEXX","cgid":3,"conf":"UAC","xml":["FCS_DLC_UAC/RICEXX_Pack0_MixAndMatch.xml"]},{"tgid":48,"name":"Tennessee State","nick":"Tigers","abbr":"TNST","slot":"MEMPHI","cgid":1,"conf":"BS-OVC","xml":["FCS_DLC_BSOVC/MEMPHI_Pack0_MixAndMatch.XML"]},{"tgid":100,"name":"Tennessee Tech","nick":"Golden Eagles","abbr":"TNTC","slot":"UCONNX","cgid":1,"conf":"BS-OVC","xml":["FCS_DLC_BSOVC/UCONNX_Pack0_MixAndMatch.XML"]},{"tgid":98,"name":"Texas A&M-Commerce","nick":"Lions","abbr":"TAMC","slot":"UABXXX","cgid":13,"conf":"Southland","xml":["FCS_DLC_SOUTHLAND/UABXXX_Pack0_MixAndMatch.XML"]},{"tgid":45,"name":"Texas Southern","nick":"Tigers","abbr":"TXSO","slot":"LSUXXX","cgid":11,"conf":"SWAC","xml":[]},{"tgid":7,"name":"The Citadel","nick":"Bulldogs","abbr":"CIT","slot":"ARKSTX","cgid":4,"conf":"SoCon","xml":[]},{"tgid":107,"name":"Towson","nick":"Tigers","abbr":"TOWS","slot":"VIRGIN","cgid":0,"conf":"CAA","xml":[]},{"tgid":163,"name":"Tuskegee","nick":"Golden Tigers","abbr":"TU","slot":"D1AAMW","cgid":17,"conf":"Generic","xml":["FCS_DLC_NEC/D1AAMW_Pack0_MixAndMatch.XML"]},{"tgid":13,"name":"UAlbany","nick":"Great Danes","abbr":"ALBY","slot":"BOSTON","cgid":0,"conf":"CAA","xml":["FCS_DLC_CAA/BOSTON_Pack0_MixAndMatch.XML"]},{"tgid":42,"name":"UAPB","nick":"Golden Lions","abbr":"UAPB","slot":"KENTUC","cgid":11,"conf":"SWAC","xml":[]},{"tgid":4,"name":"UC Davis","nick":"Aggies","abbr":"UCD","slot":"ARIZON","cgid":10,"conf":"Big Sky","xml":[]},{"tgid":81,"name":"UT Martin","nick":"Skyhawks","abbr":"UTM","slot":"SANDST","cgid":1,"conf":"BS-OVC","xml":["FCS_DLC_BSOVC/SANDST_Pack0_MixAndMatch.XML"]},{"tgid":181,"name":"Utah Tech","nick":"Trailblazers","abbr":"UTU","slot":"UMASSX","cgid":3,"conf":"UAC","xml":[]},{"tgid":96,"name":"UTRGV","nick":"Vaqueros","abbr":"UTRGV","slot":"TULANE","cgid":13,"conf":"Southland","xml":["FCS_DLC_SOUTHLAND/TULANE_Pack0_MixAndMatch.XML"]},{"tgid":114,"name":"Valporaiso","nick":"Beacons","abbr":"VALPO","slot":"WISCON","cgid":5,"conf":"Independents","xml":[]},{"tgid":24,"name":"Villanova","nick":"Wildcats","abbr":"NOVA","slot":"DUKEXX","cgid":0,"conf":"CAA","xml":[]},{"tgid":43,"name":"VMI","nick":"Keydets","abbr":"VMI","slot":"LATECH","cgid":4,"conf":"SoCon","xml":["FCS_DLC_SOCON/LATECH_Pack0_MixAndMatch.XML"]},{"tgid":162,"name":"Wagner","nick":"Seahawks","abbr":"WAG","slot":"D1AANW","cgid":17,"conf":"Generic","xml":["FCS_DLC_NEC/D1AANW_Pack0_MixAndMatch.XML"]},{"tgid":103,"name":"Weber State","nick":"Wildcats","abbr":"WEB","slot":"UTAHXX","cgid":10,"conf":"Big Sky","xml":[]},{"tgid":161,"name":"West Florida","nick":"Argonauts","abbr":"UWF","slot":"D1AAWX","cgid":17,"conf":"Generic","xml":[]},{"tgid":59,"name":"West Georgia","nick":"Wolves","abbr":"UWG","slot":"NEVADA","cgid":3,"conf":"UAC","xml":[]},{"tgid":86,"name":"Western Carolina","nick":"Catamounts","abbr":"WCU","slot":"ULLAFY","cgid":4,"conf":"SoCon","xml":[]},{"tgid":58,"name":"Western Illinois","nick":"Leathernecks","abbr":"WIU","slot":"NEBRAS","cgid":1,"conf":"BS-OVC","xml":["FCS_DLC_BSOVC/NEBRAS_Pack0_MixAndMatch.XML"]},{"tgid":77,"name":"William & Mary","nick":"Tribe","abbr":"WM","slot":"PITTSB","cgid":0,"conf":"CAA","xml":[]},{"tgid":211,"name":"Wofford","nick":"Terriers","abbr":"WOF","slot":"WKENTU","cgid":4,"conf":"SoCon","xml":[]},{"tgid":92,"name":"Yale","nick":"Bulldogs","abbr":"YALE","slot":"TEXASX","cgid":7,"conf":"Ivy League","xml":["FCS_DLC_IVY/TEXASX_Pack0_MixAndMatch.XML"]},{"tgid":67,"name":"Youngstown State","nick":"Penguins","abbr":"YSU","slot":"NORTHW","cgid":2,"conf":"MVFC","xml":["FCS_DLC_MVFC/NORTHW_Pack0_MixAndMatch.XML","FCS_DLC_MVFC/NORTHW_Pack1_MixAndMatch.XML"]}]}</script>
+<script>// app.js — FCS Uniform Studio UI. Team-first: pick a team, see its uniforms and parts, edit textures. Files come from the
+// local server (serve.mjs, automatic) or, when the page is opened on its own, from a folder picked with the File System
+// Access API (Chrome/Edge) with downloads as the last resort. Codec functions come from codec.cjs (inlined).
+'use strict';
+(() => {
+const C = globalThis.Codec;
+const MAPPING = JSON.parse(document.getElementById('fcs-mapping').textContent);
+const CONF_FOLDER = { UAC: 'FCS_DLC_UAC', SWAC: 'FCS_DLC_SWAC', 'Ivy League': 'FCS_DLC_IVY', CAA: 'FCS_DLC_CAA', Patriot: 'FCS_DLC_PATRIOT',
+  Independents: 'FCS_DLC_MEAC', MEAC: 'FCS_DLC_MEAC', 'Big Sky': 'FCS_DLC_BIGSKY', 'BS-OVC': 'FCS_DLC_BSOVC', SoCon: 'FCS_DLC_SOCON',
+  Generic: 'FCS_DLC_NEC', NEC: 'FCS_DLC_NEC', Southland: 'FCS_DLC_SOUTHLAND', MVFC: 'FCS_DLC_MVFC' };
+const PART_OF = { HELMET: 'helmet', JERSEY: 'jersey', PANTSX: 'pants', SOCKSX: 'socks', SHOESX: 'shoes', GLOVES: 'gloves' };
+const TYPE_ORDER = ['helmet', 'jersey', 'pants', 'socks', 'shoes', 'gloves'];
+const GENERIC = [
+  ['D1AANW', 'Wagner', [['D1AANW_HELMET_2007_RED_big', 'vanilla Northwest gold "NW" helmet'], ['D1AANW_HELMET_2007_GREEN_big', 'NOT vanilla: West Virginia gold/navy helmet'], ['D1AANW_JERSEY_2007_RED_big', 'vanilla green NORTHWEST jersey'], ['D1AANW_JERSEY_2007_WHITE_big', 'vanilla white NORTHWEST jersey'], ['D1AANW_JERSEY_2007_GREEN_big', 'plain dark green jersey'], ['D1AANW_PANTSX_2007_WHITE_big', 'white pants, red stripe'], ['D1AANW_PANTSX_2007_GREEN_big', 'green pants'], ['D1AANW_PANTSX_2007_RED_big', '']]],
+  ['D1AAMW', 'Tuskegee', [['D1AAMW_HELMET_2007_GRAY_big', 'vanilla Midwest gray "MW" helmet'], ['D1AAMW_HELMET_2007_GOLD_big', 'NOT vanilla: navy helmet'], ['D1AAMW_JERSEY_2007_BLUE_big', 'NOT vanilla: plain red jersey'], ['D1AAMW_JERSEY_2007_GREEN_big', 'NOT vanilla: maroon jersey'], ['D1AAMW_JERSEY_2007_WHITE_big', 'NOT vanilla: black jersey'], ['D1AAMW_PANTSX_2007_GOLD_big', 'NOT vanilla: gray pants, 512x1024']]],
+  ['D1AAEX', 'Mercyhurst', [['D1AAEX_HELMET_2007_WHITE_big', 'vanilla East purple "E" helmet'], ['D1AAEX_JERSEY_2007_BLUE_big', ''], ['D1AAEX_JERSEY_2007_WHITE_big', 'white jersey'], ['D1AAEX_PANTSX_2007_WHITE_big', 'NOT vanilla: purple pants']]],
+  ['D1AASE', 'Delta State', [['D1AASE_HELMET_2007_WHITE_big', 'white helmet'], ['D1AASE_HELMET_2007_RED_big', 'reddish helmet'], ['D1AASE_JERSEY_2007_WHITE_big', 'white SOUTHEAST jersey, red trim'], ['D1AASE_JERSEY_2007_RED_big', ''], ['D1AASE_JERSEY_2007_YELLOW_big', ''], ['D1AASE_PANTSX_2007_WHITE_big', 'white pants, red stripes'], ['D1AASE_PANTSX_2007_BLACK_big', ''], ['D1AASE_PANTSX_2007_SILVER_big', '']]],
+  ['D1AAWX', 'West Florida', [['D1AAWX_HELMET_2007_GOLD_big', ''], ['D1AAWX_HELMET_2007_BLACK_big', 'NOT vanilla: white Texas "150" helmet'], ['D1AAWX_JERSEY_2007_PURPLE_big', ''], ['D1AAWX_JERSEY_2007_WHITE_big', 'white jersey'], ['D1AAWX_JERSEY_2007_BLACK_big', ''], ['D1AAWX_PANTSX_2007_WHITE_big', 'white pants, purple stripe'], ['D1AAWX_PANTSX_2007_GOLD_big', '']]],
+];
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+function el(tag, attrs = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k === 'class') n.className = v; else if (k === 'html') n.innerHTML = v; else if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else if (v !== null && v !== undefined && v !== false) n.setAttribute(k, v === true ? '' : v); }
+  for (const k of kids.flat()) if (k !== null && k !== undefined && k !== false) n.append(k.nodeType ? k : document.createTextNode(String(k)));
+  return n;
+}
+const logEl = $('#log');
+function log(msg, cls = '') { const line = el('span', { class: cls }, `${new Date().toLocaleTimeString()}  ${msg}\n`); logEl.append(line); logEl.scrollTop = logEl.scrollHeight; (cls === 'err' ? console.error : console.log)(msg); }
+let toastTimer = 0;
+function toast(msg, cls = '') { const t = $('#toast'); t.textContent = msg; t.className = `toast show ${cls}`; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), cls === 'err' ? 6000 : 3200); }
+const fmt = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
+const guard = (fn) => async (...a) => { try { return await fn(...a); } catch (e) { log(e.message || String(e), 'err'); toast(e.message || String(e), 'err'); console.error(e); } };
+const FSA = typeof window.showDirectoryPicker === 'function';
+$('#log-clear').onclick = () => { logEl.textContent = ''; };
+
+const IO = { mode: 'none', cfg: null };
+const S = { dir: null, dirName: '', files: [], subdirs: [], big: null, xml: null, arc: null, ns: { donors: [] }, team: null, thumbs: new Map(), bigs: new Map(), lastEvent: 0, open: new Set() };
+const teamsBySlot = new Map(); for (const t of MAPPING.teams) { if (!teamsBySlot.has(t.slot)) teamsBySlot.set(t.slot, []); teamsBySlot.get(t.slot).push(t); }
+const folderFor = (t) => (t.xml[0] ? t.xml[0].split('/')[0] : CONF_FOLDER[t.conf] || '');
+const fileKind = (n) => /_mixandmatch\.xml$/i.test(n) ? 'xml' : /_big\.ast$/i.test(n) ? 'big' : /\.ast\.edat$/i.test(n) ? 'edat' : null;
+const slotOf = (n) => { const m = /^([A-Z0-9]{6})_/i.exec(n); return m ? m[1].toUpperCase() : ''; };
+const bigBase = (n) => n.replace(/\.(ast|big)$/i, '');
+const typeOfBigfile = (name) => { const i = C.splitName(bigBase(name).replace(/_big$/i, '')); return i ? PART_OF[i.part.toUpperCase()] || null : null; };
+
+// ---------- tabs / theme ----------
+function showTab(id) { $$('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === id)); $$('section.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${id}`)); }
+$$('#tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+const themes = ['auto', 'light', 'dark'];
+function applyTheme(t) { if (t === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.dataset.theme = t; $('#theme-btn').textContent = `theme: ${t}`; }
+let theme = 'auto'; try { theme = localStorage.getItem('fus-theme') || 'auto'; } catch {}
+applyTheme(theme);
+$('#theme-btn').onclick = () => { theme = themes[(themes.indexOf(theme) + 1) % 3]; applyTheme(theme); try { localStorage.setItem('fus-theme', theme); } catch {} };
+
+// ---------- IO: server API, File System Access, or downloads ----------
+const apiPath = (folder, name) => `/api/file/${encodeURIComponent(folder || '')}/${encodeURIComponent(name)}`;
+async function refBytes(ref) {
+  if (ref.api) { const r = await fetch(apiPath(ref.folder, ref.name), { cache: 'no-store' }); if (!r.ok) throw new Error(`cannot read ${ref.name}`); return new Uint8Array(await r.arrayBuffer()); }
+  const f = ref.handle ? await ref.handle.getFile() : ref.file; return new Uint8Array(await f.arrayBuffer());
+}
+function download(name, bytes) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes])); a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000); log(`downloaded ${name} (${fmt(bytes.length)})`); }
+async function writeHandle(handle, bytes) { const w = await handle.createWritable(); await w.write(bytes); await w.close(); }
+async function saveRef(ref, bytes) {
+  if (ref.api) { const r = await fetch(apiPath(ref.folder, ref.name), { method: 'PUT', body: bytes }); if (!r.ok) throw new Error(`save failed: ${(await r.json()).error || r.status}`); ref.size = bytes.length; log(`saved ${ref.folder ? ref.folder + '/' : ''}${ref.name} (${fmt(bytes.length)})`, 'ok'); return ref; }
+  if (ref.handle) { await writeHandle(ref.handle, bytes); ref.size = bytes.length; log(`saved ${ref.name} (${fmt(bytes.length)})`, 'ok'); return ref; }
+  download(ref.name, bytes); return ref;
+}
+async function saveInto(folder, name, bytes) {
+  const existing = S.files.find((f) => f.folder === folder && f.name.toLowerCase() === name.toLowerCase());
+  if (existing) { await saveRef(existing, bytes); return existing; }
+  if (IO.mode === 'api') { const ref = { name, folder, kind: fileKind(name), slot: slotOf(name), size: 0, api: true }; await saveRef(ref, bytes); S.files.push(ref); afterFilesChanged(); return ref; }
+  if (IO.mode === 'fsa') {
+    const sub = S.subdirs.find((d) => d.name === folder); const dh = sub ? sub.handle : S.dir;
+    const h = await dh.getFileHandle(name, { create: true }); await writeHandle(h, bytes);
+    const ref = { name, folder: sub ? folder : '', kind: fileKind(name), slot: slotOf(name), size: bytes.length, handle: h, dir: dh }; S.files.push(ref); afterFilesChanged(); log(`wrote ${folder ? folder + '/' : ''}${name}`, 'ok'); return ref;
+  }
+  download(name, bytes); return { name, folder, kind: fileKind(name), slot: slotOf(name), size: bytes.length, file: new File([bytes], name) };
+}
+async function saveAs(name, bytes) {
+  if (window.showSaveFilePicker) { try { const h = await window.showSaveFilePicker({ suggestedName: name }); await writeHandle(h, bytes); log(`saved ${h.name}`, 'ok'); return { name: h.name, handle: h }; } catch (e) { if (e.name === 'AbortError') return null; throw e; } }
+  download(name, bytes); return null;
+}
+async function archiveBytes(name) {
+  const clean = bigBase(name).replace(/_big$/i, '') + '_BIG';
+  if (IO.mode === 'api') { const r = await fetch(`/api/archive/${encodeURIComponent(clean.toUpperCase())}`, { cache: 'no-store' }); if (r.status === 404) return null; if (!r.ok) throw new Error('archive read failed'); return new Uint8Array(await r.arrayBuffer()); }
+  if (S.arc) { const e = S.arc.map.get(C.hex64(C.fnv1a64(clean.toUpperCase()))); if (!e) return null; const raw = new Uint8Array(await S.arc.file.slice(e.off, e.off + e.csize).arrayBuffer()); return C.isZlib(raw) ? await C.zlibInflate(raw) : raw; }
+  return null;
+}
+async function archiveHas(name) {
+  const clean = bigBase(name).replace(/_big$/i, '') + '_BIG';
+  if (IO.mode === 'api') { try { const r = await fetch(`/api/archive/${encodeURIComponent(clean.toUpperCase())}?probe=1`); return (await r.json()).found === true; } catch { return false; } }
+  if (S.arc) return S.arc.map.has(C.hex64(C.fnv1a64(clean.toUpperCase())));
+  return null; // unknown
+}
+async function archiveText(entryName) { const b = IO.mode === 'api' ? await (async () => { const r = await fetch(`/api/archive/${entryName}`); return r.ok ? new Uint8Array(await r.arrayBuffer()) : null; })() : S.arc ? await (async () => { const e = S.arc.map.get(C.hex64(C.fnv1a64(entryName))); if (!e) return null; const raw = new Uint8Array(await S.arc.file.slice(e.off, e.off + e.csize).arrayBuffer()); return C.isZlib(raw) ? await C.zlibInflate(raw) : raw; })() : null; return b ? new TextDecoder('latin1').decode(b) : null; }
+function findBig(name, folder) {
+  const want = `${bigBase(name)}.ast`.toLowerCase();
+  return S.files.find((f) => f.kind === 'big' && f.folder === folder && f.name.toLowerCase() === want) || S.files.find((f) => f.kind === 'big' && f.name.toLowerCase() === want) || null;
+}
+function setSource(text, cls = '') { const s = $('#source-strip'); s.textContent = ''; s.append(el('span', { class: `pill ${cls}` }, IO.mode === 'api' ? 'local server' : IO.mode === 'fsa' ? 'folder access' : 'file only'), ' ', text); }
+async function listApi() {
+  const r = await fetch('/api/files', { cache: 'no-store' }); const j = await r.json();
+  S.files = j.files.map((f) => ({ ...f, api: true, slot: slotOf(f.name) }));
+  S.subdirs = [...new Set(S.files.map((f) => f.folder).filter(Boolean))].sort().map((name) => ({ name }));
+  S.dirName = IO.cfg.dlcDir;
+  afterFilesChanged();
+}
+function afterFilesChanged() {
+  const bigs = S.files.filter((f) => f.kind === 'big').length, xmls = S.files.filter((f) => f.kind === 'xml').length;
+  $('#folder-info').textContent = `${S.dirName}: ${bigs} bigfiles, ${xmls} mix-and-match XMLs${S.subdirs.length ? ` in ${S.subdirs.length} conference folders` : ''}`;
+  renderFolder(); fillDonorSelects(); renderTeamList();
+}
+async function init() {
+  $('#fsa-text').textContent = 'connecting';
+  try { const r = await fetch('/api/config', { cache: 'no-store' }); if (r.ok) { IO.mode = 'api'; IO.cfg = await r.json(); } } catch {}
+  if (IO.mode === 'api') {
+    await listApi();
+    $('#fsa-dot').className = 'dot on'; $('#fsa-text').textContent = 'saves into the game folder, backups kept';
+    setSource(el('span', {}, el('code', {}, IO.cfg.dlcDir), ` · ${S.files.filter((f) => f.kind === 'big').length} bigfiles, ${S.files.filter((f) => f.kind === 'xml').length} uniform files · archive ${IO.cfg.archive ? 'connected' : 'not found'} · backups in `, el('code', {}, IO.cfg.backup)), 'ok');
+    $('#open-folder').disabled = true; $('#open-folder').textContent = 'Folder loaded by the server'; $('#rescan-folder').disabled = false; $('#arc-find').disabled = false; $('#arc-info').textContent = `${IO.cfg.archive || 'archive not found'}`;
+    log(`connected to ${IO.cfg.dlcDir} (${S.files.length} uniform files)`);
+    pollEvents();
+  } else if (FSA) {
+    IO.mode = 'fsa'; $('#fsa-dot').className = 'dot warn'; $('#fsa-text').textContent = 'no server: pick the folder once';
+    setSource(el('span', {}, 'Start ', el('code', {}, 'uniform-studio.cmd'), ' to load the folder automatically, or ', el('button', { class: 'small primary', onclick: openFolder }, 'Open your DLC folder…')), 'warn');
+  } else {
+    $('#fsa-dot').className = 'dot'; $('#fsa-text').textContent = 'read-only browser';
+    setSource(el('span', {}, 'This browser cannot save into folders; use Chrome or Edge, or start ', el('code', {}, 'uniform-studio.cmd'), '. You can still ', el('button', { class: 'small', onclick: () => $('#pick-folder').click() }, 'open a folder read-only')), 'bad');
+  }
+  renderTeamList();
+  const first = MAPPING.teams.find((t) => t.slot === 'D1AANW') || MAPPING.teams[0]; if (first && S.files.length) selectTeam(first);
+}
+async function pollEvents() {
+  try {
+    const r = await fetch(`/api/events?since=${S.lastEvent}`, { cache: 'no-store' }); const j = await r.json();
+    for (const e of j.events) {
+      S.lastEvent = e.id;
+      if (e.type === 'repackaged') { log(e.msg, 'ok'); toast(`Repackaged ${e.entry} into ${e.big}`); invalidateBig(e.folder, e.big); }
+      else if (e.type === 'error') { log(e.msg, 'err'); toast(e.msg, 'err'); }
+      else if (e.type === 'dds-open') log(e.msg);
+      else if (e.type === 'saved') { /* our own saves are logged already */ }
+    }
+    if (j.last !== undefined) S.lastEvent = Math.max(S.lastEvent, j.last);
+  } catch {}
+  setTimeout(pollEvents, 1500);
+}
+function invalidateBig(folder, name) {
+  const key = `${folder}/${name}`.toLowerCase(); S.bigs.delete(key);
+  for (const k of [...S.thumbs.keys()]) if (k.toLowerCase().startsWith(bigBase(name).toLowerCase())) S.thumbs.delete(k);
+  const f = S.files.find((x) => x.folder === folder && x.name === name); if (f) f.mtime = Date.now();
+  if (S.team) renderTeam();
+}
+
+// ---------- team list ----------
+function renderTeamList() {
+  const q = ($('#team-search').value || '').trim().toLowerCase(), conf = $('#team-conf').value, has = $('#team-xml').value;
+  const box = $('#team-list'); box.textContent = '';
+  for (const t of MAPPING.teams) {
+    const own = S.files.some((f) => f.kind === 'xml' && f.slot === t.slot);
+    if (conf && t.conf !== conf) continue; if (has === 'yes' && !own) continue; if (has === 'no' && own) continue;
+    if (q && !`${t.name} ${t.nick} ${t.slot} ${t.conf} ${t.abbr}`.toLowerCase().includes(q)) continue;
+    box.append(el('div', { class: `tl ${S.team?.team === t ? 'sel' : ''}`, onclick: () => selectTeam(t) }, el('span', {}, el('span', { class: 'n' }, t.name), ' ', el('span', { class: 's' }, t.slot)), el('span', { class: `pill ${own ? 'ok' : ''}` }, own ? 'file' : 'built-in')));
+  }
+}
+{ const confs = [...new Set(MAPPING.teams.map((t) => t.conf))].sort(); for (const c of confs) $('#team-conf').append(el('option', { value: c }, c)); }
+['#team-search', '#team-conf', '#team-xml'].forEach((s) => $(s).addEventListener('input', renderTeamList));
+
+// ---------- team view ----------
+const selectTeam = guard(async (team) => {
+  S.team = { team, slot: team.slot, xmlRef: null, doc: null, source: 'none', folder: folderFor(team) };
+  renderTeamList();
+  $('#teampane').textContent = ''; $('#teampane').append(el('div', { class: 'card empty' }, `Loading ${team.name}…`));
+  const xmls = S.files.filter((f) => f.kind === 'xml' && f.slot === team.slot).sort((a, b) => (/pack0/i.test(a.name) ? -1 : 1) - (/pack0/i.test(b.name) ? -1 : 1));
+  if (xmls.length) { S.team.xmlRef = xmls[0]; S.team.folder = xmls[0].folder; S.team.source = 'folder'; S.team.text = new TextDecoder().decode(await refBytes(xmls[0])); }
+  else { const t = await archiveText(`${team.slot}_MIXANDMATCH`); if (t) { S.team.text = t; S.team.source = 'archive'; } }
+  if (S.team.text) { const doc = new DOMParser().parseFromString(S.team.text, 'text/xml'); if (doc.querySelector('parsererror')) throw new Error(`${team.slot}: ${doc.querySelector('parsererror').textContent.slice(0, 120)}`); S.team.doc = doc; }
+  if (!S.team.folder && S.subdirs.length) S.team.folder = S.subdirs[0].name;
+  renderTeam();
+});
+const xmlOfficialsOf = (doc) => $$('officialType', doc).map((n) => n.getAttribute('name'));
+const partGet = (p, tag) => p.querySelector(tag)?.getAttribute('name') || '';
+const partOfficials = (p) => $$('official', p).map((n) => n.getAttribute('name'));
+function xmlTextOf(doc) { return `<?xml version="1.0" ?>${new XMLSerializer().serializeToString(doc.documentElement)}\n`; }
+const saveTeamXml = guard(async () => {
+  const T = S.team; if (!T?.doc) return;
+  if (T.source !== 'folder') { toast('Copy the definition into the DLC folder first', 'err'); return; }
+  await saveRef(T.xmlRef, new TextEncoder().encode(xmlTextOf(T.doc))); toast(`Saved ${T.xmlRef.name}`);
+});
+const copyToFolder = guard(async () => {
+  const T = S.team; if (!T?.doc) return;
+  const name = `${T.slot}_Pack0_MixAndMatch.XML`;
+  T.xmlRef = await saveInto(T.folder, name, new TextEncoder().encode(xmlTextOf(T.doc))); T.source = 'folder';
+  toast(`${name} written to ${T.folder || 'DLC'}; the team now uses it`); renderTeam(); renderTeamList();
+});
+function renderTeam() {
+  const T = S.team; if (!T) return; const pane = $('#teampane'); pane.textContent = '';
+  const t = T.team, teamsOnSlot = teamsBySlot.get(t.slot) || [];
+  const head = el('div', { class: 'card' }, el('div', { class: 'team-head' },
+    el('div', {}, el('h2', {}, t.name), el('div', { class: 'muted' }, t.nick)),
+    el('div', { class: 'meta' }, el('span', { class: 'pill' }, `slot ${t.slot}`), el('span', { class: 'pill' }, t.conf), el('span', { class: 'pill' }, T.folder || 'DLC root'),
+      T.source === 'folder' ? el('span', { class: 'pill ok', title: T.xmlRef.name }, `uniform file: ${T.xmlRef.name}`) : T.source === 'archive' ? el('span', { class: 'pill warn' }, 'built-in definition (read-only)') : el('span', { class: 'pill bad' }, 'no definition found'),
+      teamsOnSlot.length > 1 ? el('span', { class: 'pill bad', title: teamsOnSlot.map((x) => x.name).join(', ') }, `${teamsOnSlot.length} teams share this slot`) : ''),
+    el('span', { style: 'flex:1' }),
+    el('div', { class: 'row tight' },
+      T.source === 'archive' ? el('button', { class: 'primary', onclick: copyToFolder, title: 'write the built-in definition as a DLC file so it can be edited' }, 'Copy to DLC folder') : '',
+      T.source === 'none' ? el('button', { class: 'primary', onclick: () => { $('#ns-team').value = t.slot; $('#ns-slot').value = t.slot; renderDonors(); showTab('newset'); } }, 'Create a set') : '',
+      T.source === 'folder' ? el('button', { class: 'ghost', onclick: () => openXml(T.xmlRef) }, 'Raw XML') : '',
+      IO.mode === 'api' ? el('button', { class: 'ghost', onclick: () => fetch('/api/open-folder', { method: 'POST', body: JSON.stringify({ folder: T.folder }) }) }, 'Open folder') : '')));
+  pane.append(head);
+  if (!T.doc) {
+    pane.append(el('div', { class: 'card empty' }, T.source === 'none' && IO.mode !== 'api' && !S.arc ? 'No uniform file for this slot in the folder. Open qkl_fe2ig.ast in the Archive tab to read the built-in definition, or create a set.' : 'No definition for this slot anywhere: create a set.'));
+    return;
+  }
+  const doc = T.doc, officials = xmlOfficialsOf(doc), parts = $$('part', doc), editable = T.source === 'folder';
+  // uniforms
+  const grid = el('div', { class: 'uni-grid' });
+  officials.forEach((o, i) => {
+    const card = el('div', { class: 'uni-card' }, el('h4', {}, el('span', {}, o, i === 0 ? el('span', { class: 'pill red', style: 'margin-left:8px' }, 'home') : i === 1 ? el('span', { class: 'pill red', style: 'margin-left:8px' }, 'away') : ''), el('span', { class: 'idx' }, `row ${i} `, editable ? el('button', { class: 'small ghost', style: 'color:#ddd;border-color:#555;min-height:20px;padding:0 5px', title: 'remove this uniform', onclick: () => { $$('officialType', doc)[i].remove(); $$('part official', doc).filter((n) => n.getAttribute('name') === o).forEach((n) => n.remove()); saveTeamXml(); renderTeam(); } }, '×') : '')));
+    for (const type of TYPE_ORDER) {
+      const candidates = parts.filter((p) => p.getAttribute('type') === type); if (!candidates.length && type !== 'helmet' && type !== 'jersey' && type !== 'pants') continue;
+      const cur = candidates.find((p) => partOfficials(p).includes(o));
+      const sel = el('select', { class: 'small', disabled: !editable, onchange: (e) => { candidates.forEach((p) => $$('official', p).filter((n) => n.getAttribute('name') === o).forEach((n) => n.remove())); const pick = candidates[Number(e.target.value)]; if (pick) { const n = doc.createElement('official'); n.setAttribute('name', o); const anchor = pick.querySelector('decalUV'); if (anchor) pick.insertBefore(n, anchor); else pick.append(n); } saveTeamXml(); renderTeam(); } },
+        el('option', { value: '-1' }, candidates.length ? '— none —' : 'no parts of this type'), ...candidates.map((p, k) => el('option', { value: String(k), selected: p === cur }, `${p.getAttribute('name') || '?'} · ${partGet(p, 'bigfile')}`)));
+      const thumb = cur ? thumbCanvas(partGet(cur, 'bigfile'), T.folder) : el('div', { class: 'ph' });
+      card.append(el('div', { class: 'uni-part' }, thumb, el('div', {}, el('div', { class: 'pt' }, type), sel)));
+    }
+    grid.append(card);
+  });
+  const addOff = el('div', { class: 'row tight', style: 'margin-top:10px' }, el('input', { type: 'text', id: 'team-new-official', placeholder: 'add a uniform, e.g. Alt #1', style: 'width:220px', disabled: !editable }), el('button', { class: 'small', disabled: !editable, onclick: () => { const v = $('#team-new-official').value.trim(); if (!v) return; const n = doc.createElement('officialType'); n.setAttribute('name', v); const last = $$('officialType', doc).pop(); if (last) last.after(n); else doc.documentElement.prepend(n); saveTeamXml(); renderTeam(); } }, 'Add uniform'));
+  pane.append(el('div', { class: 'card' }, el('h3', {}, `Uniforms (${officials.length})`), editable ? '' : el('p', { class: 'muted', style: 'font-size:12px;margin:0 0 8px' }, 'Built-in definition: copy it to the DLC folder to change anything.'), grid, addOff));
+  // parts
+  const table = el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, ''), el('th', {}, 'Part'), el('th', {}, 'Bigfile'), el('th', {}, 'Where'), el('th', {}, 'Used by'), el('th', {}, ''))));
+  const tb = el('tbody', {}); table.append(tb);
+  const sorted = parts.slice().sort((a, b) => TYPE_ORDER.indexOf(a.getAttribute('type')) - TYPE_ORDER.indexOf(b.getAttribute('type')));
+  for (const p of sorted) {
+    const big = partGet(p, 'bigfile'), key = `${T.slot}:${big}`, inFolder = findBig(big, T.folder);
+    const where = el('span', { class: 'pill' }, '…');
+    if (inFolder && inFolder.folder === T.folder) { where.className = 'pill ok'; where.textContent = 'in folder'; }
+    else if (inFolder) { where.className = 'pill ok'; where.textContent = `in ${inFolder.folder}`; where.title = 'bigfiles are found in any FCS_DLC_* folder'; }
+    else if (/^generic_/i.test(big)) { where.textContent = 'game generic'; }
+    else archiveHas(big).then((h) => { if (h === true) { where.className = 'pill warn'; where.textContent = 'in game archive'; } else if (h === false) { where.className = 'pill bad'; where.textContent = 'MISSING (crashes the game)'; } else where.textContent = 'archive?'; });
+    const used = partOfficials(p);
+    const actions = el('div', { class: 'row tight' },
+      el('button', { class: 'small primary', onclick: () => toggleTextures(p, key) }, S.open.has(key) ? 'Hide textures' : 'Textures'),
+      !inFolder && !/^generic_/i.test(big) ? el('button', { class: 'small', title: 'copy the bigfile out of the game archive into this folder so it can be edited', onclick: guard(async () => { const b = await archiveBytes(big); if (!b) throw new Error(`${big} is not in the archive`); await saveInto(T.folder, `${bigBase(big)}.ast`, b); S.thumbs.delete(big); toast(`${big} pulled into ${T.folder}`); renderTeam(); }) }, 'Pull into folder') : '',
+      el('button', { class: 'small ghost', disabled: !editable, onclick: () => { p.remove(); saveTeamXml(); renderTeam(); } }, 'Remove'));
+    tb.append(el('tr', { class: 'part-row' }, el('td', {}, thumbCanvas(big, T.folder, 'thumb')), el('td', {}, el('strong', {}, p.getAttribute('type')), ' ', p.getAttribute('name') || '', p.getAttribute('shade') ? el('div', { class: 'muted', style: 'font-size:11px' }, p.getAttribute('shade')) : ''), el('td', { class: 'mono' }, big), el('td', {}, where), el('td', {}, used.length ? used.map((u) => el('span', { class: 'pill ok', style: 'margin:1px' }, u)) : el('span', { class: 'muted' }, 'unused')), el('td', {}, actions)));
+    if (S.open.has(key)) { const sub = el('tr', { class: 'sub' }, el('td', { colspan: 6 }, el('div', { class: 'muted' }, 'loading textures…'))); tb.append(sub); renderTextures(sub.firstChild, p, big); }
+  }
+  const bigOptions = S.files.filter((f) => f.kind === 'big').sort((a, b) => (a.folder === T.folder ? -1 : 1) - (b.folder === T.folder ? -1 : 1) || a.name.localeCompare(b.name));
+  const addSel = el('select', { id: 'team-add-big', style: 'min-width:280px' }, el('option', { value: '' }, 'choose a bigfile'), ...bigOptions.map((f) => el('option', { value: String(S.files.indexOf(f)) }, `${f.folder ? f.folder + '/' : ''}${f.name}`)));
+  const addLabel = el('input', { type: 'text', id: 'team-add-label', placeholder: 'label (e.g. White)', style: 'width:140px' });
+  const addRow = el('div', { class: 'row', style: 'margin-top:10px' },
+    el('label', { class: 'f' }, 'Add an existing part', addSel), el('label', { class: 'f' }, 'Label', addLabel),
+    el('button', { class: 'small', disabled: !editable, onclick: guard(async () => {
+      const f = S.files[Number(addSel.value)]; if (!f) return; const scene = bigBase(f.name).replace(/_big$/i, ''); const type = typeOfBigfile(f.name); if (!type) throw new Error('cannot tell the part type from the name');
+      const frag = new DOMParser().parseFromString(C.partTemplate(type, addLabel.value || (C.splitName(scene)?.color ?? 'Part'), `${scene}_big`, scene), 'text/xml').documentElement;
+      doc.documentElement.append(doc.importNode(frag, true)); saveTeamXml(); renderTeam();
+    }) }, 'Add part'),
+    el('span', { class: 'muted', style: 'align-self:center' }, 'or'),
+    el('button', { class: 'small', disabled: !editable, onclick: () => renderCloneBox(pane) }, 'Clone a part from another team…'));
+  pane.append(el('div', { class: 'card' }, el('h3', {}, `Parts (${parts.length})`), el('div', { class: 'scroll' }, table), addRow, el('div', { id: 'clone-box' })));
+}
+function toggleTextures(p, key) { if (S.open.has(key)) S.open.delete(key); else S.open.add(key); renderTeam(); }
+async function loadBigFor(big, folder) {
+  const ref = findBig(big, folder); const key = ref ? `${ref.folder}/${ref.name}`.toLowerCase() : `archive:${big}`.toLowerCase();
+  if (S.bigs.has(key)) return S.bigs.get(key);
+  const p = (async () => {
+    const bytes = ref ? await refBytes(ref) : await archiveBytes(big);
+    if (!bytes) return null;
+    const parsed = C.parseBigfile(bytes, ref ? ref.name : big); for (const e of parsed.entries) await C.loadEntry(e);
+    return { ref, parsed, fromArchive: !ref };
+  })();
+  S.bigs.set(key, p); return p;
+}
+function thumbCanvas(big, folder, cls = '') {
+  const cv = el('canvas', { class: cls, width: 8, height: 8, title: big });
+  const key = `${big}`;
+  const draw = (src) => { if (!src) return; cv.width = src.width; cv.height = src.height; cv.getContext('2d').drawImage(src, 0, 0); };
+  if (S.thumbs.has(key)) { const v = S.thumbs.get(key); if (v && v.then) v.then(draw); else draw(v); return cv; }
+  const p = (async () => {
+    try {
+      const b = await loadBigFor(big, folder); if (!b) return null;
+      const texes = b.parsed.entries.filter((e) => C.entryKind(e.name) === 'texture');
+      const e = texes.find((x) => /BAKED_COL$/i.test(x.name)) || texes.find((x) => /_COL$/i.test(x.name)) || texes[0]; if (!e) return null;
+      const t = C.parseTexture(e.data, e.name); let L = 0; while (Math.max(t.width >> L, t.height >> L) > 128 && L < t.mips - 1) L++;
+      const m = C.decodeMip(t, L); const c = el('canvas', { width: m.width, height: m.height }); c.getContext('2d').putImageData(new ImageData(m.rgba, m.width, m.height), 0, 0);
+      S.thumbs.set(key, c); return c;
+    } catch (err) { console.warn(big, err); S.thumbs.set(key, null); return null; }
+  })();
+  S.thumbs.set(key, p); p.then(draw);
+  return cv;
+}
+let pendingImport = null;
+async function renderTextures(box, part, big) {
+  const T = S.team; const b = await loadBigFor(big, T.folder);
+  box.textContent = '';
+  if (!b) { box.append(el('span', { class: 'pill bad' }, `${big} was not found in the folder or the archive`)); return; }
+  const list = el('div', { class: 'tex-list' });
+  if (b.fromArchive) box.append(el('div', { class: 'muted', style: 'margin:4px 0' }, 'This bigfile lives in the game archive. Pull it into the folder to edit its textures.'));
+  for (const e of b.parsed.entries) {
+    const kind = C.entryKind(e.name);
+    if (kind !== 'texture') { list.append(el('div', { class: 'tex' }, el('div', { class: 'muted', style: 'font-size:11px;text-align:center' }, kind), el('div', {}, el('div', { class: 'tn' }, e.name), el('div', { class: 'st' }, kind === 'scene' ? 'scene (geometry + texture references)' : 'kerning table')))); continue; }
+    let t; try { t = C.parseTexture(e.data, e.name); } catch (err) { list.append(el('div', { class: 'tex' }, el('span', {}, '?'), el('div', { class: 'tn' }, e.name, ' ', el('span', { class: 'pill bad' }, err.message)))); continue; }
+    const cv = el('canvas', { width: 8, height: 8 }); { let L = 0; while (Math.max(t.width >> L, t.height >> L) > 144 && L < t.mips - 1) L++; const m = C.decodeMip(t, L); cv.width = m.width; cv.height = m.height; cv.getContext('2d').putImageData(new ImageData(m.rgba, m.width, m.height), 0, 0); }
+    const st = el('div', { class: 'st' }, `${t.fourcc} ${t.width}×${t.height}, ${t.mips} mips`);
+    const editable = !b.fromArchive;
+    const acts = el('div', { class: 'ta' },
+      IO.mode === 'api' ? el('button', { class: 'small primary', disabled: !editable, title: 'write as DDS and open it in your DDS editor; saving there repackages the bigfile', onclick: guard(async () => { const r = await fetch('/api/dds/open', { method: 'POST', body: JSON.stringify({ folder: b.ref.folder, big: b.ref.name, entry: e.name }) }); const j = await r.json(); if (!r.ok) throw new Error(j.error); st.textContent = `editing in your DDS app · save there to repackage · ${j.path}`; toast(`${e.name} opened in your DDS editor`); }) }, 'Edit DDS') : el('button', { class: 'small primary', onclick: guard(async () => saveAs(`${e.name}.dds`, C.toDDS(t))) }, 'Export DDS'),
+      el('button', { class: 'small', disabled: !editable, onclick: () => { pendingImport = { b, entry: e, team: true }; $('#pick-image').click(); } }, 'Import…'),
+      el('button', { class: 'small', disabled: !editable, onclick: guard(async () => { await openBig(b.ref); openTexture(S.big.parsed.entries.find((x) => x.name === e.name)); }) }, 'Quick edit'),
+      el('button', { class: 'small ghost', onclick: guard(async () => saveAs(`${e.name}.png`, await pngBytes(t))) }, 'PNG'),
+      IO.mode === 'api' ? el('button', { class: 'small ghost', onclick: guard(async () => saveAs(`${e.name}.dds`, C.toDDS(t))) }, 'DDS') : '');
+    list.append(el('div', { class: 'tex' }, cv, el('div', {}, el('div', { class: 'tn' }, e.name), st, acts)));
+  }
+  box.append(list);
+}
+function renderCloneBox(pane) {
+  const T = S.team, box = $('#clone-box'); box.textContent = '';
+  const donors = S.files.filter((f) => f.kind === 'big' && f.slot !== T.slot).sort((a, b) => a.name.localeCompare(b.name));
+  const sel = el('select', { style: 'min-width:300px' }, el('option', { value: '' }, 'donor bigfile (another team, or one pulled from the archive)'), ...donors.map((f) => el('option', { value: String(S.files.indexOf(f)) }, `${(teamsBySlot.get(f.slot) || [])[0]?.name || f.slot}: ${f.name}`)));
+  const color = el('input', { type: 'text', placeholder: 'colour', style: 'width:110px;text-transform:uppercase' });
+  const year = el('input', { type: 'text', value: new Date().getFullYear() > 2013 ? String(new Date().getFullYear()) : '2025', maxlength: '4', style: 'width:80px' });
+  const info = el('span', { class: 'muted' });
+  sel.addEventListener('change', () => { const f = S.files[Number(sel.value)]; const i = f && C.splitName(bigBase(f.name).replace(/_big$/i, '')); if (i) { color.value = i.color; color.maxLength = i.color.length; info.textContent = `${i.part} ${i.year} · colour token must be ${i.color.length} characters`; } });
+  const offs = xmlOfficialsOf(T.doc).map((o) => el('label', { style: 'margin-right:8px' }, el('input', { type: 'checkbox', value: o }), ` ${o}`));
+  box.append(el('div', { class: 'card', style: 'margin-top:10px;background:var(--panel-2)' }, el('h3', {}, 'Clone a part into this team'),
+    el('div', { class: 'row' }, el('label', { class: 'f' }, 'Donor', sel), el('label', { class: 'f' }, 'New colour', color), el('label', { class: 'f' }, 'Year', year), el('div', { class: 'f' }, el('span', { style: 'font-size:12px;color:var(--muted);text-transform:uppercase;font-weight:600' }, 'Use for'), el('div', {}, ...offs))),
+    el('div', { class: 'row', style: 'margin-top:8px' }, el('button', { class: 'primary', onclick: guard(async () => {
+      const f = S.files[Number(sel.value)]; if (!f) throw new Error('pick a donor');
+      const big = C.parseBigfile(await refBytes(f), f.name); const scene = big.entries.find((e) => C.entryKind(e.name) === 'scene'); const i = C.splitName(scene.name);
+      if (!i) throw new Error('donor name is not SLOT_PART_YEAR_COLOR'); const nc = color.value.toUpperCase(); if (nc.length !== i.color.length) throw new Error(`colour must be ${i.color.length} characters`);
+      const map = [{ from: i.slot, to: T.slot }]; if (i.year !== year.value && /^\d{4}$/.test(year.value)) map.push({ from: i.year, to: year.value }); if (i.color.toUpperCase() !== nc) map.push({ from: i.color, to: nc });
+      (await C.renameBigfile(big, map)).forEach((n) => log(`  ${n}`));
+      const newScene = big.entries.find((e) => C.entryKind(e.name) === 'scene').name;
+      await saveInto(T.folder, `${newScene}_big.ast`, await C.buildBigfile(big));
+      const type = PART_OF[i.part.toUpperCase()]; const frag = new DOMParser().parseFromString(C.partTemplate(type, nc, `${newScene}_big`, newScene), 'text/xml').documentElement;
+      const node = T.doc.importNode(frag, true); for (const o of offs.filter((l) => l.firstChild.checked).map((l) => l.firstChild.value)) { const n = T.doc.createElement('official'); n.setAttribute('name', o); const anchor = node.querySelector('decalUV'); if (anchor) node.insertBefore(n, anchor); else node.append(n); }
+      T.doc.documentElement.append(node); await saveTeamXml(); toast(`${newScene} created from ${f.name}`); renderTeam();
+    }) }, 'Clone'), el('button', { class: 'ghost', onclick: () => { box.textContent = ''; } }, 'Cancel'), info)));
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ---------- folder tab (manual mode) ----------
+async function scanDir(dh, folder) {
+  for await (const [name, h] of dh.entries()) {
+    if (h.kind === 'directory') { if (!folder && /^FCS_DLC_/i.test(name)) { S.subdirs.push({ name, handle: h }); await scanDir(h, name); } continue; }
+    const kind = fileKind(name); if (!kind) continue;
+    const f = await h.getFile();
+    S.files.push({ name, handle: h, dir: dh, folder, kind, size: f.size, slot: slotOf(name) });
+  }
+}
+const openFolder = guard(async () => {
+  if (IO.mode === 'api') return;
+  if (FSA) {
+    const dir = await window.showDirectoryPicker({ mode: 'readwrite' }).catch((e) => { if (e.name !== 'AbortError') throw e; }); if (!dir) return;
+    S.dir = dir; S.dirName = dir.name; S.files = []; S.subdirs = []; await scanDir(dir, '');
+    setSource(el('span', {}, el('code', {}, dir.name), ` · ${S.files.filter((f) => f.kind === 'big').length} bigfiles, ${S.files.filter((f) => f.kind === 'xml').length} uniform files`), 'ok');
+    $('#rescan-folder').disabled = false; afterFilesChanged(); log(`opened ${dir.name}: ${S.files.length} uniform files`);
+    if (S.team) selectTeam(S.team.team); else { const first = MAPPING.teams.find((t) => t.slot === 'D1AANW'); if (first) selectTeam(first); }
+  } else $('#pick-folder').click();
+});
+$('#pick-folder').addEventListener('change', (ev) => {
+  const files = [...ev.target.files]; S.dir = null; S.files = []; S.subdirs = []; S.dirName = files[0]?.webkitRelativePath.split('/')[0] || 'folder';
+  for (const f of files) { const kind = fileKind(f.name); if (!kind) continue; const parts = f.webkitRelativePath.split('/'); const folder = parts.length > 2 && /^FCS_DLC_/i.test(parts[parts.length - 2]) ? parts[parts.length - 2] : ''; S.files.push({ name: f.name, file: f, dir: null, folder, kind, size: f.size, slot: slotOf(f.name) }); }
+  S.subdirs = [...new Set(S.files.map((f) => f.folder).filter(Boolean))].map((name) => ({ name }));
+  afterFilesChanged(); if (S.team) selectTeam(S.team.team);
+});
+$('#open-folder').onclick = openFolder;
+$('#rescan-folder').onclick = guard(async () => { if (IO.mode === 'api') { S.bigs.clear(); S.thumbs.clear(); await listApi(); if (S.team) selectTeam(S.team.team); return; } S.files = []; S.subdirs = []; await scanDir(S.dir, ''); afterFilesChanged(); });
+$('#folder-filter').addEventListener('input', renderFolder);
+function renderFolder() {
+  const q = $('#folder-filter').value.trim().toLowerCase(); const tb = $('#folder-table tbody'); tb.textContent = '';
+  const rows = S.files.filter((f) => { if (!q) return true; const teams = (teamsBySlot.get(f.slot) || []).map((t) => t.name).join(' '); return `${f.slot} ${teams} ${f.name} ${f.folder}`.toLowerCase().includes(q); }).sort((a, b) => a.slot.localeCompare(b.slot) || a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
+  if (!rows.length) { tb.append(el('tr', {}, el('td', { colspan: 6, class: 'empty' }, S.files.length ? 'nothing matches' : 'no files loaded'))); return; }
+  for (const f of rows) {
+    const teams = (teamsBySlot.get(f.slot) || []).map((t) => t.name).join(', ');
+    const act = f.kind === 'big' ? el('button', { class: 'small', onclick: () => openBig(f) }, 'Open') : f.kind === 'xml' ? el('button', { class: 'small', onclick: () => openXml(f) }, 'Edit XML') : el('span', { class: 'pill' }, 'encrypted');
+    tb.append(el('tr', {}, el('td', {}, el('code', {}, f.slot)), el('td', {}, teams || el('span', { class: 'muted' }, '—')), el('td', { class: 'mono' }, f.folder ? `${f.folder}/` : '', f.name), el('td', {}, el('span', { class: `pill ${f.kind === 'xml' ? 'ok' : ''}` }, f.kind === 'big' ? 'bigfile' : f.kind === 'xml' ? 'mix & match' : 'edat')), el('td', {}, fmt(f.size)), el('td', {}, act)));
+  }
+}
+
+// ---------- bigfile tab ----------
+$('#open-big-file').onclick = guard(async () => {
+  if (window.showOpenFilePicker) { const [h] = await window.showOpenFilePicker({ types: [{ description: 'bigfile', accept: { 'application/octet-stream': ['.ast', '.AST', '.big'] } }] }).catch((e) => { if (e.name !== 'AbortError') throw e; return []; }); if (h) await openBig({ name: h.name, handle: h, folder: '', kind: 'big', slot: slotOf(h.name) }); }
+  else $('#pick-big').click();
+});
+$('#pick-big').addEventListener('change', (ev) => { const f = ev.target.files[0]; if (f) openBig({ name: f.name, file: f, folder: '', kind: 'big', slot: slotOf(f.name) }); ev.target.value = ''; });
+const openBig = guard(async (ref) => {
+  const bytes = await refBytes(ref); const parsed = C.parseBigfile(bytes, ref.name);
+  S.big = { ref, parsed, name: ref.name }; for (const e of parsed.entries) await C.loadEntry(e);
+  renderBig(); showTab('bigfile');
+  const sceneName = parsed.entries.find((e) => C.entryKind(e.name) === 'scene')?.name || ''; const expect = bigBase(ref.name).replace(/_big$/i, '').toUpperCase();
+  if (sceneName && sceneName.toUpperCase() !== expect) log(`${ref.name}: the file name says ${expect} but the scene inside is ${sceneName}`, 'warn');
+  log(`opened ${ref.name}: ${parsed.entries.length} entries`);
+});
+function renderBig() {
+  const b = S.big; const tb = $('#big-table tbody'); tb.textContent = '';
+  $('#big-title').textContent = b ? b.name : ''; $('#big-info').textContent = b ? `${b.parsed.entries.length} entries · prefix ${b.parsed.prefix.map((x) => x.toString(16)).join(' ')} · ${fmt(b.parsed.size)}` : '';
+  const dirty = !!b && b.parsed.entries.some((e) => e.dirty);
+  $('#big-save').disabled = !b || !dirty || !(b.ref.api || b.ref.handle); $('#big-save-as').disabled = !b; $('#big-scene').hidden = true;
+  if (!b) { tb.append(el('tr', {}, el('td', { colspan: 7, class: 'empty' }, 'open a bigfile from the Files tab or a team\'s part list'))); return; }
+  for (const e of b.parsed.entries) {
+    const kind = C.entryKind(e.name); const size = e.data ? e.data.length : e.csize + e.delta;
+    const tdPrev = el('td', {}), tdFmt = el('td', {}), tdAct = el('td', {});
+    if (kind === 'texture') {
+      try {
+        const t = C.parseTexture(e.data, e.name); e.tex = t;
+        tdFmt.append(el('span', { class: 'mono' }, `${t.fourcc} ${t.width}×${t.height}, ${t.mips} mips`));
+        const cv = el('canvas', { class: 'thumb' }); tdPrev.append(cv); drawThumb(cv, t);
+        tdAct.append(el('button', { class: 'small primary', onclick: () => openTexture(e) }, 'Edit'), ' ', el('button', { class: 'small ghost', onclick: guard(async () => saveAs(`${e.name}.png`, await pngBytes(t))) }, 'PNG'), ' ', el('button', { class: 'small ghost', title: 'exact original DXT blocks', onclick: guard(async () => saveAs(`${e.name}.dds`, C.toDDS(t))) }, 'DDS'), ' ', el('button', { class: 'small ghost', onclick: () => { pendingImport = { entry: e, direct: true }; $('#pick-image').click(); } }, 'Replace…'));
+      } catch (err) { tdFmt.append(el('span', { class: 'pill bad' }, err.message)); }
+    } else if (kind === 'scene') { tdFmt.append(el('span', { class: 'muted' }, 'scene (RSF)')); tdAct.append(el('button', { class: 'small ghost', onclick: () => { $('#big-scene').hidden = false; $('#big-scene-text').textContent = sceneRefs(e.data).join('\n'); } }, 'References')); }
+    else { tdFmt.append(el('span', { class: 'muted' }, 'kerning table (text)')); tdAct.append(el('button', { class: 'small ghost', onclick: () => { $('#big-scene').hidden = false; $('#big-scene-text').textContent = new TextDecoder('latin1').decode(e.data); } }, 'Show')); }
+    tdAct.append(' ', el('button', { class: 'small ghost', onclick: guard(async () => saveAs(`${e.name}.bin`, e.data)) }, 'Raw'));
+    tb.append(el('tr', {}, tdPrev, el('td', { class: 'mono' }, e.name, e.dirty ? ' ' : '', e.dirty ? el('span', { class: 'pill warn' }, 'edited') : ''), el('td', {}, kind), tdFmt, el('td', {}, fmt(size)), el('td', { class: 'mono' }, `0x${e.flags.toString(16)}`), tdAct));
+  }
+}
+function sceneRefs(data) { const s = new TextDecoder('latin1').decode(data); return [...s.matchAll(/[A-Za-z]:[\\/][\x20-\x7e]{8,}/g)].map((m) => m[0]); }
+function drawThumb(cv, t) { let L = 0; while (Math.max(t.width >> L, t.height >> L) > 256 && L < t.mips - 1) L++; const m = C.decodeMip(t, L); cv.width = m.width; cv.height = m.height; cv.getContext('2d').putImageData(new ImageData(m.rgba, m.width, m.height), 0, 0); }
+async function pngBytes(t) { const m = C.decodeMip(t, 0); const cv = el('canvas', { width: m.width, height: m.height }); cv.getContext('2d').putImageData(new ImageData(m.rgba, m.width, m.height), 0, 0); const blob = await new Promise((r) => cv.toBlob(r, 'image/png')); return new Uint8Array(await blob.arrayBuffer()); }
+async function saveBig(b) {
+  const bytes = await C.buildBigfile(b.parsed); await saveRef(b.ref, bytes);
+  b.parsed.entries.forEach((e) => { e.dirty = false; }); invalidateBig(b.ref.folder, b.ref.name); renderBig();
+}
+$('#big-save').onclick = guard(async () => saveBig(S.big));
+$('#big-save-as').onclick = guard(async () => { const b = S.big; const bytes = await C.buildBigfile(b.parsed); const r = await saveAs(b.name, bytes); if (r && r.handle) { b.ref = { ...b.ref, handle: r.handle, name: r.name, api: false }; b.name = r.name; b.parsed.entries.forEach((e) => { e.dirty = false; }); renderBig(); } });
+
+// ---------- texture editor ----------
+const T = { entry: null, tex: null, work: null, ctx: null, zoom: 1, tool: 'brush', undo: [], redo: [], recolorSrc: null, stamp: null, drawing: false, last: null, pan: null };
+const canvas = $('#tex-canvas'), stage = $('#stage');
+function openTexture(entry) {
+  const t = entry.tex || C.parseTexture(entry.data, entry.name); entry.tex = t; const m = C.decodeMip(t, 0);
+  T.entry = entry; T.tex = t; T.undo = []; T.redo = []; T.recolorSrc = null; cancelStamp();
+  T.work = el('canvas', { width: t.width, height: t.height }); T.ctx = T.work.getContext('2d', { willReadFrequently: true }); T.ctx.putImageData(new ImageData(m.rgba, m.width, m.height), 0, 0);
+  canvas.width = t.width; canvas.height = t.height;
+  $('#tex-title').textContent = entry.name; $('#tex-info').textContent = `${t.fourcc} ${t.width}×${t.height}, ${t.mips} mips · from ${S.big?.name || ''}`;
+  const kv = $('#tex-kv'); kv.textContent = '';
+  for (const [k, v] of [['bigfile', S.big?.name || ''], ['entry', entry.name], ['format', t.fourcc], ['size', `${t.width} × ${t.height}`], ['mips', t.mips], ['bytes', fmt(entry.data.length)], ['hash', C.hex64(entry.hash)]]) kv.append(el('dt', {}, k), el('dd', {}, String(v)));
+  const mips = $('#tex-mips'); mips.textContent = ''; for (let i = 0; i < t.mips; i++) { const [w, h] = C.mipDims(t.width, t.height, i); mips.append(el('span', { class: 'pill' }, `L${i} ${w}×${h}`)); }
+  ['#tex-undo', '#tex-redo', '#tex-revert', '#tex-export-png', '#tex-export-dds', '#tex-import', '#tex-apply'].forEach((s) => { $(s).disabled = false; }); $('#tex-undo').disabled = true; $('#tex-redo').disabled = true;
+  showTab('texture'); setZoom('fit'); render();
+}
+function render() { const cx = canvas.getContext('2d'); cx.clearRect(0, 0, canvas.width, canvas.height); if (!$('#view-alpha').checked) { cx.fillStyle = '#000'; cx.fillRect(0, 0, canvas.width, canvas.height); } if (T.work) cx.drawImage(T.work, 0, 0); }
+$('#view-alpha').addEventListener('change', render);
+function setZoom(z) {
+  if (!T.tex) return;
+  if (z === 'fit') z = Math.min((stage.clientWidth - 4) / T.tex.width, (stage.clientHeight - 4) / T.tex.height, 8); else if (z === '+') z = T.zoom * 1.5; else if (z === '-') z = T.zoom / 1.5; else z = Number(z);
+  T.zoom = Math.max(0.05, Math.min(32, z)); canvas.style.width = `${T.tex.width * T.zoom}px`; canvas.style.height = `${T.tex.height * T.zoom}px`; $('#zoom-v').textContent = `${(T.zoom * 100).toFixed(0)}%`; placeStampBox();
+  canvas.style.imageRendering = T.zoom >= 1 ? 'pixelated' : 'auto'; // crisp texels when zoomed in; smooth (not aliased) when the texture is shrunk to fit
+}
+$$('[data-zoom]').forEach((b) => b.addEventListener('click', () => setZoom(b.dataset.zoom)));
+stage.addEventListener('wheel', (e) => { if (!e.ctrlKey) return; e.preventDefault(); setZoom(e.deltaY < 0 ? '+' : '-'); }, { passive: false });
+$$('#tool-buttons button').forEach((b) => b.addEventListener('click', () => { T.tool = b.dataset.tool; $$('#tool-buttons button').forEach((x) => x.classList.toggle('active', x === b)); $('#recolor-box').hidden = T.tool !== 'recolor'; canvas.style.cursor = T.tool === 'pan' ? 'grab' : 'crosshair'; }));
+$('#tool-color').addEventListener('input', (e) => { $('#tool-hex').value = e.target.value; });
+$('#tool-hex').addEventListener('change', (e) => { if (/^#[0-9a-f]{6}$/i.test(e.target.value)) $('#tool-color').value = e.target.value.toLowerCase(); });
+for (const [id, out] of [['tool-size', 'tool-size-v'], ['tool-opacity', 'tool-opacity-v'], ['tool-tol', 'tool-tol-v']]) $(`#${id}`).addEventListener('input', (e) => { $(`#${out}`).textContent = e.target.value; });
+const tool = () => ({ color: $('#tool-color').value, size: Number($('#tool-size').value), opacity: Number($('#tool-opacity').value) / 100, tol: Number($('#tool-tol').value) });
+function pos(e) { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) / T.zoom, (e.clientY - r.top) / T.zoom]; }
+function pushUndo() { T.undo.push(T.ctx.getImageData(0, 0, T.work.width, T.work.height)); if (T.undo.length > 20) T.undo.shift(); T.redo = []; $('#tex-undo').disabled = false; $('#tex-redo').disabled = true; }
+function dab(x, y) { const { color, size, opacity } = tool(); const c = T.ctx; c.save(); c.globalCompositeOperation = T.tool === 'eraser' ? 'destination-out' : 'source-over'; c.globalAlpha = opacity; c.fillStyle = color; c.beginPath(); c.arc(x, y, size / 2, 0, Math.PI * 2); c.fill(); c.restore(); }
+function stroke(x0, y0, x1, y1) { const { size } = tool(); const d = Math.hypot(x1 - x0, y1 - y0), step = Math.max(1, size / 4), n = Math.max(1, Math.ceil(d / step)); for (let i = 0; i <= n; i++) dab(x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n); }
+canvas.addEventListener('pointerdown', (e) => {
+  if (!T.tex || T.stamp) return;
+  if (e.button === 1) { T.pan = [e.clientX, e.clientY, stage.scrollLeft, stage.scrollTop]; canvas.setPointerCapture(e.pointerId); return; }
+  const [x, y] = pos(e); canvas.setPointerCapture(e.pointerId);
+  if (T.tool === 'pan') { T.pan = [e.clientX, e.clientY, stage.scrollLeft, stage.scrollTop]; return; }
+  if (T.tool === 'picker' || T.tool === 'recolor') { const p = T.ctx.getImageData(Math.floor(x), Math.floor(y), 1, 1).data; const hex = `#${[p[0], p[1], p[2]].map((v) => v.toString(16).padStart(2, '0')).join('')}`; if (T.tool === 'picker') { $('#tool-color').value = hex; $('#tool-hex').value = hex; } else { T.recolorSrc = [p[0], p[1], p[2]]; $('#recolor-src').style.background = hex; $('#recolor-src-hex').textContent = hex; $('#recolor-apply').disabled = false; } return; }
+  if (T.tool === 'fill') { pushUndo(); floodFill(Math.floor(x), Math.floor(y)); render(); return; }
+  pushUndo(); T.drawing = true; T.last = [x, y]; dab(x, y); render();
+});
+canvas.addEventListener('pointermove', (e) => { if (T.pan) { stage.scrollLeft = T.pan[2] - (e.clientX - T.pan[0]); stage.scrollTop = T.pan[3] - (e.clientY - T.pan[1]); return; } if (!T.drawing) return; const [x, y] = pos(e); stroke(T.last[0], T.last[1], x, y); T.last = [x, y]; render(); });
+const endStroke = () => { T.drawing = false; T.pan = null; };
+canvas.addEventListener('pointerup', endStroke); canvas.addEventListener('pointercancel', endStroke);
+function floodFill(sx, sy) {
+  const { color, tol } = tool(); const w = T.work.width, h = T.work.height; const img = T.ctx.getImageData(0, 0, w, h), d = img.data;
+  const o0 = (sy * w + sx) * 4, ref = [d[o0], d[o0 + 1], d[o0 + 2], d[o0 + 3]]; const rgb = [parseInt(color.slice(1, 3), 16), parseInt(color.slice(3, 5), 16), parseInt(color.slice(5, 7), 16)];
+  const seen = new Uint8Array(w * h); const stack = [sy * w + sx]; const t2 = tol * tol;
+  while (stack.length) {
+    const i = stack.pop(); if (seen[i]) continue; const o = i * 4;
+    const dd = (d[o] - ref[0]) ** 2 + (d[o + 1] - ref[1]) ** 2 + (d[o + 2] - ref[2]) ** 2 + (d[o + 3] - ref[3]) ** 2; if (dd > t2) continue; seen[i] = 1;
+    if (T.tool === 'eraser') d[o + 3] = 0; else { d[o] = rgb[0]; d[o + 1] = rgb[1]; d[o + 2] = rgb[2]; d[o + 3] = 255; }
+    const x = i % w, y = (i / w) | 0; if (x > 0) stack.push(i - 1); if (x < w - 1) stack.push(i + 1); if (y > 0) stack.push(i - w); if (y < h - 1) stack.push(i + w);
+  }
+  T.ctx.putImageData(img, 0, 0);
+}
+function rgb2hsl(r, g, b) { r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2; if (mx === mn) return [0, 0, l]; const d = mx - mn, s = l > .5 ? d / (2 - mx - mn) : d / (mx + mn); let h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; return [h / 6, s, l]; }
+function hsl2rgb(h, s, l) { if (s === 0) return [l * 255, l * 255, l * 255]; const q = l < .5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q; const f = (t) => { t = (t + 1) % 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < .5 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; }; return [f(h + 1 / 3) * 255, f(h) * 255, f(h - 1 / 3) * 255]; }
+$('#recolor-apply').onclick = () => {
+  if (!T.recolorSrc) return; pushUndo();
+  const { color, tol } = tool(); const tgt = rgb2hsl(parseInt(color.slice(1, 3), 16), parseInt(color.slice(3, 5), 16), parseInt(color.slice(5, 7), 16));
+  const w = T.work.width, h = T.work.height, img = T.ctx.getImageData(0, 0, w, h), d = img.data, t2 = tol * tol, s = T.recolorSrc; let n = 0;
+  for (let o = 0; o < d.length; o += 4) { const dd = (d[o] - s[0]) ** 2 + (d[o + 1] - s[1]) ** 2 + (d[o + 2] - s[2]) ** 2; if (dd > t2) continue; const l = rgb2hsl(d[o], d[o + 1], d[o + 2])[2]; const [r, g, b] = hsl2rgb(tgt[0], tgt[1], l); d[o] = r; d[o + 1] = g; d[o + 2] = b; n++; }
+  T.ctx.putImageData(img, 0, 0); render(); log(`recolored ${n} pixels`);
+};
+$('#tex-undo').onclick = () => { if (!T.undo.length) return; T.redo.push(T.ctx.getImageData(0, 0, T.work.width, T.work.height)); T.ctx.putImageData(T.undo.pop(), 0, 0); $('#tex-undo').disabled = !T.undo.length; $('#tex-redo').disabled = false; render(); };
+$('#tex-redo').onclick = () => { if (!T.redo.length) return; T.undo.push(T.ctx.getImageData(0, 0, T.work.width, T.work.height)); T.ctx.putImageData(T.redo.pop(), 0, 0); $('#tex-redo').disabled = !T.redo.length; $('#tex-undo').disabled = false; render(); };
+$('#tex-revert').onclick = () => { if (!T.entry) return; pushUndo(); const m = C.decodeMip(T.tex, 0); T.ctx.putImageData(new ImageData(m.rgba, m.width, m.height), 0, 0); render(); };
+$('#tex-export-png').onclick = guard(async () => { const blob = await new Promise((r) => T.work.toBlob(r, 'image/png')); await saveAs(`${T.entry.name}.png`, new Uint8Array(await blob.arrayBuffer())); });
+$('#tex-export-dds').onclick = guard(async () => { await saveAs(`${T.entry.name}.dds`, C.toDDS(encodeCurrent())); });
+function encodeCurrent() { const rgba = T.ctx.getImageData(0, 0, T.work.width, T.work.height).data; return C.encodeTexture(T.tex, rgba); }
+$('#tex-apply').onclick = guard(async () => {
+  $('#tex-apply').disabled = true; $('#tex-apply').textContent = 'Encoding…'; await new Promise((r) => setTimeout(r, 20));
+  try {
+    const enc = encodeCurrent(); const e = T.entry; e.data = enc.bytes; e.dirty = true; e.tex = C.parseTexture(enc.bytes, e.name); T.tex = e.tex;
+    log(`${e.name}: re-encoded ${enc.fourcc} ${enc.width}×${enc.height} with ${enc.mips} mips`, 'ok');
+    if (S.big && (S.big.ref.api || S.big.ref.handle)) { await saveBig(S.big); toast(`${e.name} saved into ${S.big.name}`); } else { renderBig(); toast('Applied; save the bigfile from the Bigfile tab'); }
+  } finally { $('#tex-apply').disabled = false; $('#tex-apply').textContent = 'Apply & save'; }
+});
+$('#tex-import').onclick = () => { pendingImport = { entry: T.entry, direct: false }; $('#pick-image').click(); };
+function resampleCanvas(rgba, w, h, dw, dh) { const src = el('canvas', { width: w, height: h }); src.getContext('2d').putImageData(new ImageData(rgba, w, h), 0, 0); const dst = el('canvas', { width: dw, height: dh }); const cx = dst.getContext('2d'); cx.imageSmoothingQuality = 'high'; cx.drawImage(src, 0, 0, dw, dh); return cx.getImageData(0, 0, dw, dh).data; }
+async function imageToRGBA(f) {
+  if (/\.dds$/i.test(f.name)) { const dds = C.fromDDS(new Uint8Array(await f.arrayBuffer())); return { ...dds, label: `${dds.fourcc || '32-bit'} ${dds.width}×${dds.height}${dds.mips ? `, ${dds.mips} mips` : ''}` }; }
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error(`cannot read ${f.name}`)); i.src = URL.createObjectURL(f); });
+  const w = img.naturalWidth, h = img.naturalHeight; const cv = el('canvas', { width: w, height: h }); cv.getContext('2d').drawImage(img, 0, 0); return { rgba: cv.getContext('2d').getImageData(0, 0, w, h).data, width: w, height: h, img, label: `${w}×${h}` };
+}
+$('#pick-image').addEventListener('change', guard(async (ev) => {
+  const f = ev.target.files[0]; ev.target.value = ''; if (!f || !pendingImport) return;
+  const job = pendingImport; pendingImport = null;
+  const imp = await imageToRGBA(f); log(`imported ${f.name}: ${imp.label}`);
+  if (job.team) { // team part texture: repackage straight away
+    const b = job.b, e = job.entry, t = C.parseTexture(e.data, e.name);
+    const { bytes, mode } = C.textureFromImport(t, imp, resampleCanvas); e.data = bytes; e.dirty = true;
+    const out = await C.buildBigfile(b.parsed); await saveRef(b.ref, out); b.parsed.entries.forEach((x) => { x.dirty = false; });
+    toast(`${e.name} replaced (${mode}) and ${b.ref.name} saved`); invalidateBig(b.ref.folder, b.ref.name); return;
+  }
+  if (T.entry !== job.entry) openTexture(job.entry);
+  const w = imp.width, h = imp.height;
+  const src = imp.img || (() => { const c = el('canvas', { width: w, height: h }); c.getContext('2d').putImageData(new ImageData(imp.rgba || C.decodeDXT(imp.data.subarray(0, C.mipBytes(w, h, imp.fourcc)), w, h, imp.fourcc), w, h), 0, 0); return c; })();
+  if (job.direct || (w === T.tex.width && h === T.tex.height)) { pushUndo(); T.ctx.clearRect(0, 0, T.work.width, T.work.height); T.ctx.drawImage(src, 0, 0, T.tex.width, T.tex.height); render(); if (job.direct) $('#tex-apply').click(); return; }
+  const scale = Math.min(T.tex.width / w, T.tex.height / h, 1);
+  T.stamp = { img: src, x: 0, y: 0, w: Math.round(w * scale), h: Math.round(h * scale), ar: w / h };
+  $('#stamp-box').hidden = false; $('#stamp').hidden = false; syncStampInputs(); placeStampBox(); showTab('texture');
+}));
+function syncStampInputs() { if (!T.stamp) return; $('#stamp-x').value = T.stamp.x; $('#stamp-y').value = T.stamp.y; $('#stamp-w').value = T.stamp.w; $('#stamp-h').value = T.stamp.h; }
+function placeStampBox() { if (!T.stamp) return; const s = $('#stamp'); s.style.left = `${T.stamp.x * T.zoom}px`; s.style.top = `${T.stamp.y * T.zoom}px`; s.style.width = `${T.stamp.w * T.zoom}px`; s.style.height = `${T.stamp.h * T.zoom}px`; }
+function cancelStamp() { T.stamp = null; $('#stamp').hidden = true; $('#stamp-box').hidden = true; }
+$('#stamp-cancel').onclick = cancelStamp;
+$('#stamp-place').onclick = () => { if (!T.stamp) return; pushUndo(); T.ctx.drawImage(T.stamp.img, T.stamp.x, T.stamp.y, T.stamp.w, T.stamp.h); cancelStamp(); render(); };
+for (const k of ['x', 'y', 'w', 'h']) $(`#stamp-${k}`).addEventListener('input', (e) => { if (!T.stamp) return; const v = Number(e.target.value) || 0; T.stamp[k] = v; if ($('#stamp-lock').checked) { if (k === 'w') T.stamp.h = Math.round(v / T.stamp.ar); if (k === 'h') T.stamp.w = Math.round(v * T.stamp.ar); } syncStampInputs(); placeStampBox(); });
+{ const box = $('#stamp'), handle = $('#stamp .h'); let drag = null;
+  box.addEventListener('pointerdown', (e) => { if (!T.stamp) return; e.preventDefault(); box.setPointerCapture(e.pointerId); drag = { mode: e.target === handle ? 'size' : 'move', x: e.clientX, y: e.clientY, s: { ...T.stamp } }; });
+  box.addEventListener('pointermove', (e) => { if (!drag) return; const dx = (e.clientX - drag.x) / T.zoom, dy = (e.clientY - drag.y) / T.zoom; if (drag.mode === 'move') { T.stamp.x = Math.round(drag.s.x + dx); T.stamp.y = Math.round(drag.s.y + dy); } else { T.stamp.w = Math.max(1, Math.round(drag.s.w + dx)); T.stamp.h = $('#stamp-lock').checked ? Math.max(1, Math.round(T.stamp.w / T.stamp.ar)) : Math.max(1, Math.round(drag.s.h + dy)); } syncStampInputs(); placeStampBox(); });
+  const end = () => { drag = null; }; box.addEventListener('pointerup', end); box.addEventListener('pointercancel', end); }
+
+// ---------- new set ----------
+{ const sel = $('#ns-team'); for (const t of MAPPING.teams) sel.append(el('option', { value: t.slot }, `${t.name} (${t.slot})`)); }
+$('#ns-team').addEventListener('change', (e) => { $('#ns-slot').value = e.target.value; renderDonors(); });
+$('#ns-slot').addEventListener('input', renderDonors); $('#ns-year').addEventListener('input', renderDonors); $('#ns-officials').addEventListener('input', renderDonors);
+function fillDonorSelects() {
+  const bigs = S.files.filter((f) => f.kind === 'big').sort((a, b) => a.name.localeCompare(b.name));
+  for (const id of ['#ns-donor', '#xml-part-big']) { const s = $(id); s.textContent = ''; s.append(el('option', { value: '' }, bigs.length ? 'choose a bigfile' : 'no files loaded')); bigs.forEach((f) => s.append(el('option', { value: String(S.files.indexOf(f)) }, `${f.folder ? f.folder + '/' : ''}${f.name}`))); }
+}
+$('#ns-add').onclick = guard(async () => {
+  const i = $('#ns-donor').value; if (i === '') return; const f = S.files[Number(i)];
+  const parsed = C.parseBigfile(await refBytes(f), f.name); const scene = parsed.entries.find((e) => C.entryKind(e.name) === 'scene'); const info = scene && C.splitName(scene.name);
+  if (!info) throw new Error(`${f.name}: cannot read SLOT_PART_YEAR_COLOR from its scene name`); if (!PART_OF[info.part.toUpperCase()]) throw new Error(`${f.name}: unknown part ${info.part}`);
+  S.ns.donors.push({ file: f, info, newColor: info.color, officials: officialsList().slice(0, 1), type: PART_OF[info.part.toUpperCase()] }); renderDonors();
+});
+const officialsList = () => $('#ns-officials').value.split(',').map((s) => s.trim()).filter(Boolean);
+function newName(d) { const slot = ($('#ns-slot').value || d.info.slot).toUpperCase(), year = $('#ns-year').value || d.info.year; return `${slot}_${d.info.part.toUpperCase()}_${year}_${d.newColor.toUpperCase()}`; }
+function renderDonors() {
+  const tb = $('#ns-table tbody'); tb.textContent = ''; const offs = officialsList(); $('#ns-empty').hidden = S.ns.donors.length > 0;
+  S.ns.donors.forEach((d, i) => {
+    const colorIn = el('input', { type: 'text', value: d.newColor, maxlength: String(d.info.color.length), style: 'width:100px;text-transform:uppercase', oninput: (e) => { d.newColor = e.target.value.toUpperCase(); renderDonors(); } });
+    const bad = d.newColor.length !== d.info.color.length;
+    tb.append(el('tr', {}, el('td', {}, el('strong', {}, d.type)), el('td', { class: 'mono' }, d.file.name), el('td', { class: 'mono' }, d.info.color, ` (${d.info.color.length})`), el('td', {}, colorIn, bad ? el('div', { class: 'pill bad' }, `needs ${d.info.color.length} chars`) : ''),
+      el('td', {}, offs.map((o) => el('label', { style: 'margin-right:8px' }, el('input', { type: 'checkbox', checked: d.officials.includes(o), onchange: (e) => { d.officials = e.target.checked ? [...new Set([...d.officials, o])] : d.officials.filter((x) => x !== o); } }), ` ${o}`))),
+      el('td', { class: 'mono' }, newName(d)), el('td', {}, el('button', { class: 'small ghost', onclick: () => { S.ns.donors.splice(i, 1); renderDonors(); } }, 'Remove'))));
+  });
+  const slot = $('#ns-slot').value.toUpperCase(), year = $('#ns-year').value;
+  const ok = S.ns.donors.length > 0 && /^[A-Z0-9]{6}$/.test(slot) && /^\d{4}$/.test(year) && S.ns.donors.every((d) => d.newColor.length === d.info.color.length && /^[A-Z0-9]+$/.test(d.newColor));
+  $('#ns-generate').disabled = !ok;
+  $('#ns-status').textContent = ok ? `will write ${S.ns.donors.length} bigfile(s) and ${slot}_Pack${$('#ns-pack').value}_MixAndMatch.XML` : 'pick a slot (6 characters), a year and same-length colours';
+}
+$('#ns-generate').onclick = guard(async () => {
+  const slot = $('#ns-slot').value.toUpperCase(), year = $('#ns-year').value, pack = $('#ns-pack').value || '0';
+  const team = MAPPING.teams.find((t) => t.slot === slot); const folder = team ? folderFor(team) : (S.subdirs[0]?.name || '');
+  $('#ns-generate').disabled = true; $('#ns-status').textContent = 'working…'; const parts = [];
+  try {
+    for (const d of S.ns.donors) {
+      const big = C.parseBigfile(await refBytes(d.file), d.file.name); const map = [];
+      if (d.info.slot.toUpperCase() !== slot) map.push({ from: d.info.slot, to: slot }); if (d.info.year !== year) map.push({ from: d.info.year, to: year }); if (d.info.color.toUpperCase() !== d.newColor) map.push({ from: d.info.color, to: d.newColor });
+      (map.length ? await C.renameBigfile(big, map) : []).forEach((n) => log(`  ${n}`));
+      const scene = big.entries.find((e) => C.entryKind(e.name) === 'scene').name;
+      await saveInto(folder, `${scene}_big.ast`, await C.buildBigfile(big));
+      parts.push({ type: d.type, name: d.newColor, bigfile: `${scene}_big`, scene, officials: d.officials });
+    }
+    const xmlName = `${slot}_Pack${pack}_MixAndMatch.XML`;
+    if (S.files.find((f) => f.name.toLowerCase() === xmlName.toLowerCase())) log(`${xmlName} already existed; it was replaced`, 'warn');
+    await saveInto(folder, xmlName, new TextEncoder().encode(C.xmlForSet(officialsList(), parts)));
+    $('#ns-status').textContent = `done: ${parts.length} bigfile(s) + ${xmlName}${folder ? ` in ${folder}` : ''}`; toast(`New set written for ${team ? team.name : slot}`);
+    log(`new set for ${slot} (${team ? team.name : 'unmapped slot'}) written`, 'ok');
+    if (team) { showTab('teams'); selectTeam(team); }
+  } finally { renderDonors(); }
+});
+
+// ---------- XML tab ----------
+$('#xml-open').onclick = guard(async () => {
+  if (window.showOpenFilePicker) { const [h] = await window.showOpenFilePicker({ types: [{ description: 'mix and match XML', accept: { 'text/xml': ['.xml', '.XML'] } }] }).catch((e) => { if (e.name !== 'AbortError') throw e; return []; }); if (h) await openXml({ name: h.name, handle: h, folder: '', kind: 'xml', slot: slotOf(h.name) }); }
+  else $('#pick-xml').click();
+});
+$('#pick-xml').addEventListener('change', (ev) => { const f = ev.target.files[0]; if (f) openXml({ name: f.name, file: f, folder: '', kind: 'xml', slot: slotOf(f.name) }); ev.target.value = ''; });
+const openXml = guard(async (ref) => {
+  const text = new TextDecoder().decode(await refBytes(ref)); const doc = new DOMParser().parseFromString(text, 'text/xml');
+  if (doc.querySelector('parsererror')) throw new Error(`${ref.name}: ${doc.querySelector('parsererror').textContent.slice(0, 120)}`);
+  S.xml = { ref, doc, name: ref.name }; renderXml(); showTab('xml'); log(`opened ${ref.name}`);
+});
+function bigfileWhere(name, folder) {
+  const inFolder = findBig(name, folder);
+  if (inFolder && inFolder.folder === folder) return el('span', { class: 'pill ok' }, 'in folder');
+  if (inFolder) return el('span', { class: 'pill ok', title: 'bigfiles are found in any FCS_DLC_* folder' }, `in ${inFolder.folder}`);
+  if (/^generic_/i.test(name)) return el('span', { class: 'pill' }, 'game generic');
+  if (!S.files.length) return el('span', { class: 'pill' }, 'no folder loaded');
+  const p = el('span', { class: 'pill warn' }, 'archive?'); archiveHas(name).then((h) => { if (h === true) p.textContent = 'in game archive'; else if (h === false) { p.className = 'pill bad'; p.textContent = 'MISSING'; } }); return p;
+}
+function renderXml() {
+  const x = S.xml; $('#xml-save').disabled = !x || !(x.ref.handle || x.ref.api); $('#xml-save-as').disabled = !x;
+  $('#xml-title').textContent = x ? x.name : ''; const tb = $('#xml-table tbody'); tb.textContent = ''; $('#xml-officials').textContent = '';
+  if (!x) { tb.append(el('tr', {}, el('td', { colspan: 7, class: 'empty' }, 'open a mix-and-match XML'))); return; }
+  const offs = xmlOfficialsOf(x.doc); const teams = (teamsBySlot.get(slotOf(x.name)) || []).map((t) => t.name).join(', ');
+  $('#xml-info').textContent = `${teams ? teams + ' · ' : ''}${offs.length} official uniforms · ${$$('part', x.doc).length} parts`;
+  offs.forEach((o, i) => $('#xml-officials').append(el('span', { class: 'pill ok' }, `${i}: ${o} `, el('button', { class: 'small ghost', style: 'min-height:18px;padding:0 4px', title: 'remove', onclick: () => { $$('officialType', x.doc)[i].remove(); $$('part official', x.doc).filter((n) => n.getAttribute('name') === o).forEach((n) => n.remove()); renderXml(); } }, '×'))));
+  for (const p of $$('part', x.doc)) {
+    const bigIn = el('input', { type: 'text', value: partGet(p, 'bigfile'), class: 'mono', style: 'width:100%', onchange: (e) => { p.querySelector('bigfile')?.setAttribute('name', e.target.value); renderXml(); } });
+    const sceneIn = el('input', { type: 'text', value: partGet(p, 'scene'), class: 'mono', style: 'width:100%', onchange: (e) => { p.querySelector('scene')?.setAttribute('name', e.target.value); renderXml(); } });
+    const labelIn = el('input', { type: 'text', value: p.getAttribute('name') || '', style: 'width:110px', onchange: (e) => p.setAttribute('name', e.target.value) });
+    const used = partOfficials(p);
+    const offCells = offs.map((o) => el('label', { style: 'margin-right:8px;white-space:nowrap' }, el('input', { type: 'checkbox', checked: used.includes(o), onchange: (e) => { if (e.target.checked) { const n = x.doc.createElement('official'); n.setAttribute('name', o); const anchor = p.querySelector('decalUV'); if (anchor) p.insertBefore(n, anchor); else p.append(n); } else $$('official', p).filter((n) => n.getAttribute('name') === o).forEach((n) => n.remove()); renderXml(); } }), ` ${o}`));
+    tb.append(el('tr', {}, el('td', {}, el('strong', {}, p.getAttribute('type') || '?'), p.getAttribute('shade') ? el('div', { class: 'muted' }, p.getAttribute('shade')) : ''), el('td', {}, labelIn), el('td', {}, bigIn), el('td', {}, sceneIn), el('td', {}, bigfileWhere(partGet(p, 'bigfile'), x.ref.folder)), el('td', {}, offCells), el('td', {}, el('button', { class: 'small ghost', onclick: () => { p.remove(); renderXml(); } }, 'Remove'))));
+  }
+  $('#xml-raw').value = xmlTextOf(x.doc);
+}
+$('#xml-add-official').onclick = () => { const v = $('#xml-new-official').value.trim(); if (!v || !S.xml) return; const n = S.xml.doc.createElement('officialType'); n.setAttribute('name', v); const last = $$('officialType', S.xml.doc).pop(); if (last) last.after(n); else S.xml.doc.documentElement.prepend(n); $('#xml-new-official').value = ''; renderXml(); };
+$('#xml-part-add').onclick = () => {
+  if (!S.xml) { log('open an XML first', 'warn'); return; } const i = $('#xml-part-big').value; if (i === '') return; const f = S.files[Number(i)];
+  const scene = bigBase(f.name).replace(/_big$/i, ''); const info = C.splitName(scene); const type = info && PART_OF[info.part.toUpperCase()];
+  if (!type) { log(`${f.name}: cannot tell the part type from the name`, 'err'); return; }
+  const frag = new DOMParser().parseFromString(C.partTemplate(type, $('#xml-part-name').value || info.color, `${scene}_big`, scene), 'text/xml').documentElement;
+  S.xml.doc.documentElement.append(S.xml.doc.importNode(frag, true)); renderXml();
+};
+$('#xml-raw-apply').onclick = guard(async () => { const doc = new DOMParser().parseFromString($('#xml-raw').value, 'text/xml'); if (doc.querySelector('parsererror')) throw new Error(doc.querySelector('parsererror').textContent.slice(0, 160)); S.xml.doc = doc; renderXml(); });
+$('#xml-save').onclick = guard(async () => { await saveRef(S.xml.ref, new TextEncoder().encode(xmlTextOf(S.xml.doc))); toast(`Saved ${S.xml.name}`); if (S.team && S.team.xmlRef === S.xml.ref) selectTeam(S.team.team); });
+$('#xml-save-as').onclick = guard(async () => { const r = await saveAs(S.xml.name, new TextEncoder().encode(xmlTextOf(S.xml.doc))); if (r?.handle) { S.xml.ref = { ...S.xml.ref, handle: r.handle, api: false }; S.xml.name = r.name; renderXml(); } });
+
+// ---------- archive tab ----------
+$('#arc-open').onclick = guard(async () => {
+  let file;
+  if (window.showOpenFilePicker) { const [h] = await window.showOpenFilePicker({ types: [{ description: 'EA archive', accept: { 'application/octet-stream': ['.ast', '.AST'] } }] }).catch((e) => { if (e.name !== 'AbortError') throw e; return []; }); if (!h) return; file = await h.getFile(); }
+  else { $('#pick-archive').click(); return; }
+  await openArchive(file);
+});
+$('#pick-archive').addEventListener('change', (ev) => { const f = ev.target.files[0]; if (f) openArchive(f); ev.target.value = ''; });
+const openArchive = guard(async (file) => {
+  const head = new Uint8Array(await file.slice(0, 64).arrayBuffer()); if (C.ascii(head, 0, 8) !== 'BGFA1.05') throw new Error(`${file.name} is not a BGFA 1.05 archive`);
+  const dv = new DataView(head.buffer); const tocOff = dv.getUint32(16, true), tocSize = dv.getUint32(24, true);
+  const parsed = C.parseBigfile(new Uint8Array(await file.slice(0, tocOff + tocSize).arrayBuffer()), file.name);
+  const map = new Map(); parsed.entries.forEach((e, i) => map.set(C.hex64(e.hash), { ...e, i, raw: null }));
+  S.arc = { file, name: file.name, map }; $('#arc-info').textContent = `${file.name}: ${parsed.entries.length} entries, ${fmt(file.size)}`; $('#arc-find').disabled = false;
+  log(`opened archive ${file.name} (${parsed.entries.length} entries)`); renderGeneric(); if (S.team) selectTeam(S.team.team);
+});
+let arcHit = null;
+$('#arc-find').onclick = guard(async () => {
+  const r = $('#arc-result'); r.textContent = ''; const name = $('#arc-name').value.trim(); const bytes = name ? await archiveBytes(name) : null;
+  arcHit = bytes ? { name: bigBase(name).replace(/_big$/i, '').toUpperCase(), bytes } : null;
+  ['#arc-extract', '#arc-download', '#arc-open-big'].forEach((s) => { $(s).disabled = !arcHit; });
+  if (!arcHit) { r.append(el('dt', {}, 'result'), el('dd', {}, 'no entry with that name (names hash case-insensitively with _BIG appended)')); return; }
+  let inner = ''; try { inner = C.parseBigfile(bytes).entries.map((e) => e.name).join(', '); } catch { inner = '(not a bigfile)'; }
+  for (const [k, v] of [['name', `${arcHit.name}_BIG`], ['bigfile', fmt(bytes.length)], ['contains', inner]]) r.append(el('dt', {}, k), el('dd', {}, String(v)));
+});
+const arcFileName = () => `${arcHit.name}_big.ast`;
+$('#arc-extract').onclick = guard(async () => { if (!arcHit) return; const slot = arcHit.name.slice(0, 6); const team = MAPPING.teams.find((t) => t.slot === slot); const folder = team ? folderFor(team) : (S.subdirs[0]?.name || ''); await saveInto(folder, arcFileName(), arcHit.bytes); toast(`${arcFileName()} extracted into ${folder || 'DLC'}`); if (S.team) renderTeam(); });
+$('#arc-download').onclick = () => { if (arcHit) download(arcFileName(), arcHit.bytes); };
+$('#arc-open-big').onclick = () => { if (arcHit) openBig({ name: arcFileName(), file: new File([arcHit.bytes], arcFileName()), folder: '', kind: 'big', slot: arcHit.name.slice(0, 6) }); };
+function renderGeneric() {
+  const box = $('#arc-generic'); box.textContent = '';
+  for (const [slot, team, names] of GENERIC) {
+    const d = el('details', {}, el('summary', {}, el('code', {}, slot), ` ${team}`)); const t = el('table', {});
+    for (const [n, note] of names) t.append(el('tr', {}, el('td', { class: 'mono' }, n), el('td', {}, note.startsWith('NOT') ? el('span', { class: 'pill bad' }, note) : note ? el('span', { class: 'pill ok' }, note) : ''), el('td', {}, el('button', { class: 'small ghost', onclick: () => { $('#arc-name').value = n; $('#arc-find').click(); } }, 'Find'))));
+    d.append(t); box.append(d);
+  }
+}
+renderGeneric();
+globalThis.FUS = { S, T, C, IO, openBig, openXml, openArchive, openTexture, selectTeam, renderTeam, renderBig, renderXml, encodeCurrent, log };
+init();
+})();
+</script>
+</body>
+</html>

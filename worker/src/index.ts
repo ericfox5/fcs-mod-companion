@@ -2,6 +2,7 @@ import type { Env } from './env.js';
 import { handleBridge } from './api/bridge.js';
 import { json, notFound } from './html.js';
 import { servePhoto, serveLogo, serveStoryImage } from './api/photos.js';
+import { serveDownload } from './api/downloads.js';
 import { getDynasty, listDynasties } from './db/queries.js';
 import { landingPage } from './pages/landing.js';
 import { scoreStrip, stripTiles } from './pages/common.js';
@@ -10,7 +11,9 @@ import { teamsPage, teamPage } from './pages/teams.js';
 import { schedulePage } from './pages/schedule.js';
 import { standingsPage } from './pages/standings.js';
 import { rankingsPage } from './pages/rankings.js';
-import { rostersPage, playerPage } from './pages/rosters.js';
+import { bracketPage } from './pages/bracket.js';
+import { rostersPage } from './pages/rosters.js';
+import { playerPage } from './pages/player.js';
 import { statsPage } from './pages/stats.js';
 import { storiesPage, storyFormPage, storyAction } from './pages/stories.js';
 import { awardsPage } from './pages/awards.js';
@@ -19,10 +22,13 @@ import { gamePage } from './pages/game.js';
 import { boardAction, top300Page } from './pages/recruiting.js';
 import { handleSupersim, type SimEnv } from './supersim/routes.js';
 import { playerEditAction } from './pages/player-edit.js';
+import { transfersPage, transferAction } from './pages/transfers.js';
+import { depthPage, depthAction } from './pages/depth.js';
+import { recruitPage, recruitEditAction, overhaulAction } from './pages/recruit-edit.js';
 import { currentMember, memberCookie, redirect } from './session.js';
 import { loginPage, loginAction, logoutAction } from './pages/login.js';
 import { joinPage, joinAction } from './pages/join.js';
-import { membersPage, inviteAction, revokeInviteAction } from './pages/members.js';
+import { membersPage, inviteAction, revokeInviteAction, addWebMemberAction, webMemberAction, readyAction } from './pages/members.js';
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
@@ -37,6 +43,7 @@ export default {
       if (parts[0] === 'img' && (parts[1] === 'players' || parts[1] === 'faces') && parts[2]) return servePhoto(env, `photos/${parts[1]}/${decodeURIComponent(parts[2])}`);
       if (parts[0] === 'img' && parts[1] === 'logos' && parts[2] && parts[3]) return serveLogo(env, `logos/${parts[2]}/${decodeURIComponent(parts[3])}`, url.searchParams.get('t') ?? '');
       if (parts[0] === 'img' && parts[1] === 'stories' && parts[2] && parts[3]) return serveStoryImage(env, `stories/${parts[2]}/${decodeURIComponent(parts[3])}`);
+      if (parts[0] === 'downloads' && parts[1] && parts.length === 2) return serveDownload(env, decodeURIComponent(parts[1])); // roster saves from R2 downloads/
       if (parts[0] === 'css' || parts[0] === 'js' || parts[0] === 'img' || parts[0] === 'data' || parts[0] === 'favicon.ico') return env.ASSETS.fetch(req); // data/: playbook JSON for Supersim
       if (parts.length === 0) return landingPage(env, await listDynasties(env.DB));
       if (parts[0] === 'd' && parts[1]) {
@@ -46,7 +53,7 @@ export default {
         const section = parts[2] ?? 'home';
         const auth = await currentMember(req, env.DB, dyn.id);
         const { member, members, account, locked } = auth;
-        if (parts[2] === 'supersim') return handleSupersim(req, env as SimEnv, dyn, parts[3], auth.account ? auth.member : null); // official game sim: signed-in account required
+        if (parts[2] === 'supersim') return handleSupersim(req, env as SimEnv, dyn, parts[3], auth.account ? auth.member : null, parts.slice(4)); // official game sim: signed-in account required; parts[3] is 'data', 'watch' or a week
         if (req.method === 'POST') {
           const actx = { env, dyn, url, req, member, members, account, locked }; // accounts: login / logout / join / invites (pages/login.ts, join.ts, members.ts)
           if (parts[2] === 'login' && !parts[3]) return loginAction(actx, await req.formData());
@@ -54,9 +61,16 @@ export default {
           if (parts[2] === 'join' && !parts[3]) return joinAction(actx, await req.formData());
           if (parts[2] === 'members' && parts[3] === 'invite' && !parts[4]) return inviteAction(actx, await req.formData());
           if (parts[2] === 'members' && parts[3] === 'invite' && parts[4] && parts[5] === 'revoke') return revokeInviteAction(actx, parts[4]);
+          if (parts[2] === 'members' && parts[3] === 'web' && !parts[4]) return addWebMemberAction(actx, await req.formData()); // web-only members + Ready (migration 0014)
+          if (parts[2] === 'members' && parts[3] === 'web' && parts[4] && !parts[5]) return webMemberAction(actx, parts[4], await req.formData());
+          if (parts[2] === 'ready' && !parts[3]) return readyAction(actx, await req.formData());
           if (parts[2] === 'member') { const form = await req.formData(); const id = Number(form.get('blaze_id')); const back = String(form.get('back') ?? `/d/${dyn.slug}`); return redirect(back.startsWith('/') ? back : `/d/${dyn.slug}`, members.some((m) => m.blaze_id === id) ? { 'set-cookie': memberCookie(id) } : {}); }
           if (parts[2] === 'recruiting' && parts[3] === 'board') return boardAction({ env, dyn, url, req, member, members }, await req.formData());
+          if (parts[2] === 'recruiting' && parts[3] === 'overhaul') return overhaulAction(actx, await req.formData()); // commissioner: re-generate the class (preseason)
+          if (parts[2] === 'recruit' && parts[3] && parts[4] === 'edit') return recruitEditAction(actx, Number(parts[3]), await req.formData());
           if (parts[2] === 'player' && parts[3] && parts[4] === 'edit') return playerEditAction({ env, dyn, url, req, member, members }, Number(parts[3]), await req.formData());
+          if (parts[2] === 'transfers' && !parts[3]) return transferAction(actx, await req.formData());
+          if (parts[2] === 'depth' && !parts[3]) return depthAction(actx, await req.formData());
           if (parts[2] === 'stories' && parts[3]) return storyAction({ env, dyn, url, req, member, members }, parts[3], parts[4]);
           return json({ error: 'not found' }, 404);
         }
@@ -69,12 +83,16 @@ export default {
           case 'game': return gamePage(ctx, Number(parts[3]), Number(parts[4]));
           case 'standings': return standingsPage(ctx);
           case 'rankings': return rankingsPage(ctx);
+          case 'bracket': return bracketPage(ctx);
           case 'rosters': return rostersPage(ctx, parts[3] ? Number(parts[3]) : undefined);
+          case 'depth': return depthPage(ctx, parts[3] ? Number(parts[3]) : undefined);
           case 'player': return playerPage(ctx, Number(parts[3]));
           case 'stats': return statsPage(ctx);
           case 'stories': return parts[3] === 'new' ? storyFormPage(ctx) : parts[3] && parts[4] === 'edit' ? storyFormPage(ctx, Number(parts[3])) : storiesPage(ctx);
           case 'awards': return awardsPage(ctx);
           case 'recruiting': return parts[3] === 'top300' ? top300Page(ctx) : recruitingPage(ctx);
+          case 'recruit': return recruitPage(ctx, Number(parts[3]));
+          case 'transfers': return transfersPage(ctx);
           case 'login': return loginPage(ctx);
           case 'join': return joinPage(ctx);
           case 'members': return membersPage(ctx);

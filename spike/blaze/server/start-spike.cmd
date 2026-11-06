@@ -1,2 +1,3 @@
 @echo off
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-spike.ps1"
+rem Old name of start-league.cmd.
+call "%~dp0start-league.cmd" %*

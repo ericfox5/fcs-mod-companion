@@ -1,6 +1,7 @@
 // Plaintext Blaze 3 stub for the NCAA 14 spike: logs every packet (decoded TDF) and answers the Util / Authentication /
 // UserSessions calls the client makes while logging in, so we can watch what it asks for next (the dynasty component).
 //   node blaze.mjs [--port 33152] [--service ncaa-2014-ps3] [--unknown empty|error] [--http-port 17503] [--settings minimal|full]
+//                  [--easw on|off] [--easw-port 17504]
 // The same process serves the Locker file endpoint (HTTP) that Online Dynasty uploads its .team/.dynasty files to.
 import net from 'node:net';
 import crypto from 'node:crypto';
@@ -10,10 +11,13 @@ import { fileURLToPath } from 'node:url';
 import { PacketStream, encodePacket, describe, MSG } from './packet.mjs';
 import { decode, Writer, T } from './tdf.mjs';
 import { parseXi5 } from './xi5.mjs';
+import { MAGIC, authenticate, validateRegistry, authorizeDod } from './league-auth.mjs';
 import { log, captureFile } from './log.mjs';
 import { DOD, handleDod, store as dodStore, save as dodSave, loadTable as dodLoadTable } from './dod.mjs';
 import { startSupersimPoller } from './supersim.mjs';
-import { LOCKER, handleLocker, startLockerHttp } from './locker.mjs';
+import { LOCKER, handleLocker, startLockerHttp, configureLockerAuth, getContent } from './locker.mjs';
+import { startEaswHttp, setLoginIdentity } from './easw.mjs';
+import { startWireSync } from './wire.mjs';
 
 const arg = (name, dflt) => { const i = process.argv.indexOf(name); return i === -1 ? dflt : process.argv[i + 1]; };
 const PORT = Number(arg('--port', 33152));
@@ -24,13 +28,25 @@ const QOS_PORT = Number(arg('--qos-port', 17502));
 const QOS_PROBES = Number(arg('--qos-probes', 10));
 const HTTP_PORT = Number(arg('--http-port', 17503)); // Locker upload/download endpoint (served by this process)
 const HTTP_HOST = arg('--http-host', '127.0.0.1'); // host the client is told to use in UURL/GURL
+const EASW_PORT = Number(arg('--easw-port', 17504)); // EA Sports World + XMS (in-game Dynasty Wire), served by this process
+const EASW_ON = arg('--easw', 'on') !== 'off'; // off: the console keeps Sports World disabled (OSDK_EASW_ALLOWED_LOCALES "----")
+const REGISTRY_PATH = arg('--ticket-registry', '');
+const readRegistry = () => validateRegistry(JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8')));
+if (REGISTRY_PATH) {
+  readRegistry();
+  // EASW identity is the latest console login (setLoginIdentity in consoleLogin). This process serves one PS3.
+  configureLockerAuth({ dynasties: dodStore.dynasties, isActive: s => {
+    const p = readRegistry().players.find(p => p.userId === s.userId);
+    return s.active && p && !p.disabled && p.ticketSha256 === s.credentialSha256;
+  } });
+}
 const SETTINGS_MODE = arg('--settings', 'minimal'); // minimal (Zamboni's proven set) | full (every O_* setting found in the EBOOT)
 const AUTH = 1, PLAYGROUPS = 6, UTIL = 9, STATS = 7, CENSUS = 10, MESSAGING = 15, ROOMS = 21, USERSESSIONS = 0x7802;
 // EA OSDK components (ids from ZamboniCommonComponents, class names confirmed in the NCAA 14 EBOOT strings)
 const OSDK_SETTINGS = 2249, OSDK_DYNMSG = 2250, OSDK_WEBOFFER = 2251, OSDK_SEASONAL = 2257, OSDK_TICKER2 = 2262, OSDK_ONLINEPASS = 2268;
 const LOCALE_EN_US = 1701729619;
 
-const send = (sock, pkt, note) => { sock.write(pkt); log('blaze', note, pkt.subarray(0, 200).toString('hex')); };
+const send = (sock, pkt, note) => { sock.write(pkt); log('blaze', note, REGISTRY_PATH ? undefined : pkt.subarray(0, 200).toString('hex')); };
 const reply = (sock, p, build, note = '') => {
   const w = new Writer(); if (build) build(w);
   send(sock, encodePacket({ component: p.component, command: p.command, type: MSG.RESPONSE, id: p.id, payload: w.bytes() }), `-> response ${describe(p)} ${note}`);
@@ -65,25 +81,29 @@ function preAuth(w) {
   w.str('SVRN', 'Blaze 3.19.03.0 (CL# 0)');
   w.int('UAGE', 0);
 }
-const telemetry = (w) => { w.str('ADRS', '127.0.0.1'); w.int('ANON', 0); w.str('DISA', ''); w.str('FILT', '-UION/****'); w.int('LOC', LOCALE_EN_US); w.str('NOOK', 'US,CA,MX'); w.int('PORT', 9988); w.int('SDLY', 15000); w.str('SESS', 'spike'); w.str('SKEY', ''); w.int('SPCT', 75); w.str('STIM', ''); };
+const telemetry = (w) => { w.str('ADRS', HTTP_HOST); w.int('ANON', 0); w.str('DISA', ''); w.str('FILT', '-UION/****'); w.int('LOC', LOCALE_EN_US); w.str('NOOK', 'US,CA,MX'); w.int('PORT', 9988); w.int('SDLY', 15000); w.str('SESS', 'spike'); w.str('SKEY', ''); w.int('SPCT', 75); w.str('STIM', ''); };
 function postAuth(w) {
   w.struct('PSS', (s) => { s.str('ADRS', ''); s.blob('CSIG', Buffer.alloc(0)); s.str('PJID', '0'); s.int('PORT', 0); s.int('RPRT', 0); s.int('TIID', 0); });
   w.struct('TELE', telemetry);
-  w.struct('TICK', (s) => { s.str('ADRS', '127.0.0.1'); s.int('PORT', 8999); s.str('SKEY', ''); });
+  w.struct('TICK', (s) => { s.str('ADRS', HTTP_HOST); s.int('PORT', 8999); s.str('SKEY', ''); });
   w.struct('UROP', (s) => { s.int('TMOP', 1); s.int('UID', 1); });
 }
 
 // Config sections the client fetches before login. Keys are the OSDK_* identifiers found in the game binary; values
 // disable the Online Pass / Season Ticket gate (tollbooth) and point EA Sports World at our HTTP listener so any attempt shows up.
 const QOS_HTTP = `http://${QOS_ADDR}:${QOS_PORT}`;
+const EASW_HTTP = `http://${HTTP_HOST}:${EASW_PORT}`;
 const COMMON_CONFIG = {
   OSDK_TOLLBOOTH_ONLINE_PASS_ENABLED: '0', OSDK_TOLLBOOTH_SEASON_TICKET_ENABLE: '0', OSDK_TOLLBOOTH_DDP_COMMERCE_ENABLED: '0',
   OSDK_TOLLBOOTH_DDR_ONLINE_PASS_ENABLED: '0', OSDK_TOLLBOOTH_EXPIRATION_TEST_MODE_ENABLED: '0', OSDK_TOLLBOOTH_DIME_TIMEOUT_SECS: '2',
   OSDK_DDP_UPGRADE_TO_DDR_ENABLED: '0', OSDK_ONLINEPASS_RETRIEVE_TIMEOUT: '2', OSDK_SUBSCRIPTION_RETRIEVE_TIMEOUT: '2',
   OSDK_SUBSCRIPTION_WEB_RETRIEVE_TIMEOUT: '2', OSDK_MATCHUP_TIMEOUT: '30', OSDK_REMATCH_ACCEPT_TIMEOUT: '30', OSDK_MAX_PER_OTP_SIDE: '6',
-  OSDK_EASW_AUTH_URL: `${QOS_HTTP}/easw/authentication`, OSDK_EASW_EVENT_URL: `${QOS_HTTP}/easw/event`, OSDK_EASW_GF_FILE_URL: `${QOS_HTTP}/easw/gameface`,
-  OSDK_EASW_MEDIA_URL: `${QOS_HTTP}/easw/media`, OSDK_EASW_REQ_URL: `${QOS_HTTP}/easw/req`, OSDK_NO_MEDIA_URL: `${QOS_HTTP}/easw/nomedia.jpg`,
-  OSDK_ONDEMAND_DEFAULT_BACKGROUND_URL: `${QOS_HTTP}/easw/bg.jpg`, OSDK_ONDEMAND_DEFAULT_THUMBNAIL_URL: `${QOS_HTTP}/easw/thumb.jpg`,
+  // Sports World is gated by locale: the client enables it only when its 4-char locale matches one of these patterns
+  // (IsLocaleEnabled 0x10b98ec; '*' matches any character). It carries the in-game Dynasty Wire (easw.mjs).
+  OSDK_EASW_ALLOWED_LOCALES: EASW_ON ? '****' : '----',
+  OSDK_EASW_AUTH_URL: `${EASW_HTTP}/easw`, OSDK_EASW_EVENT_URL: `${EASW_HTTP}/easw/event`, OSDK_EASW_GF_FILE_URL: `${EASW_HTTP}/easw/gameface`,
+  OSDK_EASW_MEDIA_URL: `${EASW_HTTP}/easw`, OSDK_EASW_REQ_URL: `${EASW_HTTP}/easw`, OSDK_NO_MEDIA_URL: `${EASW_HTTP}/easw/nomedia.jpg`,
+  OSDK_ONDEMAND_DEFAULT_BACKGROUND_URL: `${EASW_HTTP}/easw/bg.jpg`, OSDK_ONDEMAND_DEFAULT_THUMBNAIL_URL: `${EASW_HTTP}/easw/thumb.jpg`,
   OSDK_ONLINEPASS_DOWNLOAD_URL: `${QOS_HTTP}/easw/onlinepass`, OSDK_ONLINEPASS_TRIAL_URL: `${QOS_HTTP}/easw/onlinepass`,
 };
 // Extra keys per config id, named after the OSDK_* strings the EBOOT reads for that section. Ticker count 0 = no ticker polling.
@@ -158,9 +178,17 @@ function extendedData(w, session) {
 function consoleLogin(sock, p, body) {
   const ticket = Buffer.from(String(body.TCKT ?? '0x').replace(/^0x/, ''), 'hex');
   let t = { userId: 1000, onlineId: 'Player' };
-  try { t = parseXi5(ticket); } catch (e) { log('blaze', `ticket parse failed: ${e.message}`); }
-  const session = { userId: t.userId ?? 1000, personaId: t.userId ?? 1000, onlineId: t.onlineId ?? 'Player', key: crypto.randomBytes(16).toString('hex'), loginAt: Math.floor(Date.now() / 1000) };
+  const previous = sessions.get(sock); if (previous) previous.active = false;
+  sessions.delete(sock);
+  if (REGISTRY_PATH || ticket.subarray(0,8).equals(MAGIC)) {
+    try { if (!REGISTRY_PATH) throw new Error('Local NP registry not configured'); t = authenticate(ticket, readRegistry()); }
+    catch { log('blaze', 'league authentication rejected'); return replyError(sock,p,0x4000); }
+  } else {
+    try { t = parseXi5(ticket); } catch (e) { log('blaze', `ticket parse failed: ${e.message}`); }
+  }
+  const session = { ...t, active: true, userId: t.userId ?? 1000, personaId: t.userId ?? 1000, onlineId: t.onlineId ?? 'Player', key: crypto.randomBytes(16).toString('hex'), loginAt: Math.floor(Date.now() / 1000) };
   sessions.set(sock, session);
+  setLoginIdentity(session);
   log('blaze', `ps3Login for ${session.onlineId} (user ${session.userId}, service ${t.serviceId ?? '?'})`);
   reply(sock, p, (w) => {
     w.int('AGUP', 0); w.str('LDHT', ''); w.int('NTOS', 0); w.str('PRIV', '');
@@ -213,6 +241,16 @@ function handlePlaygroups(sock, p, body, session) {
 function handle(sock, p, body) {
   if (p.type !== MSG.REQUEST) return;
   const session = sessions.get(sock);
+  if (REGISTRY_PATH && session) {
+    const account = readRegistry().players.find(x => x.userId === session.userId);
+    if (!account || account.disabled || account.ticketSha256 !== session.credentialSha256) {
+      session.active = false; sessions.delete(sock); return replyError(sock,p,0x4000);
+    }
+    session.joinDynasties = [...account.joinDynasties];
+  }
+  if (REGISTRY_PATH && !session && p.component !== AUTH && !(p.component === UTIL && [1,2,4,5,7,20].includes(p.command))
+      && !(p.component === USERSESSIONS && p.command === 35))
+    return replyError(sock,p,0x4000);
   if (p.component === UTIL) {
     switch (p.command) {
       case 1: return reply(sock, p, (w) => w.stringMap('CONF', clientConfig(String(body.CFID ?? ''))), `(${body.CFID}: ${Object.keys(clientConfig(String(body.CFID ?? ''))).length} keys)`);
@@ -236,18 +274,24 @@ function handle(sock, p, body) {
       case 36: return reply(sock, p, (w) => w.str('AUTH', `AUTH_${session?.key ?? 'none'}`));
       case 29: case 32: return reply(sock, p, (w) => w.list('NLST', T.STRUCT, [], () => {}), '(no entitlements)');
       case 42: return reply(sock, p, (w) => { w.int('EAMC', 0); w.str('LHST', ''); w.int('PMC', 0); w.str('PRIV', ''); w.str('THST', ''); w.str('TSUI', ''); w.str('TURI', ''); });
-      case 70: sessions.delete(sock); return reply(sock, p, undefined, '(logout)');
+      case 70: if (session) session.active = false; sessions.delete(sock); return reply(sock, p, undefined, '(logout)');
       default: return reply(sock, p, undefined, '(generic empty)');
     }
   }
   if (p.component === USERSESSIONS) {
+    // 35 = resumeSession {SKEY}. Sessions are not kept across a reconnect, so the client must log in again.
+    // 0x16 is USER_ERR_RESUMABLE_SESSION_NOT_FOUND (full code 0x00167802). 0x4000 is ERR_SYSTEM and drops the socket.
+    if (p.command === 35) return replyError(sock, p, 0x16);
     reply(sock, p, undefined, '(empty)');
     if (p.command === 20 && session) notify(sock, USERSESSIONS, 1, (w) => { extendedData(w, session); w.int('USID', session.personaId); }, 'UserSessionExtendedDataUpdate (after updateNetworkInfo)');
     return;
   }
   if (p.component === PLAYGROUPS) return handlePlaygroups(sock, p, body, session);
   if (p.component === LOCKER) return handleLocker({ p, body, session, reply: (build, note) => reply(sock, p, build, note), replyError: (code, note) => { log('blaze', note ?? ''); replyError(sock, p, code); } });
-  if (p.component === DOD) return handleDod({ p, body, session, reply: (_, build, note) => reply(sock, p, build, note) });
+  if (p.component === DOD) {
+    if (REGISTRY_PATH && !authorizeDod(p.command,body,session,dodStore,getContent)) return replyError(sock,p,0x4000);
+    return handleDod({ p, body, session, reply: (_, build, note) => reply(sock, p, build, note) });
+  }
   if (p.component === STATS && p.command === 15) return reply(sock, p, (w) => w.map('KSIT', T.STRING, T.STRUCT, [], () => {}, () => {}), '(KeyScopes: empty map)');
   if (p.component === MESSAGING && p.command === 2) return reply(sock, p, (w) => w.int('MCNT', 0), '(fetchMessages: 0 messages)');
   if (p.component === ROOMS || p.component === CENSUS) return reply(sock, p, undefined, '(empty)');
@@ -271,7 +315,9 @@ function handle(sock, p, body) {
 
 log('blaze', `capture file: ${captureFile} (settings mode: ${SETTINGS_MODE})`);
 startLockerHttp({ port: HTTP_PORT, host: HTTP_HOST });
-startSupersimPoller({ store: dodStore, save: dodSave, loadTable: dodLoadTable });
+if (arg('--sync','on') !== 'off') startSupersimPoller({ store: dodStore, save: dodSave, loadTable: dodLoadTable });
+if (EASW_ON) { startEaswHttp({ port: EASW_PORT, host: HTTP_HOST }); startWireSync({ store: dodStore, loadTable: dodLoadTable }); }
+else log('blaze', 'Sports World disabled (--easw off): no in-game Dynasty Wire');
 net.createServer((sock) => {
   log('blaze', `connection from ${sock.remoteAddress}:${sock.remotePort}`);
   const stream = new PacketStream();
@@ -279,10 +325,10 @@ net.createServer((sock) => {
     for (const p of stream.feed(chunk)) {
       let body;
       try { body = decode(p.payload); } catch (e) { body = { $decodeError: e.message, hex: p.payload.toString('hex') }; }
-      log('blaze', describe(p), body);
+      log('blaze', describe(p), body.TCKT === undefined ? body : { ...body, TCKT: '[redacted]' });
       try { handle(sock, p, body); } catch (e) { log('blaze', `handler error ${e.stack ?? e.message}`); }
     }
   });
   sock.on('error', (e) => log('blaze', `socket error ${e.message}`));
-  sock.on('close', () => log('blaze', 'connection closed'));
+  sock.on('close', () => { const s = sessions.get(sock); if (s) s.active = false; sessions.delete(sock); log('blaze', 'connection closed'); });
 }).listen(PORT, '0.0.0.0', () => log('blaze', `blaze stub listening on 0.0.0.0:${PORT} (plaintext), unknown commands -> ${UNKNOWN}`));

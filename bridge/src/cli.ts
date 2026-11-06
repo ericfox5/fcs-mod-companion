@@ -6,7 +6,7 @@ import { parseTdb, verifyTdb, type TdbFile, type FieldValue } from '@ncaa/tdb';
 import { exportDynasty, isPlayed } from '@ncaa/ncaa14';
 import { loadConfig } from './config.js';
 import { importSave } from './commands/import.js';
-import { odImport, odList, odWatch, syncWebEdits } from './commands/od.js';
+import { odImport, odList, odWatch, syncWebEdits, odBackfillLogs, odOverhaul, odYear, odLock, odPlayoff } from './commands/od.js';
 import { syncCaptures } from './commands/captures.js';
 import { loadOdStore } from './od.js';
 import { photosUpload } from './commands/photos.js';
@@ -111,8 +111,17 @@ switch (cmd) {
     else if (args[0] === 'captures') { const store = loadOdStore(cfg.odDir); for (const d of Object.values(store.dynasties)) if ((did === undefined || d.id === did) && d.fileId) await syncCaptures(cfg, d, undefined, { limit: Number(flags.get('limit') ?? 50) }); }
     else if (args[0] === 'edits') { const store = loadOdStore(cfg.odDir); for (const d of Object.values(store.dynasties)) if ((did === undefined || d.id === did) && d.fileId) await syncWebEdits(cfg, d); }
     else if (args[0] === 'import') await odImport(cfg, { did, files: !flags.has('no-files'), note: flags.get('note'), force: flags.has('force') });
+    else if (args[0] === 'backfill-logs') await odBackfillLogs(cfg, { did }); // refill game lines from the dynasty files stored by past imports
     else if (args[0] === 'watch') await odWatch(cfg, { did, interval: Number(flags.get('interval') ?? 5), settle: Number(flags.get('settle') ?? 8), files: !flags.has('no-files') });
-    else console.log('usage: ncaa-bridge od list | od edits [--did N] | od import [--did N] [--force] [--no-files] [--note N] | od watch [--did N] [--interval s] [--settle s]   (--od-dir overrides the stub store path)');
+    // Fang's Recruit Overhaul: --set-exe <RecruitOverhaul.exe> once, --install-rcat <File04664.DB> [--archive <qkl_fe2ig.ast>] once per RPCS3 install, then od watch runs it on every new class; --run [--did N] [--force] runs it by hand
+    else if (args[0] === 'overhaul') await odOverhaul(cfg, { did, setExe: flags.get('set-exe'), clearExe: flags.has('clear-exe'), run: flags.has('run'), force: flags.has('force'), installRcat: flags.get('install-rcat'), restoreRcat: flags.has('restore-rcat'), archive: flags.get('archive'), preview: flags.has('preview') });
+    // the calendar year new dynasties start in (the Dynasty Tool's Year Changer, applied through the dynasty-file copy): --default 2025 for every new dynasty, --did N --year 2025 for one at its first preseason
+    else if (args[0] === 'year') await odYear(cfg, { did, year: flags.has('year') ? Number(flags.get('year')) : undefined, dflt: flags.get('default') });
+    // commissioner recruit lock: keeps a prospect's interest in a team above the commit threshold until he commits there
+    else if (args[0] === 'lock') await odLock(cfg, { did, prsi: flags.has('prsi') ? Number(flags.get('prsi')) : undefined, tgid: flags.has('tgid') ? Number(flags.get('tgid')) : undefined, clear: flags.has('clear') });
+    // the FCS playoff: status by default; --preview shows the projected field; --on/--off, --autobids "CAA,MVFC" or "default", --reset
+    else if (args[0] === 'playoff') await odPlayoff(cfg, { did, on: flags.has('on'), off: flags.has('off'), autobids: flags.get('autobids'), preview: flags.has('preview'), reset: flags.has('reset'), skip: flags.has('skip') ? (flags.get('skip') === 'true' ? '' : flags.get('skip')) : undefined, hold: flags.has('hold') ? (flags.get('hold') === 'true' ? '' : flags.get('hold')) : undefined, release: flags.has('release') });
+    else console.log('usage: ncaa-bridge od list | od edits [--did N] | od import [--did N] [--force] [--no-files] [--note N] | od backfill-logs [--did N] | od watch [--did N] [--interval s] [--settle s] | od overhaul [--set-exe EXE | --clear-exe] [--install-rcat DB [--archive AST] | --restore-rcat] [--run [--did N] [--force]] | od year [--default Y|off] [--did N --year Y]   (--od-dir overrides the stub store path)');
     break;
   }
   case 'export': exportCmd(args[0]!); break;

@@ -1,4 +1,34 @@
 // Small progressive enhancements: clickable table rows, the auto-scrolling scoreboard strip with its week dropdown.
+
+// Expandable rows. morphRow eases a row between two states: apply(open) switches what the row shows, and the row's
+// height glides from the old size to the new one (while closing, the content stays on screen until the row has shrunk).
+// oneOpen keeps one row open per list: it closes the row's open siblings (openSel finds them; close(row, animate) shuts
+// one). Rows above the tapped one close at once and the page scrolls by the same amount, so the tapped row stays put.
+(function () {
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  window.morphRow = function (row, open, apply, instant) {
+    if (row._morph) row._morph.finish();
+    if (reduce || instant || !row.animate) { apply(open); return; }
+    var from = row.getBoundingClientRect().height;
+    apply(open);
+    var to = row.getBoundingClientRect().height;
+    if (Math.abs(to - from) < 1) return;
+    if (!open) { apply(true); row.classList.add('closing'); }
+    row.style.overflow = 'hidden';
+    var anim = row.animate([{ height: from + 'px' }, { height: to + 'px' }], { duration: open ? 280 : 220, easing: 'cubic-bezier(.25, .8, .25, 1)' });
+    row._morph = anim;
+    anim.onfinish = function () { row._morph = null; row.style.overflow = ''; if (!open) { row.classList.remove('closing'); apply(false); } };
+  };
+  window.oneOpen = function (row, openSel, close) {
+    var list = row.parentElement; if (!list) return;
+    var before = row.getBoundingClientRect().top;
+    Array.prototype.slice.call(list.querySelectorAll(openSel)).forEach(function (r) {
+      if (r === row || r.parentElement !== list) return;
+      close(r, !(r.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING)); // animate only rows below the tapped one
+    });
+    var shift = row.getBoundingClientRect().top - before; if (shift) window.scrollBy(0, shift);
+  };
+})();
 (function () {
   // rows that carry data-href open their page (links inside the row still work on their own)
   document.addEventListener('click', function (e) {
@@ -52,7 +82,10 @@
   document.addEventListener('click', function (e) {
     var sum = e.target.closest('.pr-sum');
     if (sum && !sum.classList.contains('static') && !e.target.closest('a, input, button:not(.pr-sum), .istack')) {
-      var pr = sum.closest('.pr'); var open = pr.classList.toggle('open'); sum.setAttribute('aria-expanded', open ? 'true' : 'false'); return;
+      var pr = sum.closest('.pr'); var open = !pr.classList.contains('open');
+      var state = function (r) { return function (o) { r.classList.toggle('open', o); var s = r.querySelector('.pr-sum'); if (s) s.setAttribute('aria-expanded', o ? 'true' : 'false'); }; };
+      if (open) window.oneOpen(pr, '.pr.open', function (r, animate) { window.morphRow(r, false, state(r), !animate); });
+      window.morphRow(pr, open, state(pr)); return;
     }
     var st = e.target.closest('.st-btn');
     if (st) {
@@ -98,12 +131,18 @@
   });
 })();
 
-// mobile header menu toggle
+// dynasty menu (a <details> on the title in the bar): aria-expanded on the title; a click outside, Esc, or tabbing out
+// closes it. A click outside only closes the menu, so it does not also follow a link under the dimmed page.
 (function () {
-  var t = document.querySelector('.gnav-toggle'); if (!t) return;
-  var gh = t.closest('.gh');
-  t.addEventListener('click', function () { var open = gh.classList.toggle('menu-open'); t.setAttribute('aria-expanded', open ? 'true' : 'false'); });
-  document.addEventListener('click', function (e) { if (gh.classList.contains('menu-open') && !e.target.closest('.gh')) { gh.classList.remove('menu-open'); t.setAttribute('aria-expanded', 'false'); } });
+  var dm = document.querySelector('.dmenu'); if (!dm) return;
+  var sum = dm.querySelector('summary');
+  function sync() { sum.setAttribute('aria-expanded', dm.open ? 'true' : 'false'); }
+  function close(focus) { if (!dm.open) return; dm.open = false; sync(); if (focus) sum.focus(); }
+  sync();
+  dm.addEventListener('toggle', sync);
+  document.addEventListener('click', function (e) { if (dm.open && !dm.contains(e.target)) { e.preventDefault(); e.stopPropagation(); close(false); } }, true);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && dm.open) { e.preventDefault(); close(dm.contains(document.activeElement)); } });
+  dm.addEventListener('focusout', function (e) { if (dm.open && e.relatedTarget && !dm.contains(e.relatedTarget)) close(false); });
 })();
 
 // sortable tables (Rosters): click a heading to sort by that column, click again to flip the direction
@@ -126,3 +165,123 @@
     rows.forEach(function (r) { body.appendChild(r); });
   });
 })();
+
+// Transfer Portal: search / school / member-team filters and sort (rows carry data-search, data-team, data-member and
+// the sort keys), plus the commissioner's inline Edit panels (destination options are cloned from <template id="tp-teams">)
+(function () {
+  function apply(tools, resort) {
+    var box = tools.closest('.box'); var list = box && box.querySelector('.tp-list'); if (!list) return;
+    var q = (tools.querySelector('[data-tp-search]') || {}).value || '';
+    var team = (tools.querySelector('[data-tp-team]') || {}).value || '';
+    var mem = tools.querySelector('[data-tp-members]'); var onlyMem = !!(mem && mem.checked);
+    var words = q.toLowerCase().split(/\s+/).filter(Boolean); var shown = 0;
+    var rows = Array.prototype.slice.call(list.querySelectorAll('.tp-row'));
+    rows.forEach(function (li) {
+      var s = li.getAttribute('data-search') || '';
+      var ok = words.every(function (w) { return s.indexOf(w) !== -1; }) && (!team || li.getAttribute('data-team') === team) && (!onlyMem || li.getAttribute('data-member') === '1');
+      li.style.display = ok ? '' : 'none'; if (ok) shown++;
+    });
+    if (resort) {
+      var key = 'data-' + ((tools.querySelector('[data-tp-sort]') || {}).value || 'ovr'), desc = key === 'data-ovr';
+      rows.sort(function (a, b) {
+        var va = a.getAttribute(key) || '', vb = b.getAttribute(key) || '';
+        if (!va !== !vb) return va ? -1 : 1; // blanks (no destination) last either way
+        var na = parseFloat(va), nb = parseFloat(vb);
+        var c = (!isNaN(na) && !isNaN(nb)) ? na - nb : va.localeCompare(vb, undefined, { sensitivity: 'base' });
+        return desc ? -c : c;
+      });
+      rows.forEach(function (li) { list.appendChild(li); });
+    }
+    var c = tools.querySelector('.ft-count'); if (c) c.textContent = (words.length || team || onlyMem) ? shown + ' of ' + rows.length : '';
+  }
+  document.addEventListener('input', function (e) { var t = e.target.closest('.tp-tools'); if (t) apply(t, false); });
+  document.addEventListener('change', function (e) { var t = e.target.closest('.tp-tools'); if (t) apply(t, !!e.target.closest('[data-tp-sort]')); });
+
+  function fill(sel) {
+    var tpl = document.getElementById('tp-teams'); if (!tpl || sel.getAttribute('data-filled')) return;
+    var cur = sel.value, frag = tpl.content.cloneNode(true);
+    var own = frag.querySelector('option[value="' + sel.getAttribute('data-from') + '"]'); if (own) own.parentNode.removeChild(own);
+    Array.prototype.slice.call(sel.options).forEach(function (o) { if (o.value) sel.removeChild(o); });
+    sel.appendChild(frag); sel.value = cur; sel.setAttribute('data-filled', '1');
+  }
+  // Each row has two disclosures: the stats/ratings drawer (tap the row or its caret) and the commissioner's Edit panel.
+  // Opening either one closes whatever another row has open (oneOpen keeps the tapped row where it was on screen).
+  function show(el, open) { if (!el) return; if (open) el.removeAttribute('hidden'); else el.setAttribute('hidden', ''); }
+  function setMore(row, open) {
+    show(row.querySelector('.tp-more'), open); row.classList.toggle('more', open);
+    var c = row.querySelector('[data-tp-more]'); if (c) c.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  function setEdit(row, open) {
+    var b = row.querySelector('[data-tp-toggle]'); var panel = b && document.getElementById(b.getAttribute('data-tp-toggle')); if (!panel) return;
+    show(panel, open); b.setAttribute('aria-expanded', open ? 'true' : 'false'); row.classList.toggle('open', open);
+  }
+  // shuts whatever another row has open (its drawer, its Edit panel or both), keeping it on screen while it closes
+  function closeRow(r, animate) {
+    var edit = r.classList.contains('open'), more = r.classList.contains('more');
+    window.morphRow(r, false, function (o) { setEdit(r, o && edit); setMore(r, o && more); }, !animate);
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-tp-toggle]');
+    var row = e.target.closest('.tp-row');
+    if (b) {
+      var panel = document.getElementById(b.getAttribute('data-tp-toggle')); if (!panel || !row) return;
+      e.preventDefault();
+      var open = panel.hasAttribute('hidden');
+      if (open) window.oneOpen(row, '.tp-row.open, .tp-row.more', closeRow);
+      window.morphRow(row, open, function (o) { setEdit(row, o); });
+      if (open) { var sel = panel.querySelector('[data-tp-dest]'); if (sel) { fill(sel); sel.focus(); } }
+      return;
+    }
+    if (!row) return;
+    var caret = e.target.closest('[data-tp-more]');
+    if (!caret && e.target.closest('a, button, select, input, textarea, label, form, .tp-panel, .tp-more, .tp-note')) return;
+    if (!caret && window.getSelection && String(window.getSelection())) return; // selecting text, not tapping
+    var opening = !row.classList.contains('more');
+    if (opening) window.oneOpen(row, '.tp-row.open, .tp-row.more', closeRow);
+    window.morphRow(row, opening, function (o) { setMore(row, o); });
+  });
+})();
+
+// Player pages: selects that navigate (Switch Player) and tab strips ([data-tabs] with [data-tab] buttons and
+// [data-panel] blocks, e.g. the game log's Passing / Rushing tables).
+(function () {
+  document.addEventListener('change', function (e) {
+    var s = e.target.closest('select[data-nav]'); if (s && s.value) location.href = s.value;
+  });
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-tabs] [data-tab]'); if (!b) return;
+    var box = b.closest('[data-tabs]'), id = b.getAttribute('data-tab');
+    var own = function (el) { return el.parentElement.closest('[data-tabs]') === box; }; // tab sets nest (season > category)
+    box.querySelectorAll('[data-tab]').forEach(function (x) { if (own(x)) x.setAttribute('aria-selected', x === b ? 'true' : 'false'); });
+    box.querySelectorAll('[data-panel]').forEach(function (p) { if (!own(p)) return; if (p.getAttribute('data-panel') === id) p.removeAttribute('hidden'); else p.setAttribute('hidden', ''); });
+  });
+})();
+
+// Depth chart page: a slot select starts with its current player only; the roster (one <template id="dc-players">,
+// grouped by position) is cloned into it the first time it is touched, with the slot's own position group first.
+// A changed select is marked dirty so the coach sees what the save will send.
+(function () {
+  function fill(sel) {
+    var tpl = document.getElementById('dc-players'); if (!tpl || sel.getAttribute('data-filled')) return;
+    var cur = sel.value, frag = tpl.content.cloneNode(true), own = frag.querySelector('optgroup[data-pos="' + sel.getAttribute('data-pos') + '"]');
+    if (own) frag.insertBefore(own, frag.firstChild);
+    var dflt = sel.getAttribute('data-default'); // formation subs: "depth chart" (no sub) stays on top
+    Array.prototype.slice.call(sel.options).forEach(function (o) { sel.removeChild(o); });
+    if (dflt !== null) { var o = document.createElement('option'); o.value = '0'; o.textContent = dflt; sel.appendChild(o); }
+    else if (!own) { var z = document.createElement('option'); z.value = '0'; z.textContent = '—'; sel.appendChild(z); }
+    sel.appendChild(frag); sel.value = cur; sel.setAttribute('data-filled', '1');
+  }
+  ['pointerdown', 'focusin', 'keydown', 'touchstart'].forEach(function (ev) { document.addEventListener(ev, function (e) { var s = e.target && e.target.closest ? e.target.closest('select[data-dc]') : null; if (s) fill(s); }, true); });
+  document.addEventListener('change', function (e) {
+    var s = e.target.closest('select[data-dc]'); if (!s) return;
+    s.classList.toggle('dirty', s.value !== (s.getAttribute('data-orig') || '0'));
+  });
+})();
+
+// recruit editor: the face picker shows the chosen head art beside it
+document.addEventListener('change', function (e) {
+  var sel = e.target && e.target.closest ? e.target.closest('select[data-face-for]') : null;
+  if (!sel) return;
+  var img = document.getElementById(sel.getAttribute('data-face-for'));
+  if (img) img.src = '/img/faces/' + encodeURIComponent(sel.value) + '.png';
+});

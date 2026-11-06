@@ -39,7 +39,7 @@ export async function handlePhotos(req: Request, env: Env, root: 'photos' | 'log
     const prefix = `${root}/${new URL(req.url).searchParams.get('prefix') ?? ''}`;
     const keys: string[] = [];
     let cursor: string | undefined;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 100; i++) { // the store passed 20,000 objects with the 2026 photo set; the bridge skips what is listed here
       const page = await env.SAVES.list({ prefix, cursor, limit: 1000 });
       keys.push(...page.objects.map((o) => o.key.slice(root.length + 1)));
       if (!page.truncated) break;

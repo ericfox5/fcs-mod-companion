@@ -36,3 +36,5 @@ FCS-Supersim-Claude-Handoff-v2/
 worker/public/data/playbooks/
 # local dev test account (wrangler dev only)
 worker/.dev-account.json
+# python bytecode caches
+__pycache__/

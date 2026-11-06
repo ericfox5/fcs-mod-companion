@@ -2,60 +2,155 @@
 // NCAA 14 playbook; the server resolves one snap per request with fresh randomness, keeps the live game in
 // supersim_live and, at the final whistle, writes the official result into supersim_games (the outbox the league
 // server polls, unchanged from v1). The other sideline is the CPU unless that team belongs to another member, in
-// which case both members call their plays and the snap resolves when the second call arrives.
+// which case both members call their plays and the snap resolves when the second call arrives. Any other signed-in
+// member can watch a game that has a live row (live or final): the same payload, read-only, polled by the browser.
 //
-//   GET  /d/<slug>/supersim          page shell (coach.js + coach.css)
-//   GET  /d/<slug>/supersim/data     { input, you, controls, opponentHuman, books, state, version, final }
-//   POST /d/<slug>/supersim/data     { action: 'start' | 'play' | 'auto' | 'timeout' | 'tempo' | 'abandon', version, play?, tempo?, plays? }
+//   GET  /d/<slug>/supersim                        page shell (coach.js + coach.css): your current-week game
+//   GET  /d/<slug>/supersim/<week>/<game_no>       page shell for that game (coach it when it is yours, else watch)
+//   GET  /d/<slug>/supersim/watch/<week>/<game_no> page shell, watching
+//   GET  /d/<slug>/supersim/data[?game=<week>:<game_no>[&watch=1]]
+//        { input, you, watch, controls, coaches, opponentHuman, books, state, recent, version, final, liveGames? }
+//        or, for a member with no game to show, { noGame: message, liveGames }
+//   POST /d/<slug>/supersim/data[?game=...]  { action: 'start' | 'play' | 'auto' | 'delay' | 'timeout' | 'tempo' | 'abandon', version, play?, tempo?, plays?, elapsed? }
+//
+// The clocks are real in a coached game against the CPU: the play clock starts when the previous play is over and the
+// game clock runs through it when it was left running. The browser counts down and sends how long the coach took
+// (elapsed); the server charges at least the time it saw itself (minus the playback it allowed for), so the reading at
+// the snap is what the coach watched. A CPU offense snaps at a point rolled when the huddle starts (state.huddle.cpuAt),
+// which the browser counts down to. When the play clock runs out on the coach, the browser sends 'delay' and the
+// engine applies the delay of game (or the end of the period). Games between two members keep the tempo model.
 import type { Env } from '../env.js';
 import type { Dynasty, GameRow, MemberRow } from '../db/queries.js';
-import { getMembers, getGames, getTeam, getPlayers } from '../db/queries.js';
+import { getMembers, getGames, getGame, getTeam, getTeams, teamMap, getPlayers, getDepthChart, getFormationSubs, getPendingDepthEdit, listPendingPlayerEdits, type FormationSub } from '../db/queries.js';
 import { teamLogoUrl, headshotUrl } from '../pages/common.js';
+import { syntheticRoster, autoDepthChart } from './generic.js';
 import { html, page } from '../html.js';
 import { allowedGame, sameOrigin } from './access.js';
+import { bracketGameFor, bracketControls, finishBracketGame, type BracketGame } from './playoff-games.js';
 import { loadBook, loadIndex, teamBooks } from './coach/books.js';
-import { newGame, runPlay, mulberry32, type Rng, coinToss, tossChoice, cpuTossChoice } from './coach/engine.js';
+import { newGame, runPlay, mulberry32, type Rng, coinToss, tossChoice, cpuTossChoice, expirePlayClock, rollPlayClock, PLAY_CLOCK, PLAY_CLOCK_SHORT } from './coach/engine.js';
 import { cpuOffense, cpuDefense } from './coach/cpu.js';
 import { buildResult, buildEnvelope, sideOf } from './coach/result.js';
-import type { Book, GameInput, GameState, PlayDetail, Side, TeamInput, TossChoice } from './coach/types.js';
+import type { Book, GameInput, GameState, PlayDetail, PlayerInput, Side, TeamInput, TossChoice } from './coach/types.js';
 
 export type SimEnv = Env & { SUPERSIM_SESSION_SECRET?: string; SUPERSIM_ENABLED?: string; SUPERSIM_QUARTER_SECONDS?: string };
 const reply = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store', vary: 'Cookie', 'x-content-type-options': 'nosniff' } });
 const fail = (msg: string, status: number) => Object.assign(new Error(msg), { status });
+const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
+// seconds the play clock has really been running on the server: since the huddle began, less the playback allowance
+const huddleElapsed = (st: GameState) => (st.huddle ? (Date.now() - st.huddle.at) / 1000 - st.huddle.allow : 0);
 type Run = { id: string; status: string; input_json: string; result_json: string; envelope_json: string };
 type LiveRow = { dynasty_id: number; season_year: number; week: number; game_no: number; snapshot_id: number; home_tgid: number; away_tgid: number; started_by: number; status: string; version: number; input_json: string; state_json: string };
 interface Pending { side: Side; play: number; tempo: GameState['tempo']; by: number }
-type LiveState = GameState & { pending?: Pending | null };
+// recent: the last plays in order (a ring the watching browser animates from; st.last stays for reloads)
+type LiveState = GameState & { pending?: Pending | null; recent?: PlayDetail[] };
+export const RECENT_PLAYS = 6;
+const pushRecent = (st: LiveState, d: PlayDetail) => { const r = (st.recent ??= []); r.push(d); if (r.length > RECENT_PLAYS) r.splice(0, r.length - RECENT_PLAYS); };
 
+// A game named explicitly: ?game=<week>:<game_no> on the data endpoint, /supersim/<week>/<game_no> as a page.
+export interface GameKey { week: number; gameNo: number }
+export const parseGameKey = (s: string | null | undefined): GameKey | null => { const m = /^(\d{1,3}):(\d{1,4})$/.exec(s ?? ''); return m ? { week: Number(m[1]), gameNo: Number(m[2]) } : null; };
+
+/** May this member coach this game? Today: their own team's game in the dynasty's current week (allowedGame). The
+ *  playoff rounds will relax the current-week rule here; watching is decided separately (any member, any live row). */
+export function coachAccess(dyn: Dynasty, member: MemberRow | null | undefined, game: GameRow | null | undefined): boolean {
+  return !!member && !!game && allowedGame(dyn, member, game);
+}
+// who coaches a team: the member who owns it (a web-only member's team included), else the CPU
+const coachOf = (members: MemberRow[], tgid: number) => members.find((m) => m.tgid === tgid);
+const coachNames = (members: MemberRow[], away: number, home: number): [string, string] => [coachOf(members, away)?.persona ?? 'CPU', coachOf(members, home)?.persona ?? 'CPU'];
+
+// bracket: the FCS playoff game this row carries (worker/src/supersim/playoff-games.ts); drive: a member who is in neither
+// team starts a CPU-vs-CPU bracket game and lets it play out (start / auto / abandon only, shown as a spectator)
+export interface Current { member: MemberRow; members: MemberRow[]; game: GameRow; run: Run | null; live: LiveRow | null; other: MemberRow | undefined; watch: boolean; bracket: BracketGame | null; drive: boolean }
 // Identity: the acting member resolved by the site's session layer (signed-in account once the dynasty is locked).
-export async function resolveCurrent(env: SimEnv, dyn: Dynasty, acting: MemberRow | null) {
+// Without a key: the member's own current-week game, to coach. With a key: that game, coached when coachAccess allows
+// it (and forceWatch is off), else watched, which needs a supersim_live row. Errors flagged noGame carry the members
+// so the GET can answer with the live-games list instead.
+export async function resolveCurrent(env: SimEnv, dyn: Dynasty, acting: MemberRow | null, key: GameKey | null = null, forceWatch = false): Promise<Current> {
   if (!acting) throw fail('Sign in as a dynasty member to coach your game.', 401);
   const members = await getMembers(env.DB, dyn.id);
   const member = members.find((m) => m.blaze_id === acting.blaze_id);
-  const games = member ? await getGames(env.DB, dyn.id, dyn.season_year, { week: dyn.week, tgid: member.tgid }) : [];
-  if (games.length !== 1 || !allowedGame(dyn, member, games[0])) throw fail('No eligible current-week game for your team (bye week, offseason, or missing membership).', 403);
-  const game = games[0]!;
-  const run = await env.DB.prepare('SELECT * FROM supersim_games WHERE dynasty_id=? AND season_year=? AND week=? AND game_no=?').bind(dyn.id, dyn.season_year, dyn.week, game.game_no).first<Run>();
+  if (!member) throw fail('You are not a member of this dynasty.', 403);
+  const noGame = (msg: string, status = 403) => Object.assign(fail(msg, status), { noGame: true, members });
+  let game: GameRow | undefined;
+  if (key) { game = (await getGame(env.DB, dyn.id, dyn.season_year, key.week, key.gameNo)) ?? undefined; if (!game) throw noGame('No such game this season.', 404); }
+  else { const games = await getGames(env.DB, dyn.id, dyn.season_year, { week: dyn.week, tgid: member.tgid }); if (games.length === 1) game = games[0]; }
+  const bracket = key && game ? await bracketGameFor(env.DB, dyn, game) : null;
+  if (bracket && game) { // an FCS playoff game: coached by the members whose teams are in it, driven by any member when both are CPU
+    const live = await env.DB.prepare('SELECT * FROM supersim_live WHERE dynasty_id=? AND season_year=? AND week=? AND game_no=?').bind(dyn.id, dyn.season_year, game.week, game.game_no).first<LiveRow>();
+    const c = bracketControls(bracket, member, members);
+    const coaching = !forceWatch && bracket.open && c.sides.length > 0;
+    const drive = !forceWatch && bracket.open && !coaching && c.mayStart;
+    if (!coaching && !drive) {
+      if (!live) throw noGame(bracket.open ? 'This playoff game has not started yet.' : 'This playoff game is over.', 404);
+      return { member, members, game, run: null, live, other: undefined, watch: true, bracket, drive: false };
+    }
+    const other = coaching ? coachOf(members, game.home_tgid === member.tgid ? game.away_tgid : game.home_tgid) : undefined;
+    return { member, members, game, run: null, live, other, watch: false, bracket, drive };
+  }
+  const coaching = !!game && !forceWatch && coachAccess(dyn, member, game);
+  if (!game || (!key && !coaching)) throw noGame('No eligible current-week game for your team (bye week, offseason, or missing membership).');
+  const run = await env.DB.prepare('SELECT * FROM supersim_games WHERE dynasty_id=? AND season_year=? AND week=? AND game_no=?').bind(dyn.id, dyn.season_year, game.week, game.game_no).first<Run>();
+  const live = await env.DB.prepare('SELECT * FROM supersim_live WHERE dynasty_id=? AND season_year=? AND week=? AND game_no=?').bind(dyn.id, dyn.season_year, game.week, game.game_no).first<LiveRow>();
+  if (!coaching) { // a spectator: any member may watch a game that is (or was) played in Supersim; nothing is written
+    if (!live) throw noGame('This game is not being played in Supersim.', 404);
+    return { member, members, game, run, live, other: undefined, watch: true, bracket: null, drive: false };
+  }
   if (game.status >= 2 && !run) throw fail('This game has already been completed on the console.', 409);
-  const live = await env.DB.prepare('SELECT * FROM supersim_live WHERE dynasty_id=? AND season_year=? AND week=? AND game_no=?').bind(dyn.id, dyn.season_year, dyn.week, game.game_no).first<LiveRow>();
-  const other = members.find((m) => m.tgid === (game.home_tgid === member!.tgid ? game.away_tgid : game.home_tgid));
-  return { member: member!, members, game, run, live, other };
+  const other = coachOf(members, game.home_tgid === member.tgid ? game.away_tgid : game.home_tgid);
+  // a web-only member's team is a CPU team to the console: a game against a console member is that member's to play there
+  if (member.web_only === 1 && !run && !live) {
+    if (members.some((m) => m.web_only !== 1 && m.tgid === member.tgid)) throw fail('A console member now controls your team, so its games are played on the console.', 409);
+    if (other && other.web_only !== 1) throw fail(`${other.persona} coaches your opponent on the console, so this game is played there.`, 409);
+  }
+  return { member, members, game, run, live, other, watch: false, bracket: null, drive: false };
 }
 // Coached games use 12-minute quarters (SUPERSIM_QUARTER_SECONDS overrides), independent of the dynasty's console setting.
 const quarterSecondsFor = (env: SimEnv, _dyn: Dynasty) => { const q = Number(env.SUPERSIM_QUARTER_SECONDS); return Number.isFinite(q) && q >= 60 && q <= 900 ? q : 720; };
 
+// The dynasty's games being coached right now (status 'live', this season), for the start screen's Watch list.
+export interface LiveTeam { tgid: number; name: string; abbr: string; logo: string }
+export interface LiveGame { week: number; gameNo: number; home: LiveTeam; away: LiveTeam; score: [number, number]; q: number; clock: number; coaches: [string, string] }
+type LiveListRow = { week: number; game_no: number; home_tgid: number; away_tgid: number; a: number | null; h: number | null; q: number | null; clock: number | null };
+export async function listLiveGames(env: SimEnv, dyn: Dynasty, members: MemberRow[]): Promise<LiveGame[]> {
+  const rows = (await env.DB.prepare("SELECT week, game_no, home_tgid, away_tgid, json_extract(state_json,'$.score[0]') AS a, json_extract(state_json,'$.score[1]') AS h, json_extract(state_json,'$.q') AS q, json_extract(state_json,'$.clock') AS clock FROM supersim_live WHERE dynasty_id=? AND season_year=? AND status='live' ORDER BY week, game_no").bind(dyn.id, dyn.season_year).all<LiveListRow>()).results;
+  if (!rows.length) return [];
+  const teams = teamMap(await getTeams(env.DB, dyn.id));
+  const team = (tgid: number): LiveTeam => { const t = teams.get(tgid); return { tgid, name: t?.name ?? `Team ${tgid}`, abbr: t?.abbr ?? '?', logo: t ? teamLogoUrl(t, 'lg') : '' }; };
+  return rows.map((r) => ({ week: r.week, gameNo: r.game_no, home: team(r.home_tgid), away: team(r.away_tgid), score: [r.a ?? 0, r.h ?? 0], q: r.q ?? 1, clock: r.clock ?? 0, coaches: coachNames(members, r.away_tgid, r.home_tgid) }));
+}
+
 export async function buildInput(env: SimEnv, dyn: Dynasty, game: GameRow, ownedTeamId: number, origin: string): Promise<GameInput> {
   const index = await loadIndex(env.ASSETS, origin);
+  const edits = await listPendingPlayerEdits(env.DB, dyn.id); // site edits the console has not loaded yet count here
   const teams = await Promise.all([game.away_tgid, game.home_tgid].map(async (tgid): Promise<TeamInput> => {
-    const [team, players, depth] = await Promise.all([getTeam(env.DB, dyn.id, tgid), getPlayers(env.DB, dyn.id, tgid), env.DB.prepare('SELECT pos,depth,pgid FROM depth_chart WHERE dynasty_id=? AND tgid=? AND snapshot_id=? ORDER BY pos,depth').bind(dyn.id, tgid, dyn.current_snapshot_id).all<{ pos: number; depth: number; pgid: number }>()]);
+    const [team, players, consoleChart, consoleSubs, pendingChart] = await Promise.all([getTeam(env.DB, dyn.id, tgid), getPlayers(env.DB, dyn.id, tgid), getDepthChart(env.DB, dyn.id, tgid, dyn.current_snapshot_id), getFormationSubs(env.DB, dyn.id, tgid, dyn.current_snapshot_id), getPendingDepthEdit(env.DB, dyn.id, tgid, dyn.season_year, dyn.week ?? 0)]);
     if (!team) throw fail('Team missing from the current snapshot.', 409);
-    if (!depth.results.length) throw fail(`Depth chart missing for ${team.name}; sync the dynasty before simulating.`, 409);
+    // a pending redshirt / position / jersey change applies at once (a transfer the game sat down plays once un-redshirted)
+    for (const e of edits) { if (e.tgid !== tgid) continue; const p = players.find((x) => x.pgid === e.pgid); if (!p) continue; if (e.redshirt !== null) p.redshirt = e.redshirt; if (e.pos !== null) p.pos = e.pos; if (e.jersey !== null) p.jersey = e.jersey; }
+    // the pending depth chart and formation subs from the site's Depth Chart page, else the console's own
+    let depthChart = consoleChart; let fsubs: Record<string, number> | undefined;
+    const subKey = (side: 'o' | 'd', set: number, slot: number) => `${side}:${set}:${slot}`;
+    if (pendingChart) {
+      try {
+        const c = JSON.parse(pendingChart.chart_json) as Record<string, number[]>; const subs = JSON.parse(pendingChart.subs_json) as FormationSub[];
+        depthChart = Object.entries(c).flatMap(([pos, ids]) => ids.map((pgid, depth) => ({ pos: Number(pos), depth, pgid })).filter((r) => r.pgid > 0));
+        if (subs.length) fsubs = Object.fromEntries(subs.map((s) => [subKey(s.side === 'off' ? 'o' : 'd', s.set, s.slot), s.pgid]));
+      } catch { /* malformed edit: the console's chart */ }
+    } else if (consoleSubs.length) fsubs = Object.fromEntries(consoleSubs.map((s) => [subKey(s.side === 1 ? 'o' : 'd', s.set_id, s.slot), s.pgid]));
     let raw: Record<string, unknown> | null = null; try { raw = JSON.parse((team as unknown as { raw_json?: string }).raw_json || 'null'); } catch { /* ignore */ }
     const books = teamBooks(index, raw);
     const eligible = players.filter((p) => p.redshirt !== 1);
-    return { id: tgid, name: team.name, abbr: team.abbr, logo: teamLogoUrl(team, 'lg'), offBook: books.offBook, defBook: books.defBook, depthChart: depth.results, players: eligible.map((p) => ({ id: p.pgid, name: `${p.first_name} ${p.last_name}`, number: p.jersey, photoUrl: headshotUrl(p), pos: p.pos, overall: p.overall, ratings: JSON.parse(p.ratings_json || '{}') })) };
+    let roster: PlayerInput[] = eligible.map((p) => ({ id: p.pgid, name: `${p.first_name} ${p.last_name}`, number: p.jersey, photoUrl: headshotUrl(p), pos: p.pos, overall: p.overall, ratings: JSON.parse(p.ratings_json || '{}') }));
+    // the game keeps no roster (and no depth chart) for the generic FCS slots; Supersim plays them with placeholders
+    const synthetic = roster.length === 0;
+    if (synthetic) { roster = syntheticRoster(tgid, `${dyn.id}:${dyn.season_year}`); depthChart = autoDepthChart(roster); }
+    else if (!depthChart.length) depthChart = autoDepthChart(roster);
+    if (!depthChart.length) throw fail(`Depth chart missing for ${team.name}; sync the dynasty before simulating.`, 409);
+    return { id: tgid, name: team.name, abbr: team.abbr, logo: teamLogoUrl(team, 'lg'), offBook: books.offBook, defBook: books.defBook, depthChart, ...(fsubs ? { fsubs } : {}), players: roster, ...(synthetic ? { synthetic: true } : {}) };
   }));
-  return { dynasty: dyn.name, dynastyId: dyn.id, season: dyn.season_year, week: dyn.week, gameNo: game.game_no, gameId: `${dyn.id}:${dyn.season_year}:${dyn.week}:${game.game_no}`, snapshot: dyn.current_snapshot_id, ownedTeamId, quarterSeconds: quarterSecondsFor(env, dyn), teams: [teams[0]!, teams[1]!], backUrl: `/d/${dyn.slug}/game/${game.week}/${game.game_no}`, home: game.home_tgid, away: game.away_tgid };
+  return { dynasty: dyn.name, dynastyId: dyn.id, season: dyn.season_year, week: game.week, gameNo: game.game_no, gameId: `${dyn.id}:${dyn.season_year}:${game.week}:${game.game_no}`, snapshot: dyn.current_snapshot_id, ownedTeamId, quarterSeconds: quarterSecondsFor(env, dyn), teams: [teams[0]!, teams[1]!], backUrl: `/d/${dyn.slug}/game/${game.week}/${game.game_no}`, home: game.home_tgid, away: game.away_tgid };
 }
 // the browser does not need every rating: strip them (they stay in the stored input for the engine)
 const slimInput = (input: GameInput) => ({ ...input, teams: input.teams.map((t) => ({ ...t, players: t.players.map(({ ratings: _r, ...p }) => p) })) });
@@ -70,32 +165,55 @@ const actingOff = (st: GameState): Side => (st.phase === 'kickoff' ? st.kicking!
 // the CPU offense hurries when trailing late in a half and bleeds the clock when protecting a fourth-quarter lead
 const cpuTempo = (st: GameState, side: Side): GameState['tempo'] => { const lead = st.score[side] - st.score[1 - side as Side]; if (st.ot) return 'normal'; if (lead < 0 && (st.q === 2 || st.q >= 4) && st.clock < 150) return 'hurry'; if (lead > 0 && st.q >= 4 && st.clock < 360) return 'chew'; return 'normal'; };
 
-export async function handleSupersim(req: Request, env: SimEnv, dyn: Dynasty, resource: string | undefined, acting: MemberRow | null): Promise<Response> {
+const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'";
+// rest: the path parts after `resource` (/supersim/<week>/<game_no> -> resource '<week>', rest ['<game_no>'];
+// /supersim/watch/<week>/<game_no> -> resource 'watch', rest ['<week>', '<game_no>'])
+export async function handleSupersim(req: Request, env: SimEnv, dyn: Dynasty, resource: string | undefined, acting: MemberRow | null, rest: string[] = []): Promise<Response> {
   const url = new URL(req.url); const origin = url.origin;
   try {
     if (env.SUPERSIM_ENABLED !== 'true') return reply({ error: 'Supersim is disabled for this site.' }, 503);
-    if (resource !== undefined && resource !== 'data') return reply({ error: 'Not found' }, 404);
-    if (req.method === 'GET' && !resource) {
-      return page(html`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Supersim | ${dyn.name}</title><link rel="stylesheet" href="/css/coach.css"></head><body><div id="coach" data-endpoint="/d/${dyn.slug}/supersim/data" data-books="/data/playbooks/" data-back="/d/${dyn.slug}"></div><script type="module" src="/js/supersim/coach.js"></script></body></html>`, 200, { 'cache-control': 'private, no-store', vary: 'Cookie', 'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'" });
+    if (resource !== 'data') { // page shells: your current game, a named game to coach, a named game to watch
+      if (req.method !== 'GET') return reply({ error: 'Not found' }, 404);
+      const watch = resource === 'watch'; const parts = resource === undefined ? [] : watch ? rest : [resource, ...rest];
+      if (parts.length !== (resource === undefined ? 0 : 2) || !parts.every((p) => /^\d{1,4}$/.test(p))) return reply({ error: 'Not found' }, 404);
+      const query = parts.length ? `?game=${Number(parts[0])}:${Number(parts[1])}${watch ? '&watch=1' : ''}` : '';
+      return page(html`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Supersim | ${dyn.name}</title><link rel="stylesheet" href="/css/coach.css"></head><body><div id="coach" data-endpoint="/d/${dyn.slug}/supersim/data${query}" data-mode="${watch ? 'watch' : 'coach'}" data-books="/data/playbooks/" data-back="/d/${dyn.slug}"></div><script type="module" src="/js/supersim/coach.js"></script></body></html>`, 200, { 'cache-control': 'private, no-store', vary: 'Cookie', 'content-security-policy': CSP });
     }
-    const { member, game, run, live, other } = await resolveCurrent(env, dyn, acting);
+    if (rest.length) return reply({ error: 'Not found' }, 404);
+    const keyParam = url.searchParams.get('game'); const gameKey = parseGameKey(keyParam);
+    if (keyParam !== null && !gameKey) return reply({ error: 'Bad game key; use ?game=<week>:<game_no>.' }, 400);
+    let cur: Current;
+    try { cur = await resolveCurrent(env, dyn, acting, gameKey, url.searchParams.get('watch') === '1'); }
+    catch (e) { // nothing to coach or watch here: a signed-in member still gets the start screen with the live games
+      const err = e as { noGame?: boolean; members?: MemberRow[]; message?: string };
+      if (req.method === 'GET' && err.noGame && err.members) return reply({ noGame: err.message, liveGames: await listLiveGames(env, dyn, err.members), now: Date.now() });
+      throw e;
+    }
+    const { member, members, game, run, live, other, watch, bracket, drive } = cur;
     const payload = async (liveRow: LiveRow | null, extra: Record<string, unknown> = {}) => {
       const input: GameInput = liveRow ? JSON.parse(liveRow.input_json) : await buildInput(env, dyn, game, member.tgid, origin);
       const st: LiveState | null = liveRow ? JSON.parse(liveRow.state_json) : null;
-      const you = sideOf(input, member.tgid);
+      const you = watch || drive ? null : sideOf(input, member.tgid);
       const pending = st?.pending ?? null;
-      return { input: slimInput(input), you, controls: [you], opponentHuman: !!other, books: { off: [input.teams[0].offBook, input.teams[1].offBook], def: [input.teams[0].defBook, input.teams[1].defBook] }, state: st ? { ...st, pending: undefined } : null, pendingSide: pending ? pending.side : null, pendingMine: pending ? pending.by === member.blaze_id : false, version: liveRow?.version ?? 0, status: liveRow?.status ?? null, final: run ? { id: run.id, status: run.status, result: JSON.parse(run.result_json) } : null, ...extra };
+      // a bracket game's final lives in the playoff state, not the console outbox
+      const bracketFinal = bracket && st && liveRow?.status === 'final' ? { id: st.id, status: 'playoff', result: buildResult(st, input) } : null;
+      const coaches = coachNames(members, input.teams[0].id, input.teams[1].id);
+      return { input: slimInput(input), you, watch: watch || drive, drive, bracket: bracket ? { round: bracket.game.round, idx: bracket.game.idx, open: bracket.open } : null, controls: you === null ? [] : [you], coaches, opponentHuman: watch ? coaches.every((c) => c !== 'CPU') : !!other, books: { off: [input.teams[0].offBook, input.teams[1].offBook], def: [input.teams[0].defBook, input.teams[1].defBook] }, state: st ? { ...st, pending: undefined, recent: undefined } : null, recent: st?.recent ?? [], pendingSide: pending ? pending.side : null, pendingMine: pending ? pending.by === member.blaze_id : false, version: liveRow?.version ?? 0, status: liveRow?.status ?? null, final: run ? { id: run.id, status: run.status, result: JSON.parse(run.result_json) } : bracketFinal, now: Date.now(), ...extra };
     };
-    if (req.method === 'GET') return reply(await payload(live));
+    if (req.method === 'GET') return reply(await payload(live, live ? {} : { liveGames: await listLiveGames(env, dyn, members) }));
     if (req.method !== 'POST') return reply({ error: 'Method not allowed' }, 405);
     if (!sameOrigin(req)) return reply({ error: 'Same-origin JSON request required.' }, 403);
+    if (watch) return reply({ error: 'You are watching this game; only its two coaches can act.' }, 403);
     const text = await req.text(); if (text.length > 4096) return reply({ error: 'Request too large' }, 413);
-    const body = JSON.parse(text) as { action?: string; version?: number; play?: number; tempo?: GameState['tempo']; plays?: number; snapshot?: number | null; call?: string; choice?: string; pos?: number; depth?: number; pgid?: number };
-    const key = [dyn.id, dyn.season_year, dyn.week, game.game_no] as const;
+    const body = JSON.parse(text) as { action?: string; version?: number; play?: number; tempo?: GameState['tempo']; plays?: number; snapshot?: number | null; call?: string; choice?: string; pos?: number; depth?: number; pgid?: number; elapsed?: number };
+    const key = [dyn.id, dyn.season_year, game.week, game.game_no] as const;
+    if (drive && !['start', 'auto', 'abandon'].includes(String(body.action))) return reply({ error: 'This playoff game is between two CPU teams: start it and let it play out; nobody calls its plays.' }, 403);
+    if (bracket && !bracket.open) return reply({ error: 'This playoff game is over.' }, 409);
     if (body.action === 'start') {
       if (run) return reply({ error: 'This game already has an official result.' }, 409);
       if (live) return reply(await payload(live));
       const input = await buildInput(env, dyn, game, member.tgid, origin);
+      if (bracket) input.backUrl = `/d/${dyn.slug}/bracket`;
       if (dyn.od_id === null) return reply({ error: 'Supersim requires an online dynasty.' }, 409);
       const seed = crypto.getRandomValues(new Uint32Array(1))[0]!; const id = crypto.randomUUID();
       const st: LiveState = { ...newGame(input, seed, id, { toss: true }), pending: null };
@@ -113,13 +231,14 @@ export async function handleSupersim(req: Request, env: SimEnv, dyn: Dynasty, re
     if (live.status === 'final') return reply(await payload(live));
     if (!Number.isInteger(body.version) || body.version !== live.version) return reply({ error: 'The game moved on since you loaded it. Reloading…', stale: true, ...(await payload(live)) }, 409);
     const input: GameInput = JSON.parse(live.input_json); const st: LiveState = JSON.parse(live.state_json);
-    const you = sideOf(input, member.tgid); if (you === null) return reply({ error: 'You are not part of this game.' }, 403);
+    const you: Side | null = sideOf(input, member.tgid) ?? (drive ? 0 : null); if (you === null) return reply({ error: 'You are not part of this game.' }, 403); // a driver stands in on the away sideline; the CPU calls both
     const rng: Rng = mulberry32(crypto.getRandomValues(new Uint32Array(1))[0]!); // fresh randomness every call: nothing is predetermined
     const details: PlayDetail[] = [];
-    const resolve = async (mine: { side: Side; play: number; tempo: GameState['tempo'] } | null, cpuMine = false) => {
+    const otherSide = (1 - you) as Side; const humanOther = !!other && sideOf(input, other.tgid) === otherSide;
+    // pcLeft: the play-clock reading at the snap when the clock was real (a coached snap against the CPU), else rolled
+    const resolve = async (mine: { side: Side; play: number; tempo: GameState['tempo'] } | null, cpuMine = false, pcLeft?: number) => {
       const off = actingOff(st); const def = (1 - off) as Side; const books = await booksFor(env, origin, input, st);
       const callFor = (side: Side): number => (side === off ? cpuOffense(books.off, st, input, side, rng) : cpuDefense(books.def, st, input, side, rng));
-      const otherSide = (1 - you) as Side; const humanOther = !!other && sideOf(input, other.tgid) === otherSide;
       let myCall = mine && !cpuMine ? mine.play : callFor(you);
       if (mine && !cpuMine) { /* validate the member's play belongs to the book they are calling from */ const book = you === off ? books.off : books.def; if (!book.plays[String(mine.play)]) throw fail('That play is not in your playbook for this situation.', 400); }
       let theirCall: number | null = null;
@@ -129,7 +248,15 @@ export async function handleSupersim(req: Request, env: SimEnv, dyn: Dynasty, re
       } else theirCall = callFor(otherSide);
       const calls = you === off ? { off: myCall, def: theirCall! } : { off: theirCall!, def: myCall };
       const tempo = off === you ? (mine?.tempo ?? st.tempo) : humanOther ? (st.pending?.tempo ?? st.tempo) : cpuTempo(st, off);
-      const detail = runPlay(st, input, books, calls, rng, tempo); details.push(detail); st.pending = null; return true;
+      const detail = runPlay(st, input, books, calls, rng, tempo, { pcLeft }); details.push(detail); st.pending = null; return true;
+    };
+    // the huddle after this request's plays: when it began, the playback the browser gets before its clock starts
+    // (the animations, the clock runoff and a celebration), and the CPU offense's snap point on the play clock
+    const setHuddle = () => {
+      if (st.final || st.phase === 'toss') { st.huddle = undefined; return; }
+      const off = actingOff(st); const cpuOff = !humanOther && off !== you;
+      const allow = details.reduce((a, d) => a + (d.anim?.dur ?? 0) + 2.6 + (d.scoring ? 3.8 : 0), 0);
+      st.huddle = { at: Date.now(), allow: Math.round(allow * 10) / 10, cpuAt: cpuOff && st.phase === 'snap' ? rollPlayClock(rng, cpuTempo(st, off), st.pc ?? PLAY_CLOCK) : null };
     };
     // coin toss: the away team calls it (the CPU calls for a CPU side); a human winner then picks receive / kick / defer
     const humanSide = (side: Side) => side === you || (!!other && sideOf(input, other.tgid) === side);
@@ -163,29 +290,50 @@ export async function handleSupersim(req: Request, env: SimEnv, dyn: Dynasty, re
       }
     } else if (body.action === 'tempo') { if (['normal', 'hurry', 'chew'].includes(String(body.tempo))) st.tempo = body.tempo!; }
     else if (body.action === 'timeout') {
-      if (st.phase === 'snap' && st.to[you] > 0 && st.running && !st.final) { st.to[you] -= 1; st.running = false; } else return reply({ error: 'No timeout available right now.' }, 400);
+      if (st.phase === 'snap' && st.to[you] > 0 && st.running && !st.final) { st.to[you] -= 1; st.running = false; st.pc = PLAY_CLOCK_SHORT; setHuddle(); } else return reply({ error: 'No timeout available right now.' }, 400);
     } else if (body.action === 'play') {
       if (st.final) return reply({ error: 'The game is over.' }, 409);
       if (!Number.isInteger(body.play)) return reply({ error: 'Choose a play.' }, 400);
       if (st.pending && st.pending.side === you) return reply({ error: 'Your call is in; waiting for the other sideline.' }, 409);
-      await resolve({ side: you, play: body.play!, tempo: ['normal', 'hurry', 'chew'].includes(String(body.tempo)) ? body.tempo! : st.tempo });
+      let pcLeft: number | undefined;
+      if (!humanOther && st.phase === 'snap') {
+        if (actingOff(st) === you) { // the coach snapped: charge what the browser showed, or more if the server saw more time pass
+          const pc = st.pc ?? PLAY_CLOCK; const el = Number(body.elapsed);
+          pcLeft = pc - clamp(Math.max(Number.isFinite(el) ? el : 0, huddleElapsed(st)), 0, pc);
+        } else pcLeft = st.huddle?.cpuAt ?? undefined; // the CPU snapped where the browser counted down to
+      }
+      await resolve({ side: you, play: body.play!, tempo: ['normal', 'hurry', 'chew'].includes(String(body.tempo)) ? body.tempo! : st.tempo }, false, pcLeft);
+      setHuddle();
+    } else if (body.action === 'delay') {
+      // the browser's play clock ran out on the coach's own offense: the server must have seen that much time pass too
+      if (humanOther || st.final || st.phase !== 'snap' || actingOff(st) !== you) return reply({ error: 'No play clock is running on you.' }, 400);
+      // either the play clock ran out, or the game clock did first while it was running
+      const gone = huddleElapsed(st); const clockOut = st.running && gone >= st.clock - 1;
+      if (gone < (st.pc ?? PLAY_CLOCK) - 3 && !clockOut) return reply({ error: 'The play clock has not run out yet.', stale: true, ...(await payload(live)) }, 409);
+      details.push(expirePlayClock(st, input)); setHuddle();
     } else if (body.action === 'auto') {
       // the CPU calls the member's plays too (skip ahead); bounded per request to keep each call short
-      const n = Math.min(60, Math.max(1, Number(body.plays) || 1));
+      const n = Math.min(12, Math.max(1, Number(body.plays) || 1)); // each snap is a full field simulation (~3 ms CPU)
       if (st.phase === 'toss') settleToss(null, 'defer'); // simming from the start: the toss is called and a human winner defers
       for (let i = 0; i < n && !st.final; i++) { const ok = await resolve(null, true); if (!ok) break; }
+      setHuddle();
     } else return reply({ error: 'Unknown action.' }, 400);
+    if (body.action === 'toss') setHuddle();
+    for (const d of details) pushRecent(st, d); // every resolved play, expired play clock and kick: the spectators' ring
     // persist with the version guard
     let finalRun: Run | null = null;
-    if (st.final && !run) {
-      const id = crypto.randomUUID(); const result = buildResult(st, input); const envelope = buildEnvelope(st, input, { runId: id, blazeId: live.started_by, odId: dyn.od_id ?? 0 });
+    if (st.final && !run && bracket) { // the playoff bracket takes the final (and the next round follows); nothing goes to the console outbox
+      const state = await finishBracketGame(env.DB, dyn, game, st, input, st.id);
+      if (!state) return reply({ error: 'The bracket moved on while this game was running; the result was not recorded.' }, 409);
+    } else if (st.final && !run) {
+      const id = crypto.randomUUID(); const result = buildResult(st, input); const envelope = buildEnvelope(st, input, { runId: id, blazeId: live.started_by, odId: dyn.od_id ?? 0, webMember: members.find((m) => m.blaze_id === live.started_by)?.web_only === 1 });
       const starter = input.ownedTeamId;
       await env.DB.prepare(`INSERT INTO supersim_games(id,dynasty_id,season_year,week,game_no,snapshot_id,blaze_id,owned_tgid,home_tgid,away_tgid,seed,input_json,result_json,envelope_json)
         SELECT ?,d.id,d.season_year,d.week,g.game_no,?,?,?,g.home_tgid,g.away_tgid,?,?,?,?
         FROM dynasties d JOIN games g ON g.dynasty_id=d.id AND g.season_year=d.season_year AND g.week=d.week
         WHERE d.id=? AND d.season_year=? AND d.week=? AND g.game_no=? AND g.status<2 AND g.home_tgid=? AND g.away_tgid=?
         ON CONFLICT(dynasty_id,season_year,week,game_no) DO NOTHING`)
-        .bind(id, live.snapshot_id, live.started_by, starter, st.seed, JSON.stringify(slimInput(input)), JSON.stringify(result), JSON.stringify(envelope), dyn.id, dyn.season_year, dyn.week, game.game_no, game.home_tgid, game.away_tgid).run();
+        .bind(id, live.snapshot_id, live.started_by, starter, st.seed, JSON.stringify(slimInput(input)), JSON.stringify(result), JSON.stringify(envelope), dyn.id, dyn.season_year, game.week, game.game_no, game.home_tgid, game.away_tgid).run();
       finalRun = await env.DB.prepare('SELECT * FROM supersim_games WHERE dynasty_id=? AND season_year=? AND week=? AND game_no=?').bind(...key).first<Run>();
       if (!finalRun) return reply({ error: 'The schedule changed while the game was running (the console may have played it). The result was not recorded.' }, 409);
     }

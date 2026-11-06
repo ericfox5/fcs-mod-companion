@@ -1,5 +1,7 @@
 import type { TdbFile } from '@ncaa/tdb';
 
+// year = the calendar year (2013 + SEYR). SEAI.SSYE is NOT the year the dynasty began: the game moves it with SEYR at
+// every rollover (checked 2026-11-05 on files of three dynasties), so the season ordinal cannot come from this table.
 export interface SeasonInfo { week: number; year: number; yearOffset: number; stage: number; weekType: number; raw: Record<string, number | string> }
 export interface CalendarWeek { week: number; stage: number; period: number; raw: Record<string, number | string> }
 export interface Conference { cgid: number; name: string; leagueId: number; raw: Record<string, number | string> }

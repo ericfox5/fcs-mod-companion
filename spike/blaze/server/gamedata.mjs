@@ -1,5 +1,6 @@
-// Supersim -> console game data: the per-game tables a load or an advance downloads for a member's game that was not
-// played on that console (RE 2026-10-30, spike/blaze/NOTES.md). DynastyStatus.GAME is list<DynastyFileInfo {DFID, TMID}>
+// Game data: the per-game tables a load or an advance downloads for a member's game that is not final in the dynasty the
+// console loaded (a Supersim final, built here, or a game a console played and uploaded, kept as sent by dod.mjs; RE
+// 2026-10-30, spike/blaze/NOTES.md). DynastyStatus.GAME is list<DynastyFileInfo {DFID, TMID}>
 // (copied like TEAM by 0x2f6b18). For a member team listed there, the load (0x334d78) and the advance (0x33b2a8,
 // "Downloading Game Data for") queue 14 table descriptors (0x3138c4..0x31401c) and fetch each one with GetTableUpdate
 // {TABL, FILT {COLM 'GH4X' = 0x47483458, VALU = DFID}} (0x2effb0; 0x2ed194 picks that filter for game tables). The rows
@@ -31,7 +32,9 @@ export const LAYOUTS = {
 };
 LAYOUTS.WQSC = LAYOUTS.UWQS;
 
-const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'private', 'game-data');
+const DIR = path.join(process.env.NCAA_PRIVATE
+  ? path.resolve(process.env.NCAA_PRIVATE)
+  : path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'private'), 'game-data');
 const file = (did, id) => path.join(DIR, String(did), String(id) + '.json');
 export const saveGameData = (did, id, data) => { fs.mkdirSync(path.dirname(file(did, id)), { recursive: true }); fs.writeFileSync(file(did, id), JSON.stringify(data)); };
 export const loadGameData = (did, id) => { try { return JSON.parse(fs.readFileSync(file(did, id), 'utf8')); } catch { return null; } };

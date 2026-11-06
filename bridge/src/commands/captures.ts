@@ -1,7 +1,8 @@
-// In-game captures for the News Wire. Under RPCS3 the game's own "photo" files hold a stale texture (see NOTES), so the
-// source is the emulator's screenshot folder (F12 in RPCS3). Each new screenshot is shrunk to a JPEG with the Windows
-// drawing classes, captioned from the game's highlight XML when a photo entry was logged within a few minutes of it,
-// and pushed to the site as a capture that members can attach to a story.
+// In-game captures for the News Wire, from the emulator's screenshot folder (F12 in RPCS3). The game's own replay
+// photos come out blank under RPCS3 unless qkl_boot.ast carries spike/blaze/tools/photo-watermark-patch.mjs (NOTES).
+// Each new screenshot is shrunk to a JPEG with the Windows drawing classes, captioned from the game's highlight XML when
+// a photo entry was logged within a few minutes of it, and pushed to the site as a capture that members can attach to a
+// story.
 import { readdirSync, statSync, readFileSync, existsSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join, dirname, basename, extname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
@@ -58,8 +59,13 @@ const listScreenshots = (dir: string): string[] => {
   return out;
 };
 
+let missingReported = false; // the watch loop asks every 30 s for each dynasty: report a missing folder once
 export async function syncCaptures(cfg: BridgeConfig, d: OdDynasty, api = new WorkerApi(cfg), opts: { quiet?: boolean; limit?: number } = {}): Promise<number> {
-  if (!cfg.screenshotsDir || !existsSync(cfg.screenshotsDir)) { if (!opts.quiet) console.log(`${stamp()} captures: screenshot folder not found (${cfg.screenshotsDir ?? 'screenshotsDir unset'})`); return 0; }
+  if (!cfg.screenshotsDir || !existsSync(cfg.screenshotsDir)) {
+    if (!opts.quiet && !missingReported) console.log(`${stamp()} captures: screenshot folder not found (${cfg.screenshotsDir ?? 'screenshotsDir unset'}); RPCS3 creates it with the first F12 screenshot`);
+    missingReported = true; return 0;
+  }
+  missingReported = false;
   const state = loadState();
   const key = `${cfg.workerUrl} #${d.id}`;
   const done = (state[key] ??= {});

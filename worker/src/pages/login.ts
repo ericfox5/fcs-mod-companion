@@ -1,5 +1,6 @@
 // Sign in / sign out for member accounts (see session.ts). GET /d/<slug>/login shows the form; POST login checks the
-// username + password and sets the od_session cookie; POST logout drops the session row and clears the cookie.
+// username + password and sets the od_session cookie (accounts and sessions are site-wide: one sign-in covers every
+// dynasty the account is linked to); POST logout drops the session row and clears the cookie.
 import type { PageCtx } from '../index.js';
 import { html, type Raw } from '../html.js';
 import { layout, box } from '../layout.js';
@@ -14,9 +15,11 @@ export async function loginPage(ctx: PageCtx): Promise<Response> {
   const { dyn, url } = ctx;
   const back = safeBack(url.searchParams.get('back'), `/d/${dyn.slug}`);
   const flash = url.searchParams.get('err') ? html`<p class="flash err">Wrong username or password.</p>` : html``;
-  const note = !ctx.locked
-    ? html`<p class="muted">No accounts exist for this dynasty yet. The first one is created from an invite issued on the league server: <code>ncaa-bridge od invite --did ${dyn.od_id ?? 'N'} --persona NAME</code>, then open the link it prints.</p>`
-    : ctx.account ? html`<p class="muted">You are already signed in as <b>${ctx.account.username}</b>${ctx.member ? html` (${ctx.member.persona})` : ''}. <a href="/d/${dyn.slug}/members">Members</a></p>` : html``;
+  const note = ctx.account
+    ? html`<p class="muted">You are already signed in as <b>${ctx.account.username}</b>${ctx.member ? html` (${ctx.member.persona})` : ''}. <a href="/d/${dyn.slug}/members">Members</a></p>`
+    : !ctx.locked
+      ? html`<p class="muted">No account is linked to this dynasty yet. Accounts work across the whole site: sign in with the one you already have, and if your console persona is a member here you act as it at once. A league's first account comes from an invite issued on the league server: <code>ncaa-bridge od invite --did ${dyn.od_id ?? 'N'} --persona NAME</code>, then open the link it prints.</p>`
+      : html`<p class="muted">One username and password for every dynasty you are in: the console persona you created or joined this dynasty with is recognised by itself.</p>`;
   const body = html`<div class="auth-wrap"><h2>Sign in</h2>${flash}${box('Member account', html`${note}
     <form class="wform" method="post" action="/d/${dyn.slug}/login"><input type="hidden" name="back" value="${back}">
       <div class="fields">
@@ -38,13 +41,13 @@ export async function loginAction(ctx: PageCtx, form: FormData): Promise<Respons
   const username = String(form.get('username') ?? '').trim();
   const password = String(form.get('password') ?? '');
   if (!USERNAME_RE.test(username) || !password) return fail();
-  const acct = await getAccountByUsername(db, dyn.id, username);
+  const acct = await getAccountByUsername(db, username); // site-wide: the session is good for every dynasty the account is linked to
   if (!acct) { await burnHash(password); return fail(); }
   if (!(await verifyPassword(password, acct))) return fail();
   const old = await sessionHashFromRequest(req); // one session per browser: replace whatever cookie it carried
   if (old) await deleteSession(db, old);
   await purgeExpiredSessions(db);
-  return redirect(back, { 'set-cookie': await createSession(db, acct.id, dyn.id) });
+  return redirect(back, { 'set-cookie': await createSession(db, acct.id) });
 }
 
 // POST /d/<slug>/logout

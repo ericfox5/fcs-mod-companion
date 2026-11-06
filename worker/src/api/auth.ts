@@ -1,12 +1,16 @@
 // Member invite codes, bridge side. The bridge router (api/bridge.ts) checks the BRIDGE_TOKEN and delegates
 // `/api/bridge/invites/...` here with `path` = the segments after `invites`.
 //   POST /api/bridge/invites  { od: <stub DID>, blazeId, note? }  -> { code, slug, persona, joinUrl }
+//                                                                  or { linked: true, slug, persona, username } when the
+//                                                                  console persona already owns a site account (it is
+//                                                                  linked to the dynasty instead; no invite needed)
 //   GET  /api/bridge/invites?od=N                                 -> { slug, invites: [...] } (open invites)
 // This is the only way to get a dynasty's first invite (the site cannot issue invites until a commissioner has an
-// account), so whoever bootstraps accounts has proven control of the league server.
+// account), so whoever bootstraps accounts has proven control of the league server. Since migration 0023 the bridge's
+// member sync links known personas by itself, so an invite is only needed for someone without any site account yet.
 import type { Env } from '../env.js';
 import { json } from '../html.js';
-import { getDynastyByOdId, getMembers, getAccountForMember, insertInvite, listOpenInvites } from '../db/queries.js';
+import { getDynastyByOdId, getMembers, getAccountForMember, getAccountForPersona, linkMember, insertInvite, listOpenInvites } from '../db/queries.js';
 import { newInviteCode, joinUrl } from '../session.js';
 
 async function readBody(req: Request): Promise<any> {
@@ -38,6 +42,10 @@ export async function handleInvites(req: Request, env: Env, path: string[]): Pro
     if (!member) return json({ error: `no member with blazeId ${body.blazeId} in ${dyn.slug}` }, 404);
     const existing = await getAccountForMember(db, dyn.id, blazeId);
     if (existing) return json({ error: `${member.persona} already has an account (${existing.username})` }, 409);
+    if (member.web_only !== 1) { // a console persona with a site account from another dynasty: link, no invite
+      const owner = await getAccountForPersona(db, blazeId);
+      if (owner) { await linkMember(db, owner.id, dyn.id, blazeId); return json({ linked: true, slug: dyn.slug, blazeId, persona: member.persona, username: owner.username }); }
+    }
     const code = newInviteCode();
     const note = typeof body.note === 'string' && body.note.trim() ? body.note.trim().slice(0, 120) : 'issued by the bridge';
     await insertInvite(db, code, dyn.id, blazeId, null, note);

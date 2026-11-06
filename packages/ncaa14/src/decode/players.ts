@@ -17,6 +17,8 @@ export interface Player {
   weight: number; // PWGT (+160 lb offset in EA games)
   gamesPlayed: number; // sgmp
   headId: number; // PGHE: in-game head/face art id (1..246)
+  leaveFlag: number; // PLFL: offseason leaving reason (9-15 transfer, 16/17 staying, 19-25 draft round, 26 graduation, 28 stays)
+  leaveType: number; // PTYP: 0 staying, 1 transferring, 3 leaving the game
   ratings: Record<string, number>; // every other numeric field by code
   raw: Record<string, number | string>;
 }
@@ -36,6 +38,7 @@ export function decodePlayers(file: TdbFile): Player[] {
       pgid: r['PGID'] as number, tgid: r['TGID'] as number, firstName: r['PFNA'] as string, lastName: r['PLNA'] as string,
       pos, position: positionName(pos), year, redshirt: rs, classLabel: classYear(year, rs), jersey: r['PJEN'] as number,
       overall: r['POVR'] as number, heightInches: r['PHGT'] as number, weight: (r['PWGT'] as number) + 160, gamesPlayed: (r['sgmp'] as number) ?? 0, headId: (r['PGHE'] as number) ?? 0,
+      leaveFlag: (r['PLFL'] as number) ?? 0, leaveType: (r['PTYP'] as number) ?? 0,
       ratings, raw: r,
     });
   }

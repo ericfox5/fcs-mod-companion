@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FCS Uniform Studio</title>
+<meta name="description" content="Edit what each FCS mod team wears in NCAA 14: uniform parts, their textures (DDS), and new uniform sets. Runs locally.">
+<style>
+:root{
+  --bg:#ececec;--panel:#ffffff;--panel-2:#f6f6f6;--ink:#121212;--muted:#5f6368;--line:#d9d9d9;--line-2:#c4c4c4;
+  --red:#c8102e;--red-dk:#8f0b21;--black:#101010;--black-2:#1f1f1f;--gold:#ffb81c;--green:#1b7f3b;--blue:#0b5ed7;
+  --cond:"Bahnschrift Condensed","Bahnschrift SemiCondensed","Bahnschrift","Barlow Condensed","Arial Narrow",Impact,sans-serif;--sans:"Segoe UI","Barlow",Arial,Helvetica,sans-serif;
+  --mono:Consolas,"Cascadia Mono",Menlo,monospace;--radius:3px;--shadow:0 1px 2px rgba(0,0,0,.12);
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#121212;--panel:#1b1b1b;--panel-2:#232323;--ink:#f1f1f1;--muted:#a3a3a3;--line:#333;--line-2:#444;--shadow:0 1px 2px rgba(0,0,0,.6)}}
+:root[data-theme="dark"]{--bg:#121212;--panel:#1b1b1b;--panel-2:#232323;--ink:#f1f1f1;--muted:#a3a3a3;--line:#333;--line-2:#444;--shadow:0 1px 2px rgba(0,0,0,.6)}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans);display:flex;flex-direction:column;min-height:100vh}
+h1,h2,h3,h4,.cond{font-family:var(--cond);text-transform:uppercase;letter-spacing:.02em}
+h2{font-size:22px;font-weight:700;margin:0 0 8px}
+h3{font-size:17px;font-weight:600;margin:0 0 6px;color:var(--muted)}
+a{color:var(--blue)}
+button,.btn{font:600 13px/1 var(--sans);text-transform:uppercase;letter-spacing:.04em;border:1px solid var(--black-2);background:var(--black-2);color:#fff;padding:8px 12px;border-radius:var(--radius);cursor:pointer;min-height:34px}
+button:hover{filter:brightness(1.15)}
+button.primary{background:var(--red);border-color:var(--red)}
+button.ghost{background:transparent;color:var(--ink);border-color:var(--line-2)}
+button.small{padding:4px 8px;min-height:26px;font-size:11px}
+button:disabled{opacity:.45;cursor:not-allowed;filter:none}
+input[type=text],input[type=number],select,textarea{font:14px var(--sans);color:var(--ink);background:var(--panel);border:1px solid var(--line-2);border-radius:var(--radius);padding:6px 8px;min-height:34px}
+select.small{min-height:26px;padding:2px 6px;font-size:12px}
+input[type=color]{width:40px;height:34px;padding:2px;border:1px solid var(--line-2);background:var(--panel)}
+input[type=range]{accent-color:var(--red)}
+label.f{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+label.f>*{font-size:14px;text-transform:none;letter-spacing:0;font-weight:400;color:var(--ink)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.row.tight{gap:6px;align-items:center}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px;margin-bottom:14px}
+.card.flush{padding:0;overflow:hidden}
+.muted{color:var(--muted)}
+.mono{font-family:var(--mono);font-size:12px}
+.pill{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;background:var(--panel-2);border:1px solid var(--line-2);color:var(--muted);white-space:nowrap}
+.pill.ok{background:#e4f5e9;border-color:#9cd5ad;color:#136a30}.pill.warn{background:#fff3cd;border-color:#ffd97a;color:#7a5200}.pill.bad{background:#fde3e6;border-color:#f3a6b0;color:#8f0b21}.pill.red{background:var(--red);border-color:var(--red);color:#fff}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .pill.ok{background:#15321f;color:#9be0b1}:root:not([data-theme="light"]) .pill.warn{background:#3d3010;color:#ffd97a}:root:not([data-theme="light"]) .pill.bad{background:#3f1218;color:#f3a6b0}}
+header.top{background:var(--black);color:#fff;display:flex;align-items:stretch;position:sticky;top:0;z-index:10;box-shadow:0 2px 6px rgba(0,0,0,.35)}
+.brand{display:flex;align-items:center;gap:10px;padding:0 16px;border-right:1px solid #333}
+.brand .mark{background:var(--red);color:#fff;font:800 20px/1 var(--cond);padding:9px 10px;letter-spacing:.06em;transform:skewX(-8deg)}
+.brand .title{font:700 20px/1 var(--cond);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
+nav.tabs{display:flex;flex:1;overflow-x:auto}
+nav.tabs button{background:transparent;border:0;border-bottom:3px solid transparent;border-radius:0;color:#cfcfcf;font:600 14px/1 var(--cond);letter-spacing:.06em;padding:0 14px;min-height:52px;white-space:nowrap}
+nav.tabs button:hover{color:#fff;filter:none;background:#1c1c1c}
+nav.tabs button.active{color:#fff;border-bottom-color:var(--red)}
+nav.tabs .sep{align-self:center;color:#555;font:600 10px var(--cond);letter-spacing:.1em;padding:0 10px;border-left:1px solid #333;margin-left:6px}
+.top-right{display:flex;align-items:center;gap:10px;padding:0 16px;font-size:12px;color:#bdbdbd;white-space:nowrap}
+.top-right .dot{width:9px;height:9px;border-radius:50%;background:#777;display:inline-block;margin-right:5px}
+.top-right .dot.on{background:#2ecc71}.top-right .dot.warn{background:var(--gold)}
+.top-right button{color:#ddd;border-color:#444}
+main{flex:1;padding:16px;max-width:1500px;width:100%;margin:0 auto}
+section.tab{display:none}section.tab.active{display:block}
+.strip{height:4px;background:linear-gradient(90deg,var(--red) 0 60%,var(--gold) 60% 100%);margin:-16px -16px 14px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{font:600 12px var(--cond);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:left;padding:8px 10px;border-bottom:2px solid var(--line-2);background:var(--panel-2)}
+.scroll th{position:sticky;top:0;z-index:1}
+td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr.click{cursor:pointer}tr.click:hover td{background:var(--panel-2)}
+tr.sel td{background:rgba(200,16,46,.08)}
+tr.sub td{background:var(--panel-2);padding:4px 10px 8px 24px}
+.scroll{max-height:62vh;overflow:auto}
+.thumb{height:72px;width:auto;max-width:200px;image-rendering:auto;background:repeating-conic-gradient(#bbb 0 25%,#eee 0 50%) 0 0/12px 12px;border:1px solid var(--line-2)}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+/* team view */
+.teamview{display:grid;grid-template-columns:290px 1fr;gap:14px;align-items:start}
+.teamlist{position:sticky;top:68px}
+.teamlist .list{max-height:calc(100vh - 230px);overflow:auto;margin:8px -16px -14px;border-top:1px solid var(--line)}
+.tl{padding:7px 14px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;border-left:3px solid transparent}
+.tl:hover{background:var(--panel-2)}
+.tl.sel{background:rgba(200,16,46,.08);border-left-color:var(--red)}
+.tl .n{font-weight:600}.tl .s{font:12px var(--mono);color:var(--muted)}
+.team-head{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.team-head h2{font-size:30px;margin:0;line-height:1}
+.team-head .meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted)}
+.uni-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.uni-card{border:1px solid var(--line-2);border-radius:var(--radius);overflow:hidden;background:var(--panel)}
+.uni-card h4{margin:0;padding:8px 10px;background:var(--black);color:#fff;font:700 15px/1 var(--cond);text-transform:uppercase;letter-spacing:.08em;display:flex;justify-content:space-between;align-items:center}
+.uni-card h4 .idx{color:#999;font-size:11px}
+.uni-part{display:grid;grid-template-columns:56px 1fr;gap:10px;padding:6px 10px;border-top:1px solid var(--line);align-items:center}
+.uni-part canvas{width:56px;height:56px;object-fit:contain;image-rendering:auto;background:repeating-conic-gradient(#bbb 0 25%,#eee 0 50%) 0 0/8px 8px;border:1px solid var(--line-2)}
+.uni-part .ph{width:56px;height:56px;border:1px dashed var(--line-2);border-radius:2px}
+.uni-part .pt{font:600 11px var(--cond);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.uni-part select{width:100%}
+.part-row canvas.thumb{height:56px}
+.tex-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px;padding:8px 0}
+.tex{border:1px solid var(--line-2);border-radius:var(--radius);padding:8px;background:var(--panel);display:grid;grid-template-columns:72px 1fr;gap:8px;align-items:center}
+.tex canvas{width:72px;height:72px;object-fit:contain;background:repeating-conic-gradient(#bbb 0 25%,#eee 0 50%) 0 0/8px 8px;border:1px solid var(--line-2)}
+.tex .tn{font:12px var(--mono);word-break:break-all}
+.tex .ta{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.tex .st{font-size:11px;color:var(--muted);margin-top:3px}
+.status-strip{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px}
+/* editor */
+.editor{display:grid;grid-template-columns:230px 1fr 260px;gap:12px;min-height:60vh}
+.editor .tools{display:flex;flex-direction:column;gap:8px}
+.tools .tool{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.tools .tool button{padding:6px 4px;font-size:11px}
+.tools .tool button.active{background:var(--red);border-color:var(--red)}
+.stage{position:relative;overflow:auto;background:repeating-conic-gradient(#b9b9b9 0 25%,#e6e6e6 0 50%) 0 0/16px 16px;border:1px solid var(--line-2);min-height:60vh;max-height:78vh}
+.stage canvas{display:block;image-rendering:pixelated;cursor:crosshair}
+.stage .stamp{position:absolute;border:2px dashed var(--gold);background:rgba(255,184,28,.08);cursor:move;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
+.stage .stamp .h{position:absolute;right:-6px;bottom:-6px;width:12px;height:12px;background:var(--gold);cursor:nwse-resize;border:1px solid #000}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12px}
+.kv dt{color:var(--muted);text-transform:uppercase;font-weight:600;letter-spacing:.04em}
+.kv dd{margin:0;font-family:var(--mono);word-break:break-all}
+.swatch{display:inline-block;width:22px;height:22px;border:1px solid #000;vertical-align:middle;border-radius:2px}
+footer.log{border-top:2px solid var(--red);background:var(--black);color:#ddd}
+footer .log-head{display:flex;align-items:center;gap:10px;padding:4px 12px;font:600 12px var(--cond);text-transform:uppercase;letter-spacing:.08em;color:#aaa}
+footer pre{margin:0;padding:6px 12px 10px;max-height:150px;overflow:auto;font:12px/1.4 var(--mono);white-space:pre-wrap}
+footer pre .err{color:#ff7b8a}footer pre .ok{color:#8ce0a5}footer pre .warn{color:#ffd97a}
+details summary{cursor:pointer;font-weight:600}
+code{font-family:var(--mono);font-size:12px;background:var(--panel-2);padding:1px 4px;border-radius:2px}
+.help p,.help li{max-width:80ch}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.toast{position:fixed;right:16px;bottom:190px;background:var(--black);color:#fff;padding:10px 14px;border-left:4px solid var(--green);border-radius:3px;box-shadow:0 4px 14px rgba(0,0,0,.4);font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20;max-width:420px}
+.toast.show{opacity:1}.toast.err{border-left-color:var(--red)}
+@media (max-width:1000px){.teamview{grid-template-columns:1fr}.teamlist{position:static}.teamlist .list{max-height:40vh}.editor{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="mark">FCS</span><span class="title">Uniform Studio</span></div>
+  <nav class="tabs" id="tabs">
+    <button data-tab="teams" class="active">Teams</button>
+    <button data-tab="texture">Texture editor</button>
+    <button data-tab="newset">New set</button>
+    <span class="sep">Advanced</span>
+    <button data-tab="folder">Files</button>
+    <button data-tab="bigfile">Bigfile</button>
+    <button data-tab="xml">XML</button>
+    <button data-tab="archive">Archive</button>
+    <button data-tab="help">Help</button>
+  </nav>
+  <div class="top-right"><span><span class="dot" id="fsa-dot"></span><span id="fsa-text">starting</span></span><button class="small ghost" id="theme-btn" title="toggle theme">Theme</button></div>
+</header>
+<main>
+  <section class="tab active" id="tab-teams">
+    <div class="strip"></div>
+    <div class="card" id="source-card"><div class="status-strip" id="source-strip"><span class="muted">starting…</span></div></div>
+    <div class="teamview">
+      <aside class="card teamlist">
+        <div class="row tight"><input type="text" id="team-search" placeholder="Find a team, slot or conference" style="flex:1"></div>
+        <div class="row tight" style="margin-top:6px"><select id="team-conf" class="small" style="flex:1"><option value="">all conferences</option></select><select id="team-xml" class="small"><option value="">all</option><option value="yes">own uniform file</option><option value="no">archive only</option></select></div>
+        <div class="list" id="team-list"></div>
+      </aside>
+      <div class="teampane" id="teampane"><div class="card empty">Pick a team on the left.</div></div>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-folder">
+    <div class="strip"></div>
+    <div class="card">
+      <div class="row">
+        <button class="primary" id="open-folder">Open a DLC folder…</button>
+        <button class="ghost" id="rescan-folder" disabled>Rescan</button>
+        <label class="f">Filter<input type="text" id="folder-filter" placeholder="slot, team, file name"></label>
+        <span class="muted" id="folder-info"></span>
+      </div>
+    </div>
+    <div class="card flush"><div class="scroll"><table id="folder-table"><thead><tr><th>Slot</th><th>Team(s)</th><th>File</th><th>Kind</th><th>Size</th><th></th></tr></thead><tbody></tbody></table></div></div>
+  </section>
+
+  <section class="tab" id="tab-bigfile">
+    <div class="strip"></div>
+    <div class="card">
+      <div class="row">
+        <button class="ghost" id="open-big-file">Open a bigfile…</button>
+        <button class="primary" id="big-save" disabled>Save bigfile</button>
+        <button id="big-save-as" disabled>Save as…</button>
+        <span id="big-title" class="cond" style="font-size:18px;font-weight:700"></span>
+        <span class="muted" id="big-info"></span>
+      </div>
+    </div>
+    <div class="card flush"><div class="scroll"><table id="big-table"><thead><tr><th>Preview</th><th>Entry</th><th>Kind</th><th>Format</th><th>Size</th><th>Flags</th><th>Actions</th></tr></thead><tbody></tbody></table></div></div>
+    <div class="card" id="big-scene" hidden><h3>Scene references</h3><pre class="mono" id="big-scene-text"></pre></div>
+  </section>
+
+  <section class="tab" id="tab-texture">
+    <div class="strip"></div>
+    <div class="card">
+      <div class="row">
+        <span id="tex-title" class="cond" style="font-size:18px;font-weight:700">No texture open</span>
+        <span class="muted" id="tex-info">Pick a team, open a part's textures and choose Quick edit.</span>
+        <span style="flex:1"></span>
+        <button id="tex-undo" disabled>Undo</button><button id="tex-redo" disabled>Redo</button>
+        <button id="tex-revert" disabled>Revert</button>
+        <button id="tex-export-png" disabled>Export PNG</button>
+        <button id="tex-export-dds" disabled>Export DDS</button>
+        <button id="tex-import" disabled>Import image / DDS…</button>
+        <button class="primary" id="tex-apply" disabled>Apply &amp; save</button>
+      </div>
+    </div>
+    <div class="editor">
+      <div class="tools card">
+        <h3>Tool</h3>
+        <div class="tool" id="tool-buttons">
+          <button data-tool="brush" class="active">Brush</button><button data-tool="eraser">Eraser</button><button data-tool="fill">Fill</button>
+          <button data-tool="picker">Picker</button><button data-tool="recolor">Recolor</button><button data-tool="pan">Pan</button>
+        </div>
+        <label class="f">Colour<span class="row tight"><input type="color" id="tool-color" value="#c8102e"><input type="text" id="tool-hex" value="#c8102e" style="width:92px"></span></label>
+        <label class="f">Size <span id="tool-size-v">24</span> px<input type="range" id="tool-size" min="1" max="256" value="24"></label>
+        <label class="f">Opacity <span id="tool-opacity-v">100</span>%<input type="range" id="tool-opacity" min="1" max="100" value="100"></label>
+        <label class="f">Tolerance <span id="tool-tol-v">32</span><input type="range" id="tool-tol" min="0" max="200" value="32"></label>
+        <div id="recolor-box" hidden>
+          <h3>Recolor</h3>
+          <div class="row tight"><span>From</span><span class="swatch" id="recolor-src"></span><span class="mono" id="recolor-src-hex">click the texture</span></div>
+          <p class="muted" style="font-size:12px;margin:6px 0">Pixels within the tolerance of the picked colour take the tool colour's hue and saturation; their shading is kept.</p>
+          <button class="primary" id="recolor-apply" disabled>Apply recolor</button>
+        </div>
+        <h3>View</h3>
+        <div class="row tight"><button class="small ghost" data-zoom="fit">Fit</button><button class="small ghost" data-zoom="1">1:1</button><button class="small ghost" data-zoom="-">−</button><button class="small ghost" data-zoom="+">+</button><span class="mono" id="zoom-v"></span></div>
+        <label class="f"><span class="row tight"><input type="checkbox" id="view-alpha" checked> show transparency as checkerboard</span></label>
+      </div>
+      <div class="stage" id="stage"><canvas id="tex-canvas" width="16" height="16"></canvas><div class="stamp" id="stamp" hidden><div class="h"></div></div></div>
+      <div class="card">
+        <h3>Texture</h3>
+        <dl class="kv" id="tex-kv"></dl>
+        <div id="stamp-box" hidden>
+          <h3>Placed image</h3>
+          <div class="row tight"><label class="f">X<input type="number" id="stamp-x" style="width:80px"></label><label class="f">Y<input type="number" id="stamp-y" style="width:80px"></label></div>
+          <div class="row tight"><label class="f">W<input type="number" id="stamp-w" style="width:80px"></label><label class="f">H<input type="number" id="stamp-h" style="width:80px"></label></div>
+          <label class="f"><span class="row tight"><input type="checkbox" id="stamp-lock" checked> keep aspect</span></label>
+          <div class="row tight"><button class="primary" id="stamp-place">Place</button><button class="ghost" id="stamp-cancel">Cancel</button></div>
+        </div>
+        <h3>Mip levels</h3>
+        <div class="muted" style="font-size:12px">All mip levels are regenerated from the edited top level when you apply.</div>
+        <div id="tex-mips" class="row tight" style="margin-top:6px"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-newset">
+    <div class="strip"></div>
+    <div class="grid2">
+      <div class="card">
+        <h2>Target</h2>
+        <div class="row">
+          <label class="f">Team<select id="ns-team"><option value="">pick a team (fills the slot)</option></select></label>
+          <label class="f">Slot code (6)<input type="text" id="ns-slot" maxlength="6" style="width:110px;text-transform:uppercase"></label>
+          <label class="f">Year (4)<input type="text" id="ns-year" maxlength="4" value="2025" style="width:80px"></label>
+          <label class="f">Pack<input type="number" id="ns-pack" min="0" max="9" value="0" style="width:70px"></label>
+        </div>
+        <p class="muted" style="font-size:12px">Donor bigfiles are copied and renamed to <code>SLOT_PART_YEAR_COLOR</code>. Slot and year are replaced inside the scene file too, so every replacement must keep its length: six letters for the slot, four digits for the year, and a colour token exactly as long as the donor's.</p>
+        <h3>Official uniforms</h3>
+        <div class="row tight"><input type="text" id="ns-officials" value="Home, Away" style="flex:1"><span class="muted">comma separated</span></div>
+      </div>
+      <div class="card">
+        <h2>Donor parts</h2>
+        <div class="row">
+          <label class="f" style="flex:1">Add a bigfile (any team's, or one pulled from the archive)<select id="ns-donor"><option value="">no files loaded</option></select></label>
+          <button id="ns-add">Add</button>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:6px">A jersey donor brings its number and name decals and kerning table along.</div>
+      </div>
+    </div>
+    <div class="card flush"><table id="ns-table"><thead><tr><th>Part</th><th>Donor</th><th>Donor colour</th><th>New colour (same length)</th><th>Officials</th><th>New name</th><th></th></tr></thead><tbody></tbody></table><div class="empty" id="ns-empty">No donor parts yet.</div></div>
+    <div class="card"><div class="row"><button class="primary" id="ns-generate" disabled>Generate files</button><span class="muted" id="ns-status"></span></div></div>
+  </section>
+
+  <section class="tab" id="tab-xml">
+    <div class="strip"></div>
+    <div class="card">
+      <div class="row">
+        <button class="ghost" id="xml-open">Open an XML…</button>
+        <button class="primary" id="xml-save" disabled>Save XML</button>
+        <button id="xml-save-as" disabled>Save as…</button>
+        <span id="xml-title" class="cond" style="font-size:18px;font-weight:700"></span>
+        <span class="muted" id="xml-info"></span>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h3>Official uniform types</h3>
+        <div id="xml-officials" class="row tight"></div>
+        <div class="row tight" style="margin-top:8px"><input type="text" id="xml-new-official" placeholder="e.g. Alt #1" style="flex:1"><button class="small" id="xml-add-official">Add</button></div>
+        <p class="muted" style="font-size:12px">TEAM.TUHO / TUAW pick the home and away rows by index (0 and 1 for every team in this league), so keep "Home" first and "Away" second.</p>
+      </div>
+      <div class="card">
+        <h3>Add a part</h3>
+        <div class="row"><label class="f" style="flex:1">Bigfile<select id="xml-part-big"></select></label><label class="f">Label<input type="text" id="xml-part-name" placeholder="White" style="width:110px"></label><button id="xml-part-add" class="small">Add part</button></div>
+        <p class="muted" style="font-size:12px">The part type comes from the bigfile name (HELMET, JERSEY, PANTSX, SOCKSX, SHOESX, GLOVES).</p>
+      </div>
+    </div>
+    <div class="card flush"><div class="scroll"><table id="xml-table"><thead><tr><th>Type</th><th>Label</th><th>Bigfile</th><th>Scene</th><th>Where</th><th>Officials</th><th></th></tr></thead><tbody></tbody></table></div></div>
+    <details class="card"><summary>Raw XML</summary><textarea id="xml-raw" rows="18" style="width:100%;font-family:var(--mono);font-size:12px"></textarea><div class="row" style="margin-top:8px"><button class="small" id="xml-raw-apply">Use edited text</button></div></details>
+  </section>
+
+  <section class="tab" id="tab-archive">
+    <div class="strip"></div>
+    <div class="card">
+      <div class="row">
+        <button class="primary" id="arc-open">Open qkl_fe2ig.ast…</button>
+        <span class="muted" id="arc-info">With the local server the archive is already connected; this button is for the file-only mode.</span>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h3>Find an entry by bigfile name</h3>
+        <div class="row"><input type="text" id="arc-name" placeholder="D1AANW_HELMET_2007_RED_big" style="flex:1;text-transform:uppercase"><button id="arc-find" disabled>Find</button></div>
+        <div id="arc-result" class="kv" style="margin-top:8px"></div>
+        <div class="row" style="margin-top:8px"><button id="arc-extract" disabled>Extract to DLC folder</button><button id="arc-download" class="ghost" disabled>Download</button><button id="arc-open-big" class="ghost" disabled>Open in Bigfile tab</button></div>
+      </div>
+      <div class="card">
+        <h3>Generic FCS slots (vanilla 2007 art still in the archive)</h3>
+        <p class="muted" style="font-size:12px">Contents verified by decoding: the ones marked are not what their names say.</p>
+        <div id="arc-generic"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab help" id="tab-help">
+    <div class="strip"></div>
+    <div class="card">
+      <h2>Start</h2>
+      <p>Run <code>uniform-studio.cmd</code> (or <code>node serve.mjs --open</code>) in this folder. It finds your RPCS3 install from the bridge config, opens this page, and connects it to <code>USRDIR\DLC</code> and to <code>qkl_fe2ig.ast</code>. Every save keeps a backup under <code>%LOCALAPPDATA%\ncaa-bridge\uniforms\backup</code>.</p>
+      <h2>Editing a team</h2>
+      <ol>
+        <li>Pick the team. Its uniforms (Home, Away, alternates) show which helmet, jersey, pants, socks and shoes they use; change any of them with the dropdowns. Teams that still use the game's built-in definition get a <strong>Copy to DLC folder</strong> button first.</li>
+        <li>Under <strong>Parts</strong>, open a part's textures. <strong>Edit DDS</strong> writes the texture as a DDS and opens it in your DDS editor (Paint.NET with its DDS plugin). Save it there and the bigfile is repackaged within a second or two; the log confirms it. <strong>Import</strong> takes a DDS or PNG you already have; <strong>Quick edit</strong> opens the in-page editor for recolours and touch-ups.</li>
+        <li>Parts that live inside the game archive get a <strong>Pull into folder</strong> button; after that they are editable like any other.</li>
+        <li><strong>New set</strong> clones another team's pieces into this team's slot (same-length names) and writes the uniform file; <strong>Clone part</strong> on a team does the same for one piece.</li>
+      </ol>
+      <h2>How the files fit together</h2>
+      <p>Every team sits on a six-letter asset slot (<code>TEAM.CSAT</code>). At game load the game looks in every <code>FCS_DLC_*</code> folder for <code>SLOT_Pack0_MixAndMatch.XML</code>; without one it uses the definition baked into <code>qkl_fe2ig.ast</code> (entry <code>SLOT_MIXANDMATCH</code>). The XML lists parts, each naming a bigfile and the scene inside it, and says which official uniforms use it; <code>TEAM.TUHO</code>/<code>TUAW</code> are the home and away rows. Bigfiles are found by name in any <code>FCS_DLC_*</code> folder, then in the archive by a hash of the name, then loose in <code>USRDIR</code>; a name that resolves nowhere crashes the game at load.</p>
+      <h2>Rules</h2>
+      <ul>
+        <li>A texture keeps its size, format (DXT1/DXT5) and mip count; the full mip chain is regenerated from your edit. Save DDS files as BC1/DXT1 or BC3/DXT5 (with or without mipmaps) or 32-bit uncompressed; same size as the original.</li>
+        <li>Renames keep lengths: slot 6 characters, year 4 digits, colour token as long as the donor's.</li>
+        <li>Close the game, or sit at its menu, while saving into the game folder. Every league member needs the same DLC files.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+<footer class="log"><div class="log-head"><span>Log</span><button class="small ghost" id="log-clear" style="color:#ddd;border-color:#444">clear</button></div><pre id="log"></pre></footer>
+<input type="file" id="pick-folder" webkitdirectory multiple hidden>
+<input type="file" id="pick-image" accept=".png,.jpg,.jpeg,.webp,.gif,.bmp,.dds" hidden>
+<input type="file" id="pick-big" accept=".ast,.AST,.big" hidden>
+<input type="file" id="pick-xml" accept=".xml,.XML" hidden>
+<input type="file" id="pick-archive" accept=".ast,.AST" hidden>
+<script>/*__CODEC__*/</script>
+<script id="fcs-mapping" type="application/json">/*__MAPPING__*/</script>
+<script>/*__APP__*/</script>
+</body>
+</html>

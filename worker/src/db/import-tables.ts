@@ -1,6 +1,9 @@
 // Maps normalized import rows (as produced by @ncaa/ncaa14 exportDynasty) onto D1 columns.
 // Each spec: SQL table, columns, and a function turning one row into column values (dynasty_id, snapshot_id are prepended).
-export interface TableSpec { table: string; columns: string[]; values: (r: any, ctx: Ctx) => unknown[]; seasonScoped?: boolean }
+// weekScoped: an import replaces only the weeks its rows cover (game lines: the console empties them in the offseason)
+// keep: rows absent from a newer file stay (season stats of players who graduate or move during the offseason, which the
+// file stops carrying while the season label is unchanged); a re-sent row still replaces its stored copy
+export interface TableSpec { table: string; columns: string[]; values: (r: any, ctx: Ctx) => unknown[]; seasonScoped?: boolean; weekScoped?: boolean; keep?: boolean }
 export interface Ctx { seasonYear: number }
 const j = (v: unknown) => JSON.stringify(v);
 const b = (v: unknown) => (v ? 1 : 0);
@@ -16,15 +19,18 @@ export const IMPORT_TABLES: Record<string, TableSpec> = {
   },
   players: {
     table: 'players',
-    columns: ['pgid', 'tgid', 'first_name', 'last_name', 'pos', 'year', 'redshirt', 'jersey', 'overall', 'height', 'weight', 'games_played', 'ratings_json', 'photo_key', 'head_id'],
-    values: (r) => [r.pgid, r.tgid, r.firstName, r.lastName, r.pos, r.year, r.redshirt, r.jersey, r.overall, r.heightInches, r.weight, r.gamesPlayed, j(r.ratings), r.photoKey ?? null, r.headId ?? null],
+    columns: ['pgid', 'tgid', 'first_name', 'last_name', 'pos', 'year', 'redshirt', 'jersey', 'overall', 'height', 'weight', 'games_played', 'ratings_json', 'photo_key', 'head_id', 'leave_flag', 'leave_type'],
+    values: (r) => [r.pgid, r.tgid, r.firstName, r.lastName, r.pos, r.year, r.redshirt, r.jersey, r.overall, r.heightInches, r.weight, r.gamesPlayed, j(r.ratings), r.photoKey ?? null, r.headId ?? null, r.leaveFlag ?? null, r.leaveType ?? null],
   },
+  // TRAN (+ PLSS.WTLS): one row per transfer; stale rows go with the commit's purge of older snapshots like every spec here
+  transfers: { table: 'transfers', columns: ['pgid', 'to_tgid', 'tryr', 'trac', 'wtls'], values: (r) => [r.pgid, r.toTgid, r.year, r.active, r.weight ?? null] },
   coaches: {
     table: 'coaches',
     columns: ['ccid', 'tgid', 'first_name', 'last_name', 'position_code', 'user_controlled', 'age', 'prestige', 'off_playbook', 'sim_rp_off', 'sim_rp_def', 'career_wins', 'career_losses', 'season_wins', 'season_losses', 'raw_json'],
     values: (r) => [r.ccid, r.tgid, r.firstName, r.lastName, r.positionCode, b(r.userControlled), r.age, r.prestige, r.offPlaybook, r.simRunPassOff, r.simRunPassDef, r.careerWins, r.careerLosses, r.seasonWins, r.seasonLosses, j(r.raw)],
   },
   depthChart: { table: 'depth_chart', columns: ['tgid', 'pos', 'depth', 'pgid'], values: (r) => [r.tgid, r.pos, r.depth, r.pgid] },
+  formationSubs: { table: 'formation_subs', columns: ['tgid', 'side', 'set_id', 'slot', 'pgid'], values: (r) => [r.tgid, r.side, r.setId, r.slot, r.pgid] },
   schedule: {
     table: 'games', seasonScoped: true,
     columns: ['season_year', 'week', 'game_no', 'status', 'home_tgid', 'away_tgid', 'home_score', 'away_score', 'stadium_id', 'kickoff_minutes', 'day_of_week', 'week_type', 'overtime', 'user_played', 'user_team_game', 'cpu_pick', 'home_pick', 'source'],
@@ -39,12 +45,12 @@ export const IMPORT_TABLES: Record<string, TableSpec> = {
   allAmericans: { table: 'all_americans', seasonScoped: true, columns: ['season_year', 'pgid', 'cgid', 'pos', 'team_type'], values: (r, c) => [c.seasonYear, r.raw.PGID, r.raw.CGID, r.raw.PPOS, r.raw.TTYP] },
   teamSeasonStats: { table: 'team_season_stats', seasonScoped: true, columns: ['season_year', 'tgid', 'stats_json'], values: (r, c) => [c.seasonYear, r.TGID, j(r)] },
   teamHistory: { table: 'team_history', columns: ['tgid', 'season_year', 'wins', 'losses'], values: (r) => [r.TGID, 2013 + r.SEYR, r.WINS, r.LOSE] },
-  playerSeasonStats: { table: 'player_season_stats', seasonScoped: true, columns: ['season_year', 'kind', 'pgid', 'stats_json'], values: (r, c) => [c.seasonYear, r.kind, r.PGID, j(r)] },
+  playerSeasonStats: { table: 'player_season_stats', seasonScoped: true, keep: true, columns: ['season_year', 'kind', 'pgid', 'stats_json', 'uid'], values: (r, c) => [c.seasonYear, r.kind, r.PGID, j(r), r.uid ?? null] },
   recruitVisits: { table: 'recruit_visits', columns: ['tgid', 'prsi', 'week', 'value', 'mvp', 'nfgz', 'nfgm'], values: (r) => [r.tgid, r.prsi, r.week, r.value, r.mvp, r.nfgz, r.nfgm] },
   gameLogs: {
-    table: 'game_logs', seasonScoped: true,
-    columns: ['season_year', 'kind', 'week', 'game_no', 'pgid', 'tgid', 'stats_json'],
-    values: (r, c) => [c.seasonYear, r.kind, r.SEWN, r.SGNM, r.PGID ?? r.TGID ?? 0, r.TGID ?? null, j(r)],
+    table: 'game_logs', seasonScoped: true, weekScoped: true,
+    columns: ['season_year', 'kind', 'week', 'game_no', 'pgid', 'tgid', 'stats_json', 'uid'],
+    values: (r, c) => [c.seasonYear, r.kind, r.SEWN, r.SGNM, r.PGID ?? r.TGID ?? 0, r.TGID ?? null, j(r), r.uid ?? null],
   },
   recruits: {
     table: 'recruits',

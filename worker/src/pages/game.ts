@@ -38,9 +38,14 @@ export async function gamePage(ctx: PageCtx, week: number, gameNo: number) {
     ${side(home, true)}</section>`;
   // Supersim: the acting member's own current-week game, not yet played by the console (or already simulated here: replay).
   const canSim = env.SUPERSIM_ENABLED === 'true' && !!ctx.account && allowedGame(dyn, ctx.member ?? null, g) && (!played || g.source === 'supersim');
-  const live = canSim && !played ? await db.prepare("SELECT status, json_extract(state_json, '$.q') AS q, json_extract(state_json, '$.score[0]') AS a, json_extract(state_json, '$.score[1]') AS h FROM supersim_live WHERE dynasty_id=? AND season_year=? AND week=? AND game_no=?").bind(d, y, g.week, g.game_no).first<{ status: string; q: number; a: number; h: number }>() : null;
-  const cta = g.source === 'supersim' ? 'Supersim result' : live?.status === 'live' ? `Resume your Supersim game (${live.a}-${live.h}, Q${live.q})` : 'Coach this game in Supersim';
-  const simLink = canSim ? html`<p class="sim-cta"><a class="btn" href="/d/${dyn.slug}/supersim">${cta}</a> <span class="muted">${g.source === 'supersim' ? 'Official result recorded; the console picks it up on load.' : 'Call every play from your real playbook; the final is recorded for the console.'}</span></p>` : html``;
+  // the live Supersim row (if any): the coach's resume line, or a Watch link for everyone else while it is being coached
+  const live = env.SUPERSIM_ENABLED === 'true' && !played ? await db.prepare("SELECT status, json_extract(state_json, '$.q') AS q, json_extract(state_json, '$.score[0]') AS a, json_extract(state_json, '$.score[1]') AS h FROM supersim_live WHERE dynasty_id=? AND season_year=? AND week=? AND game_no=?").bind(d, y, g.week, g.game_no).first<{ status: string; q: number; a: number; h: number }>() : null;
+  const qtr = (q: number) => (q > 4 ? 'OT' : `Q${q}`);
+  const cta = g.source === 'supersim' ? 'Supersim result' : live?.status === 'live' ? `Resume your Supersim game (${live.a}-${live.h}, ${qtr(live.q)})` : 'Coach this game in Supersim';
+  const watchUrl = `/d/${dyn.slug}/supersim/watch/${g.week}/${g.game_no}`;
+  const simLink = canSim ? html`<p class="sim-cta"><a class="btn" href="/d/${dyn.slug}/supersim">${cta}</a> <span class="muted">${g.source === 'supersim' ? 'Official result recorded; the console picks it up on load.' : 'Call every play from your real playbook; the final is recorded for the console.'}</span></p>`
+    : live?.status === 'live' ? html`<p class="sim-cta"><a class="btn light" href="${watchUrl}"><i class="live-dot"></i>Watch live (${live.a}-${live.h}, ${qtr(live.q)})</a> <span class="muted">This game is being coached in Supersim right now; dynasty members can follow it play by play.</span></p>`
+    : live?.status === 'final' ? html`<p class="sim-cta"><a class="btn light" href="${watchUrl}">Supersim final ${live.a}-${live.h} · replay</a> <span class="muted">Coached in Supersim; the console records the result at the advance.</span></p>` : html``;
   const body = played ? await boxScore(env, dyn.id, y, g, away, home, dyn.slug) : await preview(env, dyn.id, y, away, home, dyn.slug);
   return layout({ strip: ctx.strip, member: ctx.member, members: ctx.members, path: ctx.url.pathname, title: `${away.name} at ${home.name}`, siteName: env.SITE_NAME, dyn, section: 'schedule', body: html`${header}${simLink}${body}`, wide: true });
 }

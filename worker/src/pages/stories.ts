@@ -6,9 +6,10 @@ import { layout, box } from '../layout.js';
 import { getTeams, getStories, getGames, teamMap, listWebStories, getWebStory, insertWebStory, updateWebStory, setWebStoryImage, deleteWebStory, type WebStory, type WebStoryInput, type TeamRow, type GameRow, type MemberRow } from '../db/queries.js';
 import { redirect } from '../session.js';
 import { listCaptures, getCapture } from '../db/visits.js';
+import { listConsoleStories, getConsoleStory, setRecapText, STORY_KINDS, RECAP_PROMPT, type ConsoleStory } from '../db/wire.js';
 import { teamLink, teamLogo, weekLabel, gameHref } from './common.js';
 
-const TITLE_MAX = 120, BODY_MAX = 12000, IMAGE_MAX = 5 * 1024 * 1024;
+const TITLE_MAX = 120, BODY_MAX = 12000, IMAGE_MAX = 5 * 1024 * 1024, RECAP_MAX = 5000; // a console story body holds 5,120 bytes
 const IMAGE_TYPES: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 const enc = encodeURIComponent;
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : NaN; };
@@ -29,8 +30,32 @@ function storyCard(ctx: PageCtx, s: WebStory, tm: Map<number, TeamRow>): Raw {
     : '';
   return html`<article class="box wire-story" id="story-${s.id}">${img ? html`<img class="story-img" src="${img}" alt="">` : ''}
     <div class="wire-text"><h2>${s.title}</h2>
-    <p class="byline">By <strong>${s.author_persona}</strong> · ${weekLabel(s.week)}${t ? html` · ${teamLogo(t, 'xs')} ${teamLink(dyn.slug, t)}` : ''}${game}${s.updated_at ? html` · <span class="muted">edited</span>` : ''}</p>
+    <p class="byline">By <strong>${s.author_persona}</strong> · ${weekLabel(s.week)}${t ? html` · ${teamLogo(t, 'xs')} ${teamLink(dyn.slug, t)}` : ''}${game}${s.updated_at ? html` · <span class="muted">edited</span>` : ''}${onConsole(s) ? html` · <span class="on-console" title="Delivered to the in-game Dynasty Wire">On the console</span>` : ''}</p>
     <div class="story-body">${storyBody(s.body)}</div>${actions}</div></article>`;
+}
+
+// A member story is on the console when the league server delivered its current version (title/body edit + photo).
+const onConsole = (s: WebStory) => !!s.wire_version && s.wire_version === `${s.updated_at ?? s.created_at}|${s.image_key ?? ''}`;
+
+// A story the console uploaded to its Dynasty Wire: a game or weekly recap (text the console generated from the box
+// score) or a story a member wrote in-game, with the photo it attached.
+function consoleCard(ctx: PageCtx, s: ConsoleStory, tm: Map<number, TeamRow>): Raw {
+  const t = s.team_tgid ? tm.get(s.team_tgid) : undefined;
+  const img = s.photo_key ? storyImageUrl({ image_key: s.photo_key }) : null;
+  const title = s.title || s.headline || STORY_KINDS[s.kind] || 'Story';
+  // A game recap carries the console's prompt until the coach writes their side of the story here; it then goes back
+  // into the recap on the console (league server wire.mjs replaces the recap's text block).
+  const isRecap = s.kind === 'game-recap';
+  const mayWrite = isRecap && !!ctx.member && (ctx.member.commissioner === 1 || (s.team_tgid !== null && ctx.member.tgid === s.team_tgid));
+  const consoleText = s.body && !(isRecap && s.body.startsWith(RECAP_PROMPT)) ? s.body : '';
+  const recap = s.recap_text ? html`<div class="story-body recap-side"><p class="kicker">${s.recap_by ?? 'Coach'}'s side of the story${s.recap_delivered_at && s.recap_delivered_at === s.recap_at ? html` · <span class="on-console">On the console</span>` : html` · <span class="muted">reaches the console when the league server syncs</span>`}</p>${storyBody(s.recap_text)}</div>` : '';
+  const form = mayWrite ? html`<details class="recap-form"${s.recap_text ? '' : ' open'}><summary>${s.recap_text ? 'Edit your side of the story' : 'Tell everyone your side of the story'}</summary>
+    <form method="post" action="/d/${ctx.dyn.slug}/stories/recap/${s.xms_id}"><textarea name="text" rows="6" maxlength="${RECAP_MAX}" required>${s.recap_text ?? ''}</textarea>
+    <p class="muted">Shows on the in-game Dynasty Wire with this recap. Plain text, up to ${RECAP_MAX.toLocaleString('en-US')} characters.</p><button class="btn sm">Save recap</button></form></details>` : '';
+  return html`<article class="box wire-story console-story" id="xms-${s.xms_id}">${img ? html`<img class="story-img" src="${img}" alt="${s.caption ?? ''}">` : ''}
+    <div class="wire-text"><p class="kicker">${STORY_KINDS[s.kind] ?? 'Story'} · from the console</p><h2>${title}</h2>
+    <p class="byline">${s.author_persona ? html`By <strong>${s.author_persona}</strong> · ` : ''}${s.week !== null ? weekLabel(s.week) : ''}${t ? html` · ${teamLogo(t, 'xs')} ${teamLink(ctx.dyn.slug, t)}` : ''}</p>
+    ${s.headline && s.headline !== title ? html`<p class="deck">${s.headline}</p>` : ''}${consoleText ? html`<div class="story-body">${storyBody(consoleText)}</div>` : ''}${recap}${form}${img && s.caption ? html`<p class="muted cap-line">Photo: ${s.caption}</p>` : ''}</div></article>`;
 }
 
 // /d/<slug>/stories: member stories newest first, then the game's headlines by week.
@@ -39,13 +64,14 @@ export async function storiesPage(ctx: PageCtx) {
   const db = env.DB, d = dyn.id, y = dyn.season_year;
   const tm = teamMap(await getTeams(db, d));
   const week = url.searchParams.get('week');
-  const [web, stories] = await Promise.all([listWebStories(db, d), getStories(db, d, y, week !== null ? { week: Number(week) } : { limit: 200 })]);
+  const [web, stories, fromConsole] = await Promise.all([listWebStories(db, d), getStories(db, d, y, week !== null ? { week: Number(week) } : { limit: 200 }), listConsoleStories(db, d).catch(() => [] as ConsoleStory[])]);
   const byWeek = new Map<number, typeof stories>();
   for (const s of stories) { if (!byWeek.has(s.week)) byWeek.set(s.week, []); byWeek.get(s.week)!.push(s); }
   const q = url.searchParams;
   const flash = q.get('saved') ? html`<p class="flash">Story published.</p>` : q.get('deleted') ? html`<p class="flash">Story deleted.</p>` : q.get('err') ? html`<p class="flash err">${q.get('err')}</p>` : html``;
   const body = html`<div class="wire-head"><h2>News Wire</h2>${member ? html`<a class="btn" href="/d/${dyn.slug}/stories/new">Write a story</a>` : ''}</div>${flash}
   ${web.length ? web.map((s) => storyCard(ctx, s, tm)) : html`<p class="muted">No member stories yet.${member ? ' Be the first to write one.' : ''}</p>`}
+  ${fromConsole.length ? html`<h3 class="wire-sub">In-game Dynasty Wire</h3><p class="muted">Recaps and stories posted from the console.</p>${fromConsole.map((s) => consoleCard(ctx, s, tm))}` : ''}
   <h3 class="wire-sub">From the game</h3><p class="muted">Headlines the game generates at each advance.</p>
   ${[...byWeek.entries()].sort((a, b) => b[0] - a[0]).map(([w, list]) => box(weekLabel(w), html`<ul class="headlines">${list.map((s) => html`<li><strong>${s.headline}</strong>${s.tgid ? html` <span class="muted">· ${teamLink(dyn.slug, tm.get(s.tgid))}</span>` : ''}<br>${s.text}</li>`)}</ul>`))}`;
   return layout({ strip: ctx.strip, member: ctx.member, members: ctx.members, path: ctx.url.pathname, title: 'News Wire', siteName: env.SITE_NAME, dyn, section: 'stories', body });
@@ -94,6 +120,16 @@ export async function storyAction(ctx: PageCtx, a: string, b?: string): Promise<
   const list = `/d/${dyn.slug}/stories`;
   const fail = (to: string, msg: string) => redirect(`${to}?err=${enc(msg)}`);
   if (!member) return fail(list, ctx.locked ? 'Sign in from the top bar to write a story.' : 'Pick who you are in the top bar to write a story.');
+  if (a === 'recap') { // POST /d/<slug>/stories/recap/<xmsId>: the coach's side of the story for a console game recap
+    const s = await getConsoleStory(db, d, num(b));
+    if (!s || s.kind !== 'game-recap') return notFound('No such recap');
+    if (member.commissioner !== 1 && member.tgid !== s.team_tgid) return fail(list, 'Only the coach of that team can write this recap.');
+    let form: FormData; try { form = await req!.formData(); } catch { return fail(list, 'Could not read the form.'); }
+    const text = String(form.get('text') ?? '').replace(/\r\n/g, '\n').trim().slice(0, RECAP_MAX);
+    if (!text) return fail(list, 'The recap is empty.');
+    await setRecapText(db, d, s.xms_id, text, member.persona);
+    return redirect(`${list}?saved=1#xms-${s.xms_id}`);
+  }
   const isNew = a === 'new';
   const id = isNew ? NaN : num(a);
   const existing = !isNew && Number.isInteger(id) ? await getWebStory(db, d, id) : null;

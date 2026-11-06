@@ -1,0 +1,98 @@
+<?xml version="1.0" ?><root>
+  <partType name="jersey"/>
+  <partType name="helmet"/>
+  <partType name="pants"/>
+  <partType name="socks"/>
+  <partType name="shoes"/>
+
+  <officialType name="Home"/>
+  <officialType name="Away"/>
+
+  <part name="Gray" type="helmet">
+    <bigfile name="D1AAMW_helmet_2007_gray_big"/>
+    <scene name="D1AAMW_HELMET_2007_GRAY"/>
+    <official name="Home"/>
+    <official name="Away"/>
+  </part>
+
+  <part name="Red" shade="dark" type="jersey">
+    <bigfile name="D1AAMW_jersey_2007_blue_big"/>
+    <scene name="D1AAMW_JERSEY_2007_BLUE"/>
+    <kerningTable name="D1AAMW_JERSEY_2007_BLUE_NAME"/>
+    <fontColorTexture name="D1AAMW_JERSEY_2007_BLUE_NAME_DECAL"/>
+    <numberColorTexture name="D1AAMW_JERSEY_2007_BLUE_NUMS_DECAL"/>
+    <nameScaleAtMin value="1.0"/>
+    <nameMinWidth value="0.6"/>
+    <nameMaxWidth value="0.6"/>
+    <numberSpacingOne value="0.3"/>
+    <uvSet value="2"/>
+    <official name="Home"/>
+  <decalUV value="-0.1400000006,0.2399998307,0.0700000003,0.03500000015"/></part>
+  <part name="White" shade="light" type="jersey">
+    <bigfile name="D1AASE_jersey_2007_white_big"/>
+    <scene name="D1AASE_JERSEY_2007_WHITE"/>
+    <kerningTable name="D1AASE_JERSEY_2007_WHITE_NAME"/>
+    <fontColorTexture name="D1AASE_JERSEY_2007_WHITE_NAME_DECAL"/>
+    <numberColorTexture name="D1AASE_JERSEY_2007_WHITE_NUMS_DECAL"/>
+    <nameScaleAtMin value="1.0"/>
+    <nameMinWidth value="0.6"/>
+    <nameMaxWidth value="0.6"/>
+    <numberSpacingOne value="0.3"/>
+    <uvSet value="0"/>
+    <official name="Away"/>
+  <decalUV value="-0.09499999881,0.27700001,0.0700000003,0.03500000015"/></part>
+
+  <part name="Red" shade="light" type="jersey">
+    <bigfile name="D1AAMW_jersey_2007_blue_big"/>
+    <scene name="D1AAMW_JERSEY_2007_BLUE"/>
+    <kerningTable name="D1AAMW_JERSEY_2007_BLUE_NAME"/>
+    <fontColorTexture name="D1AAMW_JERSEY_2007_BLUE_NAME_DECAL"/>
+    <numberColorTexture name="D1AAMW_JERSEY_2007_BLUE_NUMS_DECAL"/>
+    <nameScaleAtMin value="1.0"/>
+    <nameMinWidth value="0.6"/>
+    <nameMaxWidth value="0.6"/>
+    <numberSpacingOne value="0.3"/>
+    <uvSet value="2"/>
+  <decalUV value="-0.1400000006,0.2399998307,0.0700000003,0.03500000015"/></part>
+  <part name="White" shade="dark" type="jersey">
+    <bigfile name="D1AASE_jersey_2007_white_big"/>
+    <scene name="D1AASE_JERSEY_2007_WHITE"/>
+    <kerningTable name="D1AASE_JERSEY_2007_WHITE_NAME"/>
+    <fontColorTexture name="D1AASE_JERSEY_2007_WHITE_NAME_DECAL"/>
+    <numberColorTexture name="D1AASE_JERSEY_2007_WHITE_NUMS_DECAL"/>
+    <nameScaleAtMin value="1.0"/>
+    <nameMinWidth value="0.6"/>
+    <nameMaxWidth value="0.6"/>
+    <numberSpacingOne value="0.3"/>
+    <uvSet value="0"/>
+  <decalUV value="-0.09499999881,0.27700001,0.0700000003,0.03500000015"/></part>
+
+  <part name="White" type="pants">
+    <bigfile name="D1AASE_pantsx_2007_white_big"/>
+    <scene name="D1AASE_PANTSX_2007_WHITE"/>
+    <official name="Home"/>
+    <official name="Away"/>
+  </part>
+
+  <part name="White" type="socks">
+    <bigfile name="generic_socksx_white_big"/>
+    <scene name="GENERIC_SOCKSX_WHITE"/>
+    <official name="Home"/>
+    <official name="Away"/>
+  </part>
+  <part name="Black" type="socks">
+    <bigfile name="generic_socksx_black_big"/>
+    <scene name="GENERIC_SOCKSX_BLACK"/>
+  </part>
+
+  <part name="White" type="shoes">
+    <bigfile name="generic_shoesx_whiwhi_big"/>
+    <scene name="generic_shoesx_whiwhi"/>
+    <official name="Home"/>
+    <official name="Away"/>
+  </part>
+  <part name="Black" type="shoes">
+    <bigfile name="generic_shoesx_blabla_big"/>
+    <scene name="generic_shoesx_blabla"/>
+  </part>
+</root>
