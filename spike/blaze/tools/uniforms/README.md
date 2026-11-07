@@ -80,6 +80,28 @@ set has no Home/Away rows, and such a team crashes when a game loads. `node make
 `~/.ncaa-bridge/config.json`) and beside this script; every member's install needs the same file. Check a league
 file's teams with the slot report in the project notes (2026-11-06) before relying on an opponent.
 
+`node make-coming-soon-sets.mjs [--library <FCS_Team_Library>] [--only SLOT,SLOT] [--no-install] [--force]` gives all
+eleven, plus Robert Morris (NOTDAM, whose mod XML lists no parts at all) and Stonehill (CLEMSO, whose archive XML still
+dresses it in Delaware's art), a real set to start from:
+
+| Slot | Team | What it gets |
+| --- | --- | --- |
+| NILLIN, BALLST, EMICHI, CMICHI, WMICHI, HAWAII, NOTDAM | Central Connecticut, Duquesne, Merrimack, Sacred Heart, Saint Francis, Presbyterian, Robert Morris | placeholder set in the Teambuilder team's colours: helmet with its logo, home and away jersey with matching numbers, two pants |
+| WYOMIN, BOISES, UNLVXX, CLEMSO | Davidson, Drake, St. Thomas, Stonehill | the same placeholder set from school colours and the team's ESPN logo in `archive/logos/teams` (Davidson and Drake are still encrypted in the Teambuilder library, St. Thomas and Stonehill are not in it) |
+| NMEXST | Richmond | XML for the mod's own RICHMO art (already in FCS_DLC_PATRIOT, nothing pointed at it) |
+| TOLEDO | Long Island | XML for the mod's own LIUXXX art; its blue jersey ships under a helmet name and is copied as `LIUXXX_JERSEY_2020_BLUEX` |
+| DUKEXX | Villanova | its own XML (copied from the archive) plus a navy helmet option, `DUKEXX_HELMET_2026_NAVYBL`: the white helmet with the shell turned V navy and the V left where it is |
+
+Teambuilder saves carry no uniform art, only a recipe (colours, stripe and font numbers) the game draws at run time and
+two logos. The script reads the colours and the 128px logo from the save and paints them onto the mod's FCSXXX
+placeholder parts, with the COMING SOON text and FCS patches removed. Both jerseys get the school or nickname (`chest`
+in the script) below the collar, in the number colour and the jersey's own name font. Stripes and fonts are the
+placeholder's, so touch the sets up in the studio. Everything lands in the DLC folders and in `dist/coming-soon` (not in
+git), with PNG previews. Members need that whole folder, not just the XMLs.
+
+Re-running is safe after studio edits: `dist/coming-soon/installed.json` records what the script installed, and a file
+changed since is kept (the run says KEPT) unless you pass `--force`.
+
 Caveat: the mod's archive no longer holds the vanilla art under every generic-slot name (the "NW green helmet"
 entry is a West Virginia helmet, the Midwest jerseys are red/maroon/black, and so on); the Archive tab lists what
 each name really contains. The mod's own definitions want files that are not in this install: the placeholder set

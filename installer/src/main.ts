@@ -1,8 +1,9 @@
 // FCS-online: one executable that sets a member's RPCS3 up for the FCS mod online league (the roster/jersey patches,
-// the stop-gap uniform files, the league server address, the private PSN server), installs the FCS2026 roster save,
-// and starts the league server on the host's PC. Built into a single .exe by installer/build.mjs (Node SEA); the
-// payload (patch entries, uniform XMLs, optional roster save) is generated at build time from the project's private
-// files and embedded. Runs as a console wizard; every flag makes a step non-interactive.
+// the uniform sets and stop-gap uniform files, the league server address, the private PSN server), installs the FCS2026
+// roster save, and starts the league server on the host's PC. Built into a single .exe by installer/build.mjs (Node
+// SEA); the payload (patch entries, uniform XMLs, optional roster save) is generated at build time from the project's
+// private files and embedded, the uniform sets' bigfiles as the SEA asset uniform-pack.bin. Runs as a console wizard;
+// every flag makes a step non-interactive.
 //
 //   FCS-online.exe                       menu
 //   FCS-online.exe join   [--rpcs3 DIR] [--server IP] [--rpcn HOST:PORT] [--yes]
@@ -14,9 +15,11 @@ import path from 'node:path';
 import os from 'node:os';
 import readline from 'node:readline/promises';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import payload from '../generated/payload.json';
 
-interface Payload { builtAt: string; site: string; ppuHash: string; patches: { name: string; block: string; words: number }[]; uniforms: Record<string, string>; roster?: { dir: string; files: Record<string, string>; note: string } }
+interface UniformFile { folder: string; name: string; offset: number; size: number; sha1: string }
+interface Payload { builtAt: string; site: string; ppuHash: string; patches: { name: string; block: string; words: number }[]; uniforms: Record<string, string>; uniformSets?: UniformFile[]; roster?: { dir: string; files: Record<string, string>; note: string } }
 const P = payload as Payload;
 const GAME = 'BLUS31159';
 const args = process.argv.slice(2);
@@ -95,14 +98,41 @@ function patchStatus(rpcs3: string): string[] {
   return P.patches.map((p) => { const have = entries.get(p.name); const en = new RegExp(`^  "${p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}":\\n(?:[^\\n]*\\n){6}`, 'm').exec(c)?.[0]?.includes('Enabled: true'); return `${have ? (have === p.block ? 'installed' : 'DIFFERENT') : 'missing'}${have ? (en ? ', enabled' : ', NOT enabled') : ''}  ${p.name} (${p.words} words)`; });
 }
 
-// ---- uniforms: stop-gap XMLs into USRDIR\DLC\FCS_DLC_NEC ----------------------------------------------------------
+// ---- uniforms: stop-gap XMLs into USRDIR\DLC\FCS_DLC_NEC, uniform sets (bigfiles + XML) into their FCS_DLC_* folders ---
+// A DLC file this replaces is backed up outside the DLC folders (the studio's backup folder: a stray copy in a DLC folder
+// is one more file the game scans). A slot XML of the same name in another FCS_DLC folder is moved there too, so no slot
+// has two definitions.
 const dlcDir = (rpcs3: string) => path.join(rpcs3, 'dev_hdd0', 'game', GAME, 'USRDIR', 'DLC');
-function installUniforms(rpcs3: string): { written: string[]; same: string[]; missingDlc: boolean } {
-  const dlc = dlcDir(rpcs3); if (!fs.existsSync(dlc)) return { written: [], same: [], missingDlc: true };
-  const folder = path.join(dlc, 'FCS_DLC_NEC'); fs.mkdirSync(folder, { recursive: true });
-  const written: string[] = [], same: string[] = [];
-  for (const [name, text] of Object.entries(P.uniforms)) { const f = path.join(folder, name); if (fs.existsSync(f) && fs.readFileSync(f, 'latin1') === text) same.push(name); else { fs.writeFileSync(f, text, 'latin1'); written.push(name); } }
-  return { written, same, missingDlc: false };
+const DLC_BACKUP = path.join(process.env.LOCALAPPDATA || os.homedir(), 'ncaa-bridge', 'uniforms', 'backup');
+const sha1 = (b: Buffer) => createHash('sha1').update(b).digest('hex');
+function setAside(dlc: string, file: string): void { fs.mkdirSync(DLC_BACKUP, { recursive: true }); fs.renameSync(file, path.join(DLC_BACKUP, `${path.relative(dlc, file).replace(/[\\/]/g, '__')}.${stamp()}.bak`)); dlcBackups++; }
+let dlcBackups = 0;
+function backupDlc(dlc: string, file: string): void { if (!fs.existsSync(file)) return; fs.mkdirSync(DLC_BACKUP, { recursive: true }); fs.copyFileSync(file, path.join(DLC_BACKUP, `${path.relative(dlc, file).replace(/[\\/]/g, '__')}.${stamp()}.bak`)); dlcBackups++; }
+// uniform-pack.bin: the SEA asset in the exe; generated/uniform-pack.bin when the bundle runs under plain node
+function uniformPack(): Buffer | null {
+  try { const sea = require('node:sea'); if (sea.isSea()) return Buffer.from(sea.getAsset('uniform-pack.bin')); } catch { /* not a SEA build */ }
+  const f = path.resolve(__dirname, '..', 'generated', 'uniform-pack.bin'); return fs.existsSync(f) ? fs.readFileSync(f) : null;
+}
+function installUniforms(rpcs3: string): { written: string[]; same: string[]; setAside: string[]; bigfiles: { written: number; same: number }; missingDlc: boolean; missingPack: boolean } {
+  const res = { written: [] as string[], same: [] as string[], setAside: [] as string[], bigfiles: { written: 0, same: 0 }, missingDlc: false, missingPack: false };
+  const dlc = dlcDir(rpcs3); if (!fs.existsSync(dlc)) return { ...res, missingDlc: true };
+  const nec = path.join(dlc, 'FCS_DLC_NEC'); fs.mkdirSync(nec, { recursive: true });
+  for (const [name, text] of Object.entries(P.uniforms)) { const f = path.join(nec, name); if (fs.existsSync(f) && fs.readFileSync(f, 'latin1') === text) res.same.push(name); else { backupDlc(dlc, f); fs.writeFileSync(f, text, 'latin1'); res.written.push(name); } }
+  const sets = P.uniformSets ?? []; if (!sets.length) return res;
+  const pack = uniformPack(); if (!pack) return { ...res, missingPack: true };
+  const folders = fs.readdirSync(dlc).filter((f) => /^FCS_DLC_/i.test(f) && fs.statSync(path.join(dlc, f)).isDirectory());
+  for (const u of sets) {
+    const dest = path.join(dlc, u.folder, u.name), xml = /_MixAndMatch\.XML$/i.test(u.name);
+    if (xml) for (const other of folders) {
+      if (other.toLowerCase() === u.folder.toLowerCase()) continue;
+      for (const f of fs.readdirSync(path.join(dlc, other))) if (f.toLowerCase() === u.name.toLowerCase()) { setAside(dlc, path.join(dlc, other, f)); res.setAside.push(`${other}\\${f}`); }
+    }
+    if (fs.existsSync(dest) && sha1(fs.readFileSync(dest)) === u.sha1) { if (xml) res.same.push(u.name); else res.bigfiles.same++; continue; }
+    const bytes = pack.subarray(u.offset, u.offset + u.size); if (sha1(bytes) !== u.sha1) throw new Error(`uniform pack is damaged at ${u.folder}\\${u.name}`);
+    fs.mkdirSync(path.dirname(dest), { recursive: true }); backupDlc(dlc, dest); fs.writeFileSync(dest, bytes);
+    if (xml) res.written.push(`${u.folder}\\${u.name}`); else res.bigfiles.written++;
+  }
+  return res;
 }
 
 // ---- network: the game's custom config (IP swap -> league server, PSN -> RPCN) and config/rpcn.yml Host -------------
@@ -176,10 +206,17 @@ async function joinFlow(): Promise<void> {
   say('\n1. Game patches');
   const r = installPatches(rpcs3);
   for (const n of r.changed) say(`   installed/updated: ${n}`); for (const n of r.kept) say(`   already current:   ${n}`); say('   all entries enabled for 01.00 and 01.02 in config/patch_config.yml');
-  say('\n2. Stop-gap uniforms');
+  say('\n2. Uniforms (placeholder sets for the Coming Soon teams, stop-gap XMLs)');
   const u = installUniforms(rpcs3);
   if (u.missingDlc) say(`   the FCS mod DLC folder is missing (${dlcDir(rpcs3)}); install the FCS mod first, then run this again`);
-  else { for (const n of u.written) say(`   wrote ${n}`); for (const n of u.same) say(`   already there: ${n}`); }
+  else {
+    for (const n of u.written) say(`   wrote ${n}`);
+    if (u.same.length) say(`   already current: ${u.same.join(', ')}`);
+    if (u.bigfiles.written || u.bigfiles.same) say(`   uniform files: ${u.bigfiles.written} written, ${u.bigfiles.same} already current`);
+    for (const n of u.setAside) say(`   moved aside (same slot defined in another folder): ${n}`);
+    if (u.missingPack) say('   this exe has no uniform pack (built without it); only the stop-gap XMLs were installed');
+    if (dlcBackups) say(`   ${dlcBackups} replaced file(s) backed up in ${DLC_BACKUP}`);
+  }
   say('\n3. Network');
   for (const n of configureNetwork(rpcs3, server, rpcn)) say(`   ${n}`);
   if (P.roster && (flags.get('roster') === 'true' || (!YES && await confirm(`\n4. Install the roster save ${P.roster.dir} (up to 90 players per team; needs the patches above)?`, false)))) say(`   ${installRoster(rpcs3)}`);
@@ -193,6 +230,11 @@ async function statusFlow(): Promise<void> {
   for (const l of patchStatus(rpcs3)) say(`  ${l}`);
   const dlc = dlcDir(rpcs3); say(`  DLC folder: ${fs.existsSync(dlc) ? `${fs.readdirSync(dlc).filter((f) => f.startsWith('FCS_DLC_')).length} FCS_DLC folders` : 'MISSING (mod not installed)'}`);
   for (const n of Object.keys(P.uniforms)) say(`  uniform XML ${n}: ${fs.existsSync(path.join(dlc, 'FCS_DLC_NEC', n)) ? 'present' : 'missing'}`);
+  if (P.uniformSets?.length) {
+    const st = { current: 0, different: 0, missing: 0 }; const off: string[] = [];
+    for (const u of P.uniformSets) { const f = path.join(dlc, u.folder, u.name); const s = !fs.existsSync(f) ? 'missing' : sha1(fs.readFileSync(f)) === u.sha1 ? 'current' : 'different'; st[s]++; if (s !== 'current' && /_MixAndMatch\.XML$/i.test(u.name)) off.push(`${u.folder}\\${u.name} ${s}`); }
+    say(`  uniform sets: ${st.current} of ${P.uniformSets.length} files current, ${st.different} different, ${st.missing} missing${off.length ? ` (${off.join('; ')})` : ''}`);
+  }
   const custom = path.join(rpcs3, 'config', 'custom_configs', `config_${GAME}.yml`);
   if (fs.existsSync(custom)) { const t = fs.readFileSync(custom, 'utf8'); for (const k of ['Internet enabled', 'PSN status', 'IP swap list']) say(`  Net ${k}: ${/^  (Internet enabled|PSN status|IP swap list): (.*)$/m.exec(t.split('\n').find((l) => l.startsWith(`  ${k}:`)) ?? '')?.[2] ?? '?'}`); } else say('  no custom game config');
   const rp = path.join(rpcs3, 'config', 'rpcn.yml'); say(`  RPCN: ${fs.existsSync(rp) ? `host ${/^Host: (.*)$/m.exec(fs.readFileSync(rp, 'utf8'))?.[1] ?? '?'}, account ${/^NPID: "?([^"\n]+)"?$/m.test(fs.readFileSync(rp, 'utf8')) ? 'present' : 'none'}` : 'no rpcn.yml'}`);
@@ -201,7 +243,7 @@ async function statusFlow(): Promise<void> {
 async function main(): Promise<void> {
   let mode = words[0] ?? flags.get('mode');
   if (!mode) {
-    say(`FCS online league setup (built ${P.builtAt})\n  1. Join a league: set this PC's RPCS3 up (patches, uniforms, server address, PSN server)\n  2. Install the FCS2026 roster save${P.roster ? '' : ' (not in this build)'}\n  3. Host a league: start the league server from a project checkout\n  4. Status of this PC's setup\n  5. Quit`);
+    say(`FCS online league setup (built ${P.builtAt})\n  1. Join a league: set this PC's RPCS3 up (patches, uniform sets, server address, PSN server)\n  2. Install the FCS2026 roster save${P.roster ? '' : ' (not in this build)'}\n  3. Host a league: start the league server from a project checkout\n  4. Status of this PC's setup\n  5. Quit`);
     mode = { '1': 'join', '2': 'roster', '3': 'host', '4': 'status' }[await ask('Choice', '1')] ?? 'quit';
   }
   if (mode === 'join') await joinFlow();

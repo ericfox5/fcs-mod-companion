@@ -2085,3 +2085,62 @@ First full Supersim game on the new engine (Brown 37, Furman 36, week 1 of 2014,
   locked-position name lookup 0xca768c indexes a 6-byte abbreviation table that includes LS (24) and 3DRB (25), fine.
 - Consequence to tell members: any player edited in the in-game editor since the jersey #0 entry was installed may
   have had his number replaced by his team's lowest free number when the edit was confirmed.
+
+## 2026-11-07 (evening): QA'd FCS2026 roster shipped
+
+- The 90-man FCS2026 save got a QA pass in the roster builder (outside the repo; Rosters/2026/control/README.md):
+  61 staff cards removed, #0 parsed, refreshed and position-assigned jersey numbers, every added player's skin tone
+  checked by eye, and a name + team prior (Rosters/tools/src/faces/name_prior.py) for faces the photo cannot decide.
+  USR-DATA sha 93a7e59d…, 11,305 PLAY rows.
+- FCS-online.exe rebuilt with it (`npm run build:installer -- --roster <Rosters/2026/out/BLUS31159-ROSTER-FCS2026>`,
+  8 entries / 1002 words, exe sha 5245be53…; copy at Desktop\FCS\FCS-online.exe, previous one .bak-2026-11-07).
+- Site download replaced in place: R2 `ncaa-online-saves/downloads/FCS-2026-Roster.zip` (`wrangler r2 object put …
+  --content-type application/zip --remote`; wrangler 4 writes locally without `--remote`). Same layout as before
+  (save folder at the zip root) plus a README.txt saying the save needs the FCS-online.exe patches. No code deploy:
+  the landing-page link is unchanged. The 69-man zip it replaced (USR-DATA 6acd554d…) is in
+  %LOCALAPPDATA%\ncaa-bridge\backups\2026-11-07-roster-download.
+
+## 2026-11-07 — Coming Soon slots: Teambuilder placeholder sets
+
+- FCS_Team_Library (Sooner Fan Sports Sim Network, 2022, 128 Teambuilder teams by old conference): each
+  BLUS31159-TEAM-### USR-DATA is two DXT3 logos as DDS (256x256 wordmark, 128x128 helmet logo; Merrimack's 128 is a
+  Nike swoosh) followed by an EA DB (TEAM, TUNI x2, COCH, CSKL, CAMD, STAD, SZIP, CITY, PLPS, PLAY, DCHT). TEAM.CSAT is
+  CASXXX; no uniform art anywhere. TUNI is the recipe: colours as (tag << 24) | RGB (tag 1 primary, 2 secondary,
+  0 custom, 0 = unused), CJOB/CJTB home/away jersey body, JOFP/JOFT and JTFP/JTFT number fill/trim, JONG/JTNG name,
+  CHOF helmet shell (best guess), CPAC/CPAB pants; plus stripe/font numbers and chest text. The CAS templates the game
+  draws them with are not under any name guessed in qkl_fe2ig.ast. Davidson and Drake (Pioneer folder) are still
+  encrypted (only HED-DATA decrypted); St. Thomas and LIU (Sharks) are not in the library.
+- `spike/blaze/tools/uniforms/make-coming-soon-sets.mjs` (installed today): CCSU NILLIN, Duquesne BALLST (replaces its
+  Wagner stop-gap), Merrimack EMICHI, Sacred Heart CMICHI, Saint Francis WMICHI, Presbyterian HAWAII get
+  SLOT_{HELMET,JERSEY,PANTSX}_2026_* sets cloned from FCSXXX_*_2042_* (scenes byte-identical to Hampton's apart from
+  names), recoloured to TUNI with the logo on both helmet sides. Richmond NMEXST and LIU TOLEDO already had mod art in
+  the DLC folders (RICHMO_* in PATRIOT, LIUXXX_* in NEC) with no XML; they get XMLs only. LIUXXX_HELMET_2020_BLUEX is a
+  jersey (TENNES scene); copied as LIUXXX_JERSEY_2020_BLUEX. Davidson WYOMIN, Drake BOISES, St. Thomas UNLVXX: Wagner
+  stop-gap in FCS_DLC_PIONEER. All bigfiles parse, hashes match, scene references resolve. Not yet seen in game. The
+  distribution copy is `tools/uniforms/dist/coming-soon` (23 MB); every member and the PS3 need it.
+- Same day, second pass: Robert Morris (TGID 68) sits on NOTDAM, whose archive XML is part types only (no parts, no
+  officials); it gets a Teambuilder set (FCS Independents TEAM-003, navy/white/red). Davidson WYOMIN, Drake BOISES and
+  St. Thomas UNLVXX now get the same placeholder set from school colours (sampled from the logos) and their ESPN logos
+  (archive/logos/teams 2166/2181/2900), replacing the Wagner stop-gaps. All 12 slots' XMLs have Home and Away rows whose
+  bigfiles exist. A scan of all 131 mapped teams found every Home/Away part resolvable once the `.ast.edat` DLC files
+  (MVFC: SDSU, UNI, the Madden-named RUSH parts) and qkl_misc/qkl_patch are counted; four mod XMLs have no Home/Away
+  rows at all: ETSU GEORST, Prairie View AUBURN, Yale TEXASX (no officials) and UAlbany BOSTON ("Black/Yellow").
+  Not known to crash; untouched.
+- Third pass: Stonehill (TGID 21) is on CLEMSO, Delaware's old slot; the archive CLEMSO_MIXANDMATCH still dresses it
+  in Delaware's art (archive CLEMSO_* bigfiles, Home/Away/Blackout). A DLC CLEMSO XML now points at a Stonehill
+  placeholder set (purple #372d7d / black, ESPN logo 284 with the ® speck dropped). Every placeholder jersey carries the
+  school or nickname where COMING SOON sat (centre 511,1603 of the 1024x2048 body; the front, below the collar), set
+  in the jersey's own NAME_DECAL font: its kerning table is "40 / 2 / ABC…Z0-9#-  " then x/width pairs, cells 64x128,
+  letters on rows 14..107. Villanova (DUKEXX, archive XML) gets a DLC XML = the archive one plus a non-official helmet
+  part DUKEXX_HELMET_2026_NAVYBL: the white helmet (archive DUKEXX_helmet_2013_Black1, flat 255 shell) with everything
+  outside the V (largest ink piece plus what it encloses), the light silhouette and the hardware strip painted #002463,
+  the V's own navy (the silhouette's edges recoloured by projection, the seam dots under each V gone). Installed; a manifest (dist/coming-soon/installed.json) now keeps studio edits from being overwritten.
+- FCS-online.exe now ships the uniform sets: build.mjs packs every file under tools/uniforms/dist/coming-soon/FCS_DLC_*
+  (bytes from the live DLC folder when present, so studio touch-ups ship) into generated/uniform-pack.bin, a SEA asset
+  (71 files, 31 MB; payload.uniformSets indexes folder/name/offset/size/sha1) and drops stop-gap XMLs whose slot has a
+  set (BALLST). `join` writes them into their FCS_DLC_* folders, backs replaced DLC files up to
+  %LOCALAPPDATA%\ncaa-bridge\uniforms\backup and moves a same-named slot XML out of any other FCS_DLC folder; `status`
+  counts current/different/missing. Tested: bundle and exe on fake installs (stale BALLST stop-gap replaced, a duplicate
+  WYOMIN XML in NEC moved aside, second run all current, files byte-identical to the live DLC) and exe status on the real
+  install (71/71 current). 122 MB, sha256 7f65c7d7…; copy at Desktop\FCS\FCS-online.exe (previous one
+  .bak-2026-11-07-pre-uniforms).
