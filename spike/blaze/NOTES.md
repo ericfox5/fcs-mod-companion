@@ -1851,3 +1851,16 @@ First full Supersim game on the new engine (Brown 37, Furman 36, week 1 of 2014,
   (69-man copy backed up in %LOCALAPPDATA%\ncaa-bridge\backups\2026-11-06-roster70); 69-man plans in 2026/_prev-70.
   UNTESTED in game: Rosters -> Load Roster -> ROSTER-FCS2026 with the patches on, then a throwaway dynasty + advance
   (the roster-save path at stride 100 / 0x1c0000 is the one remaining untested piece of the roster project).
+
+## 2026-11-06 — FCS-online.exe (installer/)
+
+- Node SEA single executable (91 MB: node.exe + a 2.5 MB bundle + the payload): `node installer/build.mjs --roster
+  <save folder>` -> installer/dist/FCS-online.exe (copy at Desktop\FCS\FCS-online.exe). Modes: join / roster / host /
+  status, flags --rpcs3 --server --rpcn --project --yes. The payload (patch entries from private/rpcs3-patches.yml,
+  the three stop-gap XMLs, the FCS2026 save) is generated at build time into installer/generated (gitignored).
+- Member setup it performs: patch entries merged by name into patches/imported_patch.yml and enabled in
+  config/patch_config.yml (CRLF preserved, backups *.bak-<stamp>), XMLs into USRDIR\DLC\FCS_DLC_NEC, custom config
+  Net = Connected / RPCN / IP swap "gosredirector.ea.com=<server>&&*.ea.com=<server>", rpcn.yml Host. It cannot create
+  the RPCN account (RPCS3 GUI) or run the league server without a checkout (host mode starts league.mjs from one).
+- Tests: a copy of the real config tree (entries "already current", no duplicate blocks, CRLF kept, RPCN host set),
+  an empty fake install (files created, DLC/custom-config warnings), the real install read-only (all enabled).
