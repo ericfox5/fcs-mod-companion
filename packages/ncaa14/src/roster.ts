@@ -36,18 +36,22 @@ export function rekeyStride(file: TdbFile, opts: { from: number; to: number }): 
   const play = file.table('PLAY');
   const teams = Math.floor(play.header.maxRecords / from);
   let rekeyed = 0, kept = 0, overflow = 0; const perTable: string[] = [];
+  // PGID everywhere; PLAY.POID too (the id a player was created with, keyed the same way: the roster tooling and the
+  // offline roster saves keep POID == PGID)
   for (const t of file.tables) {
-    if (!t.fieldMap.has('PGID')) continue;
-    const f = t.field('PGID'); const limit = 2 ** f.bits; let n = 0, k = 0, ov = 0;
-    for (let i = 0; i < t.recordCount; i++) {
-      const v = Number(t.get(i, 'PGID'));
-      if (v === PGID_NONE || v === 0) { k++; continue; }
-      const nv = pgidOf(teamOfPgid(v, from), slotOfPgid(v, from), to);
-      if (nv >= limit) { ov++; continue; }
-      t.set(i, 'PGID', nv); n++;
+    for (const col of ['PGID', 'POID']) {
+      if (!t.fieldMap.has(col) || (col === 'POID' && t.name !== 'PLAY')) continue;
+      const f = t.field(col); const limit = 2 ** f.bits; let n = 0, k = 0, ov = 0;
+      for (let i = 0; i < t.recordCount; i++) {
+        const v = Number(t.get(i, col));
+        if (v === PGID_NONE || v === 0) { k++; continue; }
+        const nv = pgidOf(teamOfPgid(v, from), slotOfPgid(v, from), to);
+        if (nv >= limit) { ov++; continue; }
+        t.set(i, col, nv); n++;
+      }
+      rekeyed += n; kept += k; overflow += ov;
+      if (n || ov) perTable.push(`${t.name}${col === 'POID' ? '.POID' : ''} ${n}${ov ? ` (${ov} left: would overflow ${f.bits} bits)` : ''}`);
     }
-    rekeyed += n; kept += k; overflow += ov;
-    if (n || ov) perTable.push(`${t.name} ${n}${ov ? ` (${ov} left: would overflow ${f.bits} bits)` : ''}`);
   }
   const oldMax = play.header.maxRecords;
   if (teams * to > oldMax) play.growTable(teams * to);
