@@ -127,12 +127,31 @@ export class TdbTable {
   removeRecord(i: number): void {
     const h = this.header;
     if (i < 0 || i >= h.currentRecords) throw new RangeError(`table ${this.name}: record ${i} out of range (${h.currentRecords} populated)`);
-    if (h.indexCount > 0 || hasExtraData(h)) throw new Error(`table ${this.name}: removing records from indexed or extra-data tables not supported`);
+    // index entries are 16-byte definitions ({4CC, 0x0101, field no, 1}), not per-record data, so they survive a removal
+    if (hasExtraData(h)) throw new Error(`table ${this.name}: removing records from extra-data tables not supported`);
     const L = h.lengthBytes, lastIdx = h.currentRecords - 1;
     if (i !== lastIdx) this.data.copyWithin(i * L, lastIdx * L, (lastIdx + 1) * L);
     this.data.fill(0, lastIdx * L, (lastIdx + 1) * L);
     h.currentRecords = lastIdx;
     if (this.storedRecords !== h.maxRecords) this.data = this.data.slice(0, lastIdx * L);
+  }
+
+  // Raise the capacity. Fixed-allocation tables (2/6/10/14) store every slot on disk, so their storage is extended with
+  // zeroed records; grow-on-demand tables only change the header. The allocation type is left as it is. Index entries
+  // are 16-byte definitions ({field name, flags, field number, 1}: the console's PLAY carries PGID and TGID, TEAM carries
+  // TGID), not per-row data, so they are kept as they are. Extra-data tables are refused (layout not understood).
+  growTable(newMaxRecords: number): void {
+    const h = this.header;
+    if (!Number.isInteger(newMaxRecords) || newMaxRecords < h.maxRecords) throw new RangeError(`table ${this.name}: cannot shrink maxRecords ${h.maxRecords} to ${newMaxRecords}`);
+    if (newMaxRecords > 0xffff) throw new RangeError(`table ${this.name}: maxRecords is a 16-bit field (${newMaxRecords})`);
+    if (hasExtraData(h)) throw new Error(`table ${this.name}: growing extra-data tables not supported`);
+    if (newMaxRecords === h.maxRecords) return;
+    if (this.storedRecords === h.maxRecords) {
+      const grown = new Uint8Array(newMaxRecords * h.lengthBytes);
+      grown.set(this.data);
+      this.data = grown;
+    }
+    h.maxRecords = newMaxRecords;
   }
 
   // Append a record and return its index. Fixed-allocation tables need a free slot; grow-on-demand

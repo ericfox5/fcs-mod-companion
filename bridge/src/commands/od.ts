@@ -6,11 +6,11 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { exportDynasty, decodeSeason, isPlayed, type DynastyExport, type Game } from '@ncaa/ncaa14';
+import { exportDynasty, decodeSeason, isPlayed, detectStride, freePgids, rosterSlots, PGID_STRIDE, STRIDES, type DynastyExport, type Game } from '@ncaa/ncaa14';
 import { WorkerApi } from '../api.js';
 import type { BridgeConfig } from '../config.js';
 import { loadOdStore, lockerIndex, lockerIndexAll, readLockerBlob, readLockerBlobAny, openDynastyFile, odFingerprint, odSlug, odName, consoleFileId, seasonGames, type OdDynasty, type OdGameResult, type OpenedDynastyFile } from '../od.js';
-import { patchDynasty, PATCH_FORMAT, NEW_TRANSFER_WEIGHT, BASE_YEAR, RECRUIT_FIRST_MAX, RECRUIT_LAST_MAX, WEIGHT_BASE, patchSetEmpty, type TransferPatch, type DepthPatch, type DynastyPatchSet, type RecruitPatch, type RecruitEdit } from '../dynasty-patch.js';
+import { patchDynasty, PATCH_FORMAT, NEW_TRANSFER_WEIGHT, BASE_YEAR, RECRUIT_FIRST_MAX, RECRUIT_LAST_MAX, WEIGHT_BASE, patchSetEmpty, type TransferPatch, type DepthPatch, type DynastyPatchSet, type RecruitPatch, type RecruitEdit, type CreatePlayerPatch } from '../dynasty-patch.js';
 import { pushExport, playerUids } from './import.js';
 import { syncCaptures } from './captures.js';
 import { loadPhotoIndex, attachPhotoKeys, photoDirsOf } from '../photos.js';
@@ -36,7 +36,18 @@ interface StartYearMemo { year: number; base: number; at: string; taken?: number
 // a commissioner's recruit lock (`od lock`): the prospect's interest in tgid is kept above the commit threshold on every
 // published copy until the console's file shows him committed there
 interface LockMemo { prsi: number; tgid: number; at: string }
-interface OdState { [did: string]: { fingerprint: string; slug: string; importId: number; at: string; eligibility?: { year: number; pending: number[]; done: number[] }; overhaul?: OverhaulMemo; startYear?: StartYearMemo; locks?: LockMemo[]; playoff?: PlayoffMemo; firstYear?: number } }
+// the roster stride the dynasty's files are keyed with (`od stride`, docs/roster-stride-inventory.md): published through
+// the dynasty-file copy until a console upload is keyed that way (taken); the console must run the matching game patch
+interface StrideMemo { stride: number; base: number; at: string; taken?: number }
+// players created from the bridge (`od players`): PLAY rows added through the dynasty-file copy until the console's
+// upload carries them (matched by team + last name)
+// batch: the `od players` run that queued the row; once the console's file carries any row of a batch, the rest of that
+// batch is known to have been skipped at patch time (no free slot) and is dropped with it
+type QueuedPlayer = CreatePlayerPatch & { batch?: string };
+interface PlayersMemo { pending: QueuedPlayer[]; at: string; base: number }
+// PLAY rows the bridge takes back out through the dynasty-file copy (`od repair`), until a console upload lacks them all
+interface RepairMemo { remove: number[]; restores?: number[]; at: string; base: number; note: string }
+interface OdState { [did: string]: { fingerprint: string; slug: string; importId: number; at: string; eligibility?: { year: number; pending: number[]; done: number[] }; overhaul?: OverhaulMemo; startYear?: StartYearMemo; locks?: LockMemo[]; playoff?: PlayoffMemo; firstYear?: number; stride?: StrideMemo; players?: PlayersMemo; repair?: RepairMemo } }
 const loadState = (): OdState => (existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, 'utf8')) : {});
 const saveState = (s: OdState): void => { mkdirSync(STATE_DIR, { recursive: true }); writeFileSync(STATE_FILE, JSON.stringify(s, null, 2)); };
 const stamp = () => new Date().toTimeString().slice(0, 8);
@@ -116,12 +127,14 @@ export async function syncWebEdits(cfg: BridgeConfig, d: OdDynasty, api = new Wo
   const plyz = new Map<number, PlyzRow>(players.map((r) => [r.PGID, r]));
   for (const r of transfers.plyz) plyz.set(r.PGID, { ...(plyz.get(r.PGID) ?? r), PLFL: r.PLFL as number, PTYP: r.PTYP as number });
   for (const r of eligible.plyz) plyz.set(r.PGID, { ...(plyz.get(r.PGID) ?? r), PRSD: 0 });
-  const recruits = pendingOverhaul(cfg, d); const startYear = pendingStartYear(cfg, d);
-  const patch: DynastyPatchSet = { transfers: transfers.newRows ? transfers.patches : [], depth, eligible: eligible.pgids, ...(recruits ? { recruits } : {}), ...(recruitEdits.length ? { recruitEdits } : {}), ...(startYear ? { startYear } : {}), ...(playoff ? { playoff } : {}) };
+  const recruits = pendingOverhaul(cfg, d); const startYear = pendingStartYear(cfg, d); const stride = pendingStride(cfg, d); const createPlayers = pendingCreatePlayers(cfg, d); const removePlayers = pendingRemovePlayers(cfg, d);
+  const patch: DynastyPatchSet = { transfers: transfers.newRows ? transfers.patches : [], depth, eligible: eligible.pgids, ...(recruits ? { recruits } : {}), ...(recruitEdits.length ? { recruitEdits } : {}), ...(startYear ? { startYear } : {}), ...(playoff ? { playoff } : {}), ...(stride ? { stride } : {}), ...(createPlayers.length ? { createPlayers } : {}), ...(removePlayers.length ? { removePlayers } : {}) };
+  // while a stride change is on its way the change tables name players by ids the console is about to change: held back
+  if (stride && (plyz.size || transfers.traz.length || transfers.plsz.length)) notes.push(` DID ${d.id}: player/transfer change tables held until the console takes stride ${stride}`);
   const changed = [
-    writeEditTable(d, join(dir, 'PLYZ.json'), 'PLYZ', PLYZ_COLUMNS, [...plyz.values()], { type: 1, flty: 1 }, opts),
-    writeEditTable(d, join(dir, 'TRAZ.json'), 'TRAZ', TRAN_COLUMNS, transfers.traz, { type: 0, flty: 1 }, opts),
-    writeEditTable(d, join(dir, 'PLSZ.json'), 'PLSZ', PLSS_COLUMNS, transfers.plsz, { type: 0, flty: 1 }, opts),
+    writeEditTable(d, join(dir, 'PLYZ.json'), 'PLYZ', PLYZ_COLUMNS, stride ? [] : [...plyz.values()], { type: 1, flty: 1 }, opts),
+    writeEditTable(d, join(dir, 'TRAZ.json'), 'TRAZ', TRAN_COLUMNS, stride ? [] : transfers.traz, { type: 0, flty: 1 }, opts),
+    writeEditTable(d, join(dir, 'PLSZ.json'), 'PLSZ', PLSS_COLUMNS, stride ? [] : transfers.plsz, { type: 0, flty: 1 }, opts),
     syncDynastyPatch(cfg, d, dir, patch, opts),
   ].some(Boolean);
   if (changed && !opts.quiet) for (const n of notes) console.log(`${stamp()}${n}`);
@@ -556,6 +569,155 @@ function odStartYear(dir: string, d: OdDynasty, ex: DynastyExport, memo: OdState
   const taken = !!m && !m.stale && (!!m.taken || ex.season.year === m.year);
   return { startYear: taken ? m!.year : firstYear, firstYear };
 }
+// The roster stride still to reach the console (od stride --did N --stride 100).
+function pendingStride(cfg: BridgeConfig, d: OdDynasty): number | undefined {
+  const m = loadState()[sk(cfg, d)]?.stride;
+  return m && !m.taken ? m.stride : undefined;
+}
+// A console upload keyed at the queued stride: the switch is done, the copy is withdrawn by the next syncWebEdits.
+function maybeStrideTaken(cfg: BridgeConfig, d: OdDynasty, opened: OpenedDynastyFile, fileId: number, state: OdState): void {
+  const memo = state[sk(cfg, d)]?.stride; if (!memo || memo.taken) return;
+  if (detectStride(opened.file.table('PLAY')) === memo.stride) { memo.taken = fileId; saveState(state); console.log(`${stamp()} DID ${d.id}: the console's file ${fileId} is keyed at stride ${memo.stride}; the switch is done`); }
+}
+// ncaa-bridge od stride [--did N --stride 100 | --did N --off]: queue a roster-stride change for one dynasty (status without flags).
+export async function odStride(cfg: BridgeConfig, opts: { did?: number; stride?: number; off: boolean }): Promise<void> {
+  const store = loadOdStore(cfg.odDir); const state = loadState();
+  const list = Object.values(store.dynasties).filter((d) => opts.did === undefined || d.id === opts.did);
+  if (opts.stride === undefined && !opts.off) {
+    for (const d of list) { const m = state[sk(cfg, d)]?.stride; console.log(`DID ${d.id} ${odName(d)}: ${m ? `stride ${m.stride}, ${m.taken ? `taken (console file ${m.taken})` : `pending since ${m.at} (built from file ${m.base})`}` : 'stride 70 (the game default, nothing queued)'}`); }
+    return;
+  }
+  if (opts.did === undefined) throw new Error('--did N is required with --stride / --off');
+  const d = list[0]; if (!d) throw new Error(`no dynasty DID ${opts.did} in ${cfg.odDir}`);
+  const memo = state[sk(cfg, d)] ?? (state[sk(cfg, d)] = { fingerprint: '', slug: '', importId: 0, at: '' });
+  if (opts.off) { delete memo.stride; saveState(state); console.log(`DID ${d.id}: stride setting cleared (files already published are left as they are)`); }
+  else {
+    const want = opts.stride;
+    if (want === undefined || !(STRIDES as readonly number[]).includes(want)) throw new Error(`--stride takes one of ${STRIDES.join(', ')}`);
+    memo.stride = { stride: want, base: consoleFileId(d), at: new Date().toISOString() }; saveState(state);
+    console.log(`DID ${d.id}: stride ${want} queued (from console file ${consoleFileId(d)}); the watcher publishes the re-keyed dynasty file and the console takes it at its next load from the hub. The console must run the "FCS mod: 100-player rosters" patch for stride 100, and must not load stride-70 dynasties while it does.`);
+  }
+  await syncWebEdits(cfg, d, new WorkerApi(cfg)).catch((e: Error) => console.error(`${stamp()} DID ${d.id} web edits: ${e.message}`));
+}
+// Players queued by `od players` / `od repair` that no console upload carries yet.
+function pendingCreatePlayers(cfg: BridgeConfig, d: OdDynasty): CreatePlayerPatch[] {
+  return loadState()[sk(cfg, d)]?.players?.pending ?? [];
+}
+function pendingRemovePlayers(cfg: BridgeConfig, d: OdDynasty): number[] {
+  return loadState()[sk(cfg, d)]?.repair?.remove ?? [];
+}
+function maybeRemovalsTaken(cfg: BridgeConfig, d: OdDynasty, ex: DynastyExport, state: OdState): void {
+  const memo = state[sk(cfg, d)]?.repair; if (!memo?.remove.length) return;
+  const have = new Set(ex.players.map((p) => p.pgid)); const left = memo.remove.filter((g) => have.has(g));
+  const restored = memo.restores?.length ? memo.restores.every((g) => have.has(g)) : false; // the same copy's restores arrived
+  if (left.length === memo.remove.length && !restored) return;
+  // one batch: once the console's file lacks any of them it took the copy, and an id still present is a row created
+  // afterwards under a freed id (the fill reuses them), not a removal that failed
+  console.log(`${stamp()} DID ${d.id}: the console's file lacks ${memo.remove.length - left.length} of the ${memo.remove.length} rows the repair removed${left.length ? ` (${left.length} ids reused since)` : ''}; repair done`);
+  delete state[sk(cfg, d)]!.repair;
+  saveState(state);
+}
+function maybePlayersTaken(cfg: BridgeConfig, d: OdDynasty, ex: DynastyExport, state: OdState): void {
+  const memo = state[sk(cfg, d)]?.players; if (!memo?.pending.length) return;
+  const have = new Set(ex.players.map((p) => `${p.tgid}:${p.lastName}`));
+  const carried = (c: QueuedPlayer) => have.has(`${c.tgid}:${c.lastName.slice(0, RECRUIT_LAST_MAX)}`);
+  const landed = new Set(memo.pending.filter(carried).map((c) => c.batch).filter((b): b is string => !!b));
+  const left = memo.pending.filter((c) => !carried(c) && !(c.batch && landed.has(c.batch)));
+  if (left.length === memo.pending.length) return;
+  const n = memo.pending.filter(carried).length, dropped = memo.pending.length - left.length - n;
+  console.log(`${stamp()} DID ${d.id}: the console's file carries ${n} of the ${memo.pending.length} queued players${dropped ? ` (${dropped} of the same batch skipped at patch time, dropped)` : ''}`);
+  if (left.length) memo.pending = left; else delete state[sk(cfg, d)]!.players;
+  saveState(state);
+}
+// rating codes set low on a generated reserve so the auto depth chart leaves him on the bench
+const RESERVE_RATINGS = ['POVR', 'PSPD', 'PACC', 'PAGI', 'PSTR', 'PAWR', 'PCTH', 'PCAR', 'PBTK', 'PTRK', 'PJMP', 'PTHA', 'PTHP', 'PRBK', 'PPBK', 'PRBS', 'PPBS', 'PIBL', 'PPBF', 'PPMV', 'PFMV', 'PBSH', 'PPRS', 'PTAK', 'PHIT', 'PPRC', 'PZCV', 'PMCV', 'PBCV', 'PRTR', 'PESV', 'PJMV', 'PSMV', 'PKPR', 'PKAC', 'PSTA', 'PKRT', 'PBFW'];
+export const RESERVE_RATING = 40;
+// ncaa-bridge od players [--did N] [--tgid T | --team NAME] [--fill 100] [--prefix Reserve] [--clear]: fill a team up to
+// N players with generated reserves (copies of the team's own players at the same position, low ratings, free jersey
+// numbers) through the dynasty-file copy; status without --fill. The console must run the capacity patch first.
+export async function odPlayers(cfg: BridgeConfig, opts: { did?: number; tgid?: number; team?: string; fill?: number; prefix?: string; clear: boolean }): Promise<void> {
+  const store = loadOdStore(cfg.odDir); const state = loadState();
+  const list = Object.values(store.dynasties).filter((d) => opts.did === undefined || d.id === opts.did);
+  if (opts.fill === undefined && !opts.clear) {
+    for (const d of list) { const m = state[sk(cfg, d)]?.players; console.log(`DID ${d.id} ${odName(d)}: ${m?.pending.length ? `${m.pending.length} generated player(s) pending since ${m.at} (built from file ${m.base}): ${m.pending.map((c) => `team ${c.tgid} ${c.firstName} ${c.lastName}`).slice(0, 5).join(', ')}${m.pending.length > 5 ? ' ...' : ''}` : 'nothing queued'}`); }
+    return;
+  }
+  if (opts.did === undefined) throw new Error('--did N is required with --fill / --clear');
+  const d = list[0]; if (!d) throw new Error(`no dynasty DID ${opts.did} in ${cfg.odDir}`);
+  const memo = state[sk(cfg, d)] ?? (state[sk(cfg, d)] = { fingerprint: '', slug: '', importId: 0, at: '' });
+  if (opts.clear) { delete memo.players; saveState(state); console.log(`DID ${d.id}: queued players cleared (rows already published stay in the copy until the console's next upload replaces it)`); }
+  else {
+    const cd = consoleDynasty(cfg, d); if (!cd) throw new Error(`DID ${d.id}: no console dynasty file yet`);
+    const teams = cd.ex.teams; const want = String(opts.team ?? '').toLowerCase();
+    const team = opts.tgid !== undefined ? teams.find((t) => t.tgid === opts.tgid) : teams.find((t) => [t.name, t.longName, t.abbr].some((n) => String(n ?? '').toLowerCase() === want)) ?? teams.find((t) => [t.name, t.longName].some((n) => String(n ?? '').toLowerCase().includes(want)));
+    if (!team) throw new Error(`team ${opts.tgid ?? opts.team} not found in the dynasty (use --tgid or the display name)`);
+    const fill = opts.fill!; if (!(fill > 0 && fill <= 100)) throw new Error('--fill takes 1..100');
+    const play = cd.file.table('PLAY'); const stride = detectStride(play) ?? PGID_STRIDE; const slots = rosterSlots(stride);
+    // the roster as the next copy will carry it: the console's rows minus a pending repair's removals, plus its restores
+    const removeSet = new Set(memo.repair?.remove ?? []);
+    const mine = cd.ex.players.filter((p) => p.tgid === team.tgid && !removeSet.has(p.pgid));
+    const pendingAll = (memo.players?.pending ?? []).filter((c) => c.tgid === team.tgid);
+    const restores = pendingAll.filter((c) => c.pgid); const pending = pendingAll.filter((c) => !c.pgid);
+    const usedIds = new Set<number>(restores.map((c) => c.pgid!)); for (let i = 0; i < play.recordCount; i++) { const g = Number(play.get(i, 'PGID')); if (!removeSet.has(g)) usedIds.add(g); }
+    let free = -pending.length; for (let s = 0; s < slots; s++) if (!usedIds.has(team.tgid * stride + s)) free++;
+    const need = Math.min(Math.min(fill, slots) - mine.length - restores.length - pending.length, free);
+    if (need <= 0) { console.log(`DID ${d.id}: ${team.name} already has ${mine.length + restores.length} players${pending.length ? ` + ${pending.length} queued` : ''} and ${Math.max(free, 0)} free slot(s) of the ${slots} a stride-${stride} team can fill; nothing to add for --fill ${fill}`); return; }
+    const playFields = play.fieldMap;
+    const ratings = RESERVE_RATINGS.filter((k) => playFields.has(k));
+    const byPos = new Map<number, typeof mine>(); for (const p of mine) byPos.set(p.pos, [...(byPos.get(p.pos) ?? []), p]);
+    const order = [...byPos.entries()].sort((a, b) => b[1].length - a[1].length).map(([pos]) => pos);
+    const used = new Set<number>([...mine.map((p) => p.jersey), ...pendingAll.map((c) => c.jersey ?? -1)]);
+    const taken = new Set<string>([...mine.map((p) => p.lastName), ...(memo.players?.pending ?? []).map((c) => c.lastName)]);
+    const prefix = (opts.prefix ?? 'Reserve').slice(0, RECRUIT_FIRST_MAX);
+    const made: QueuedPlayer[] = []; const batch = new Date().toISOString();
+    let seq = 1;
+    for (let i = 0; i < need; i++) {
+      const pos = order[i % order.length] ?? 0; const cands = byPos.get(pos) ?? mine;
+      const tpl = cands[(i * 7) % cands.length]!;
+      let jersey = 0; while (used.has(jersey) && jersey < 100) jersey++; if (jersey >= 100) jersey = 99; used.add(jersey);
+      let last = ''; do { last = `Res${String(seq++).padStart(2, '0')}`; } while (taken.has(last)); taken.add(last);
+      const fields: Record<string, number> = { PYEA: i % 4, PRSD: 0 }; for (const k of ratings) fields[k] = RESERVE_RATING;
+      made.push({ tgid: team.tgid, firstName: prefix, lastName: last, pos, jersey, template: tpl.pgid, fields, batch });
+    }
+    memo.players = { pending: [...(memo.players?.pending ?? []), ...made], at: batch, base: cd.fileId }; saveState(state);
+    const to = mine.length + restores.length + pending.length + made.length;
+    console.log(`DID ${d.id}: ${made.length} reserve(s) queued for ${team.name} (TGID ${team.tgid}, ${mine.length + restores.length} players now -> ${to}${to < fill ? `; a stride-${stride} team fills ${slots} slots and ${free} were free` : ''}); positions ${[...new Set(made.map((c) => c.pos))].join('/')}, jerseys ${made.map((c) => c.jersey).join(' ')}. The watcher publishes them in the dynasty-file copy; the console must run both roster patches (stride + capacity) before loading it, and games dress only slots 0..69.`);
+  }
+  await syncWebEdits(cfg, d, new WorkerApi(cfg)).catch((e: Error) => console.error(`${stamp()} DID ${d.id} web edits: ${e.message}`));
+}
+// ncaa-bridge od repair --did N --tgid T --from CID [--keep-reserves]: put a team's roster back after the console mangled
+// it (2026-11-06: a user team above 70 lost 20 original rows and gained 20 duplicate reserves at ids in other teams'
+// ranges during a game). Rows of the team in locker file CID that no longer exist anywhere in the console's newest
+// file are restored under their original ids with every field; the team's rows named "Reserve" (unless --keep-reserves)
+// and any row outside the team's id range that duplicates an in-range row by name are removed. Delivered like
+// `od players`: through the dynasty-file copy at the console's next hub load.
+export async function odRepair(cfg: BridgeConfig, opts: { did?: number; tgid?: number; from?: number; keepReserves: boolean }): Promise<void> {
+  if (opts.did === undefined || opts.tgid === undefined || !opts.from) throw new Error('--did N, --tgid T and --from CID are required');
+  const store = loadOdStore(cfg.odDir); const state = loadState();
+  const d = Object.values(store.dynasties).find((x) => x.id === opts.did); if (!d) throw new Error(`no dynasty DID ${opts.did} in ${cfg.odDir}`);
+  const cd = consoleDynasty(cfg, d); if (!cd) throw new Error(`DID ${d.id}: no console dynasty file yet`);
+  const refBlob = readLockerBlob(cfg.odDir, opts.from); if (!refBlob) throw new Error(`locker file ${opts.from} not found`);
+  const ref = openDynastyFile(refBlob).file; const tgid = opts.tgid; const stride = detectStride(cd.file.table('PLAY')) ?? PGID_STRIDE;
+  const play = cd.file.table('PLAY'); const present = new Set<number>(); const mine: { pgid: number; first: string; last: string }[] = [];
+  for (let i = 0; i < play.recordCount; i++) { const g = Number(play.get(i, 'PGID')); present.add(g); if (Number(play.get(i, 'TGID')) === tgid) mine.push({ pgid: g, first: String(play.get(i, 'PFNA')), last: String(play.get(i, 'PLNA')) }); }
+  const rp = ref.table('PLAY'); const restore: QueuedPlayer[] = []; const batch = new Date().toISOString();
+  for (let i = 0; i < rp.recordCount; i++) {
+    if (Number(rp.get(i, 'TGID')) !== tgid) continue; const g = Number(rp.get(i, 'PGID')); if (present.has(g)) continue;
+    const row = rp.row(i); const fields: Record<string, number | string> = {};
+    for (const [k, v] of Object.entries(row)) if (k !== 'PGID' && k !== 'TGID' && k !== 'POID' && (typeof v === 'number' || typeof v === 'string')) fields[k] = v;
+    restore.push({ tgid, firstName: String(row.PFNA), lastName: String(row.PLNA), pos: Number(row.PPOS), jersey: Number(row.PJEN), template: null, fields, pgid: g, batch });
+  }
+  const inRange = (g: number) => Math.floor(g / stride) === tgid;
+  const inRangeNames = new Set(mine.filter((m) => inRange(m.pgid)).map((m) => `${m.first} ${m.last}`));
+  const remove = mine.filter((m) => (!opts.keepReserves && m.first === 'Reserve') || (!inRange(m.pgid) && inRangeNames.has(`${m.first} ${m.last}`))).map((m) => m.pgid);
+  if (!restore.length && !remove.length) { console.log(`DID ${d.id}: team ${tgid} needs no repair against file ${opts.from} (${mine.length} rows now)`); return; }
+  const memo = state[sk(cfg, d)] ?? (state[sk(cfg, d)] = { fingerprint: '', slug: '', importId: 0, at: '' });
+  memo.players = { pending: [...(memo.players?.pending ?? []).filter((c) => !(c.tgid === tgid && c.firstName === 'Reserve' && !opts.keepReserves)), ...restore], at: batch, base: cd.fileId };
+  memo.repair = { remove: [...new Set([...(memo.repair?.remove ?? []), ...remove])], restores: [...new Set([...(memo.repair?.restores ?? []), ...restore.map((r) => r.pgid!)])], at: batch, base: cd.fileId, note: `team ${tgid} from file ${opts.from}` };
+  saveState(state);
+  console.log(`DID ${d.id}: team ${tgid} repair queued from file ${opts.from}: restore ${restore.length} row(s) [${restore.map((r) => `${r.pgid}:${r.lastName}`).join(' ')}], remove ${remove.length} row(s) [${remove.join(' ')}]; ${mine.length} rows now -> ${mine.length - remove.length + restore.length}. Published in the dynasty-file copy; the console takes it at its next hub load.`);
+  await syncWebEdits(cfg, d, new WorkerApi(cfg)).catch((e: Error) => console.error(`${stamp()} DID ${d.id} web edits: ${e.message}`));
+}
 // The start year still to reach the console.
 function pendingStartYear(cfg: BridgeConfig, d: OdDynasty): number | undefined {
   const m = loadState()[sk(cfg, d)]?.startYear;
@@ -784,6 +946,9 @@ export async function odImportOne(cfg: BridgeConfig, d: OdDynasty, opts: OdImpor
   state[sk(cfg, d)] = { ...state[sk(cfg, d)], fingerprint: fp, slug: dynasty.slug, importId, at: new Date().toISOString(), firstYear };
   saveState(state);
   console.log(`${stamp()}   committed in ${((Date.now() - t0) / 1000).toFixed(1)}s -> ${cfg.workerUrl}/d/${dynasty.slug}`);
+  maybeStrideTaken(cfg, d, opened, fileId, state);
+  maybePlayersTaken(cfg, d, ex, state);
+  maybeRemovalsTaken(cfg, d, ex, state);
   // the start year first: a console file that took it moves the reshaped class to the new year before the overhaul looks
   await maybeStartYear(cfg, d, ex, fileId, state, api).catch((e: Error) => console.error(`${stamp()} DID ${d.id} start year: ${e.message}`));
   await maybeOverhaul(cfg, d, opened, ex, fileId, state, api).catch((e: Error) => console.error(`${stamp()} DID ${d.id} recruit overhaul: ${e.message}`));

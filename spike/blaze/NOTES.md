@@ -1605,3 +1605,234 @@ First full Supersim game on the new engine (Brown 37, Furman 36, week 1 of 2014,
   there was nothing to link. Follow-up: `listDynasties` (the landing page's "Browse Dynasties") now hides a league-server
   dynasty with no members (`od_id` set and no `od_members` rows); offline-save imports (no member list) stay listed and
   the hidden dynasty's pages stay reachable by URL. Checked on `wrangler dev --port 8802` against a seeded local D1.
+
+## 2026-11-06 — jersey #0 crash (player editor / game load) and the RPCS3 patch "FCS mod: jersey #0"
+
+- Symptom: a player set to #0 on the site (the editor allows 0..99 and PLYZ carries PJEN 0) shows fine on the roster
+  screens, but opening him in the in-game player editor (player model) or loading a game crashes. Eric's log:
+  `F {PPU[0x1000015] Thread (FGGameSim) [0x001791c4]} VM: Access violation reading location 0x6b700019`.
+- 0x1791c4 is the return address of `strcmp` (0x69d6e4) inside `FindStringIndex(array, count, needle)` at 0x179188
+  (RPCS3 reports the caller's PC for faults inside the leaf). The garbage pointer is an entry past the end of the
+  player editor's "Jersey Number Name" list:
+  - taken-number mask for a team, 0x483b1c (cursor over PLAY, fetch PJEN): sets bit n only for 1 <= n <= 99
+    (`cmplwi r3,1; blt` at 0x483bb8), so a player with 0 never marks bit 0;
+  - list count, 0x17a3b4 (count dispatcher 0x17a738): kind 5 (CAP) = 99; otherwise loop n = 1..99 (`li r5,1` at
+    0x17a3fc) counting free numbers, then +1 for the player's own number (always for kind 1, else when own's bit is set);
+  - list builder, 0x177c84 (fill dispatcher 0x1784c4): kind 5 = "1".."99"; otherwise loop n = 1..99 (`mr r24,r30` at
+    0x177d80) adding n when free or equal to own;
+  - lookup of the current value, 0x1791f0 jersey case 0x179538-0x1795a8: `sprintf("%d", own)` then FindStringIndex.
+  With own = 0 the builder never reaches 0, the list is one entry shorter than the count, and the search runs off the
+  end. The jersey number lives at byte +0x78 of the global edit-player record ([0x1c72064]).
+- Rendering: the character manager keeps the number at +0x33c of the player-art object (set at 0x5f07c8 from the
+  "jerseyNumber" descriptor). Readers: 0x5e2678 and 0x5e4fcc test `n == 0 || n >= 10` (crorc at 0x5e2688 / 0x5e5064)
+  and send 0 down the two-digit placement path ("00", numberSpacingAdj0/1 lookups, digit split at 0x5e27fc-0x5e2860),
+  while 0x5f143c (helmetCenterNumOffset*, n <= 9) and 0x5f651c (front/backUVOffsetScale, n < 10) set 0 up as one
+  digit; the placement function 0x5e4ec0 dereferences the parameter blocks at +0x2ec/+0x2f8 without null checks.
+  The number sheet (`<slot>_NUMS_DECAL`, 256x4096) is 16 cells of 256 px with digits 0..9 in cells 0..9, so "0" is
+  drawable like any digit. No `.pus` script in qkl_boot.ast touches numbers; this is CPU code.
+- Patch (five one-word swaps, generator `tools/jersey-zero-patch.py`, bake option `ps3-eboot.mjs --jersey-zero`):
+  0x483bb8 `cmplwi r3,1` -> `cmplwi r3,0` (0x28030000); 0x17a3fc `li r5,1` -> `li r5,0` (0x38a00000); 0x177d80
+  `mr r24,r30` -> `li r24,0` (0x3b000000; r30 stays 1 for the bit shift and the CAP default); 0x5e2688 and 0x5e5064
+  `crorc` -> `crnor cr0eq,cr0lt,cr0lt` (0x4c400042), i.e. the two-digit path only for n >= 10. Count and list now agree
+  for every own value (0 is listed as free when nobody wears it and as the player's own number when he does), the mask
+  keeps teammates from picking a taken 0, and CAP (kind 5, array sized 99, indexed n-1) is unchanged. The Flash list
+  builder 0x240f68 (loop from 1) and the spinner clamps 0xe5c4d0 / 0x101a940 still offer 1..99 in-game.
+- Installed in <rpcs3>/patches/imported_patch.yml + config/patch_config.yml (copy in private/rpcs3-patches.yml, 44 words
+  in all), backups in %LOCALAPPDATA%\ncaa-bridge\backups\2026-11-06-jersey0. PS3 ELF
+  `private/BLUS31159-1.02-allconf-five-dynasties-jersey0.elf` (sha256 c98b9e45...62f7, 44 writes; still needs the
+  signing route from docs/ps3-no-psn-research.md). Not yet tested in game: open the #0 player in the player editor and
+  load a game; if the game load still dies, the next suspects are the helmet/shoulder/sleeve number textures
+  (`HelmetNumberTexture`, `ShoulderNumberTexture`, `SleevesNumberTexture`) — grab the new access-violation PC.
+- Roster-cap research done the same day (PGID = TGID*70 + slot in the executable: 8 `mulli 0x7507` divisions, 101
+  `mulhwu 0xD41D41D5` divisions, up to 301 shift-add multiplies, the league package PLAY max 70 at 0x8ae38, roster-save
+  size 0x15e000 at 0x3b46a0, dynasty buffer 0x7e5000) is written up in docs/roster-stride-inventory.md.
+- CONFIRMED 2026-11-06 (Eric): with "FCS mod: jersey #0" applied, a #0 player opens in the player editor and plays in
+  a game; the number renders. Stage 2 of the roster-cap work (the executable patch) starts from the inventory.
+
+## 2026-11-06 — roster cap Stage 2: the "FCS mod: 100-player rosters" patch (built, not yet run in game)
+
+- Generator `tools/roster-stride-patch.py` (report `docs/roster-stride-report.md`, words `private/roster-stride-words.json`,
+  yml entry appended to <rpcs3>/patches/imported_patch.yml and private/rpcs3-patches.yml, **Enabled: false** in
+  patch_config.yml until a stride-100 dynasty exists; backups in %LOCALAPPDATA%\ncaa-bridge\backups\2026-11-06-roster100).
+  778 words: 8 `mulli 0x7507` divisions -> `0x51EB` (exact for TGID <= 403; the one inside the All-Conference window is
+  emitted at its moved address 0x453968 and needs that patch listed first), 101 `mulhwu 0xD41D41D5` divisions ->
+  `0x47AE147B` (the subf/srwi 1/add/srwi 6 tail stays: x/100 exact for all 32-bit x), 113 shift-add x70 chains ->
+  `mulli R,X,100` + nops (chains found by tracking coefficients of X; a chain that turns X into 35X computes R at its
+  first instruction instead), the league package PLAY rows (0x8ae38: 100) and the roster save buffer (0x3b4690/0x3b46a0:
+  0x15e000 -> 0x1c0000).
+- Left at 70 on purpose (documented in the report): the engine's 70-per-side layout (0xa23c84, 0xa2a3e8: row base of
+  the away team in PLGA/DCGA and the 140-entry arrays; the +70 at 0xa94bd4 / 0xa94c54), frontend/other-region chains
+  that index 70-entry per-team arrays (0x64d38, 0x110baa4, 0x110c3f4, 0xdf2f0 ...), 0x48b168 (a 70 % scale), and every
+  `li 70` / `cmp 69|70` limit. Forced in: the slot computations 0xa94bb4, 0xa94c24 and the depth-chart slot 0xa31228.
+  So with the patch on, ids are stride 100 but every team must still hold <= 70 players (slots 0..69) until the arrays
+  and limits are grown (checkpoint 2).
+- Delivery: `ncaa-bridge od stride --did N --stride 100` queues a StrideMemo in od-state; syncWebEdits adds `stride` to
+  the DynastyPatchSet (applied last; PLYZ/TRAZ/PLSZ change tables are held empty while it is pending), the watcher
+  publishes the re-keyed copy (patchDynasty: detectStride, rekeyStride, PLAY 9100 -> 13000) and the memo is marked
+  taken when a console upload reads back at stride 100 (maybeStrideTaken). `od stride` alone prints the status.
+- Checkpoint 1 procedure: `od stride --did <test> --stride 100` with the watcher running -> enable the patch in RPCS3
+  -> load that dynasty from the hub ("Downloading Dynasty File") -> rosters, depth chart, a game, an advance -> watch
+  RPCS3.log for access violations and the server log for the upload (PLAY max should stay 13000). Do not load a
+  stride-70 dynasty or a roster save while the patch is on. PS3 ELF with everything:
+  private/BLUS31159-1.02-allconf-five-dynasties-jersey0-roster100.elf (sha256 e2c82d78...0346, 822 writes).
+- The console's dynasty file (unlike the offline saves) carries index definitions: PLAY {PGID, TGID}, TEAM {TGID},
+  PLGA {IXPG}, DCGA {IXDG}, 16 bytes each ({4CC, 0x0101, field number, 1}), no per-row data, so growTable keeps them
+  and the game rebuilds its lookups at load. The in-game copies PLGA (max 140 = 2 x 70, alloc 14) and DCGA (182 =
+  2 x 91) live in the dynasty file too: checkpoint 2 has to grow PLGA to 200 along with the engine's +70 offsets.
+
+- Checkpoint 1 (Eric, same evening): coach1 at stride 100 loaded, rosters and depth chart fine, but the game vs
+  Abilene Christian started with no players on either side and died at the kickoff play call (0x163e28, NULL player).
+  Cause: two engine chains I had filed as "70-per-side layout" are PGID bases: 0xa2392c creates the player objects
+  from base = GINF.GHTG/GATG * 70 + i (chain 0xa23c84, loop `cmpwi cr1,r17,0x46`), and 0xa2a3a0 rebuilds PGID =
+  TGID * 70 + packed slot from the in-game depth chart (chain 0xa2a3e8); both now forced to x100 (788 words,
+  yml entry replaced in both files, ELF re-baked sha256 9bd74fca...5bcf, 832 writes). The copies PLAY->PLGA
+  (0x43f990) and DCHT->DCGA (0x466b34) select `PGID >= TGID*100 and < +70` through the patched chains, so they were
+  fine; `(x+1)*0x51EB>>21` and the 0x47AE147B tail were checked numerically (exact below 40,400 / for all 32-bit x).
+  Retest pending.
+- CHECKPOINT 1 PASSED (Eric, 2026-11-06 13:13): with the stride-100 copy published (file 297 -> re-keyed copy) and the
+  patch on, coach1 loaded, played a full game vs Abilene Christian and advanced to week 6. The console's upload (file
+  326) is keyed at stride 100 (8,582 of 8,694 PLAY rows match /100) and keeps PLAY max 13000, so the console preserves
+  the grown table across its own saves; the bridge marked the stride taken. The `.team` package (file 324) still has
+  PLAY max 70 (and CUTP 70, PINP 840): the 0x8ae38 'LEAG' creation is a different package, the .team builder is still
+  to be found. The earlier failed attempt was the console loading its stride-70 file 297 with the patch on (the stride
+  had not been queued), not the patch itself.
+
+## 2026-11-06 — roster cap checkpoint 2: dynasty capacity 100, games dress 70 (built, not yet run in game)
+
+- Why "dress 70": the in-game side is 2 x 70 by layout, not by constant: PLGA/DCGA (140/182 rows, alloc 14), the
+  engine's player pool (`0xa5daf0(.., 140)` at 0xa23c1c, sized by the PLGA row count byte), objects with 140-entry
+  arrays at fixed offsets (0xded90: +0x50/+0x280/+0x4b8, the 0xdea2c position array), a 140 x 12-byte stack array in
+  0x4e4bf8, loops over 140 (0xdf2e0, 0xdebb8), the away offset +70 (0xa94bd4/0xa94c54), the in-game DB tables 'MULT'
+  (140 rows at 0xa2a8f0) and the 70-entry per-team u16 lists in the recruiting UI global (0x537a28). Growing those
+  means relaying out compiled objects. So the dynasty roster (PLAY) goes to 100 and a game dresses slots 0..69 (the
+  PLAY->PLGA / DCHT->DCGA copies keep `base .. base+70`). Slots 70..99 are reserves; a depth-chart entry pointing at a
+  reserve is dropped by the DCGA copy (behaviour at game time still to be seen).
+- Patch "FCS mod: 100-player rosters (capacity)" (roster-stride-patch.py --capacity, 99 words, Enabled: false, needs the
+  stride entry): 81 `base + 70` range ends fed by the patched x100 chains -> +100 (19 kept at 70 because their functions
+  touch the in-game ..GA tables, as 4CC immediates or inside SQL strings: 0x43fabc, 0x466c60, 0x46d924/0x46d9c4,
+  0x46dfe0 [game setup], 0x47302c, 0x47ccf4, 0x49dcc8, 0x49de88, 0x4e41ec, 0x4e43a4, 0x4e5f50, 0x4e92bc, 0x51402c,
+  0x5140e4, 0x514358, 0x514410, 0x5148b4, 0x51496c); 6 roster-size checks (0x17eda0 room < 70, 0x1849d4 add < 70,
+  0x1f1360 over 70, 0x2529ec full >= 69 -> 99, 0x5045b8 offseason cut > 70, 0x50217c free-slot loop) -> 100; the
+  "COMMON TEAM MANAGEMENT MODULE" (0x46e34c) six per-player arrays (12/14/27/4/2/2 B x 70, allocation = +8 header,
+  init length) -> x100. Not patched (known limits): the .team package PLAY max 70 (creation site still unknown; the
+  member's own team must stay <= 70 until found), CUTP 70 / PINP 840 in the package, the 70-cap on player heads
+  (0x1107ca4, 0x188-byte entries), 0x4848dc (byte field vs 70, unclear), the recruiting UI 70-slot lists.
+  ELF ...-roster100.elf re-baked with both entries: sha256 2b6ec50b...5134, 931 writes.
+- Test vehicle: `ncaa-bridge od players --did 8 --team "Abilene Christian" --fill 100` queues 31 generated reserves
+  (copies of the team's own players by position, ratings 40, free jersey numbers from 0, PYEA cycling) as
+  DynastyPatchSet.createPlayers (PlayersMemo in od-state, published by the watcher, cleared when the console's upload
+  carries them by team + last name). A stride-100 team fills 99 slots (one-slot margin as
+  with 69 of 70); the fill is bounded by the team's free slots (a transfer keeps his old team's PGID). Queued for DID 8:
+  Abilene Christian 65 -> 99 (34 reserves, PLAY 8725/13000).
+  Procedure: enable BOTH roster entries in RPCS3 first (the team-management arrays overflow otherwise), then queue the
+  fill, hub -> load coach1 -> ACU roster shows 100 -> play vs ACU (70 dress) -> advance.
+
+## 2026-11-06 — cut week to 90 (Eric: 90 in season, up to 100 in the offseason, Cut Players trims to 90)
+
+- The capacity entry is regenerated with `--cut 90` (101 words, installed in both patch files, Enabled in RPCS3;
+  ELF ...-roster100.elf re-baked: sha256 e894bce8...66d4, 933 writes; 8 node tests pass). Words: 0x5045b8 cut-stage
+  trigger `cmplwi r3,70 -> 90`; 0x5031ac auto-cut keep `li r22,70 -> 90`; 0x266710 GetMaxTeamRosterSize stub
+  `li r3,70 -> 90`; 0x1f1360 roster-management cut state -> 90; 0x17eda0 / 0x1849d4 / 0x2529ec roster-editor
+  room / add / full -> 90 / 90 / 89; 0x50217c free-slot loop stays 100.
+- How the cut week works (0x5047c8 -> 0x5041e4, strings "Holding Team Tryouts", "Evaluating Players", "Cutting
+  Players - 0%"): CLST (cut list, a permanent dynasty table: 0/13230 in file 326) is filled per team type; per team the
+  CLST rows in the PGID range (or MCTP = team) are counted; > 70 -> 0x502cf8: per position group (0..16) the quota from
+  the coach-style tables (r14/r15 styles x 17 groups, two tables at r16/r17) is kept best-MIOP-first (rows deleted from
+  the list), then the remaining list ordered by MIOP desc is kept until r22 = 70 - (K/P keeps) players stay; whatever
+  is still listed is cut by 0x502a30 ("delete from CLST"). <= 70 -> 0x502bd4 just clears the team's list. User teams go
+  through the same loop (no user check in it); the online cut UI goes through DoD 127 checkCutPlayer / 128 cutPlayer,
+  which the stub answers generically.
+- Script bindings (registered by `0x56d39c(class, name, "AdapterExtObject")` wrappers at 0x87xxxx-0x8dxxxx; the thunk
+  after each wrapper calls a vtable slot on a global adapter object; adapters are created by 0x2db0d8): TeamAdapter
+  (ctor 0x265774, vtable 0x189ee48, global 0x1c793f4): +0x3c GetMaxTeamRosterSize = 0x266710 `li r3,70; blr`.
+  RostersAdapter (ctor 0x2cb194, vtable 0x189e740): +0x8 GameCutPlayer 0x2cb2ec, +0xc GameCheckRosterCutState
+  0x2cb334 (dynasty: 0x48fefc position minimums; otherwise 0x1f132c POCH count > 70). DynastyAdapter (ctor 0x2494a0,
+  vtable 0x189a750): +0x230 CanAdvanceToOffseason 0x250ad8, +0x174 CutPlayers_SaveChanges 0x24f2a8, +0x190
+  AdvanceToPreseasonRecruiting 0x24f454. DynastyRecruitingAdapter (ctor 0x279f20, vtable 0x189b4b8): +0x8
+  GetNumScholarshipsRemaining 0x27a1a4 -> 0x4b972c = 0x4b7ebc(team) - count(RCPR where MCTP = team);
+  0x4b7ebc = {25,15,10,5,0}[TEAM.SDUR] (0x474fd4; SNCT/SDUR are sanction fields set by 0x47bf8c/0x47c190/0x4f84c0)
+  minus the year's TRAN rows in the team's range (dynasty only). So recruiting is 25 per class, not roster-bound.
+- Not found: the `.team` package builder's per-table allotments (0x338c9c "Uploading Team Data for %s": a 50,000-byte
+  DB filled via a virtual on the object looked up into 0x1c88d7c; PLAY 70, DCHT 91, CUTP 70, PINP 840, CAMW 200, PLSU
+  50, TRAN/PLSS 23, PINT 65, RECB/RECV 35, RCPR/RCPT 25, USDT 16 appear nowhere as literals or descriptors; 0xa39768
+  with "140 rows" was the Ultimate Team command constructor, not a table creator). Next test: a member team above 70.
+- Tooling: scratchpad roster/cut-info.py (strings, fn, raw, callers) and cut-info2.py (after, bind = strings incl.
+  SQL placeholder bytes with code refs and binding tables, tiny, vt, adapter, resolve, ctorvt, vslot, vslot2, opdrefs,
+  impl). Binding wrappers use `addic` (opcode 12) for string addresses, so string-ref scans must accept 12 and 14.
+
+## 2026-11-06 — checkpoint 2 re-pointed to Georgetown; Duquesne stop-gap uniforms
+
+- Eric had already played Abilene Christian (checkpoint 1) and Duquesne (next opponent) crashes the game loader, so
+  the generated reserves moved to Georgetown: `od players --did 8 --clear`, then `--team Georgetown --fill 100`
+  (29 reserves, 70 -> 99, PGIDs 8370..; patch base = console file 326, the console's current file; files 327/328 are
+  the earlier ACU copies, 328 was downloaded once). dod.mjs holds a new copy for the same base until the console comes
+  back through the hub, so the Georgetown copy is taken at the next hub load.
+- Duquesne (TGID 10) sits on TEAM.CSAT `BALLST`; the mod's archive XML for that slot (entry #3256) is a one-row
+  "Coming Soon" placeholder (FCSXXX_HELMET_2042_BLUEX / JERSEY_2042_TEA / PANTSX_2042_GREEN from FCS_DLC_CAA, all
+  present and well-formed; generic socks/shoes in the archive) with no Home/Away rows, which is what crashes. Same
+  shape for 10 other slots (Central Connecticut NILLIN, Davidson WYOMIN, Drake BOISES, Long Island TOLEDO, Merrimack
+  EMICHI, Presbyterian HAWAII, Richmond NMEXST, Sacred Heart CMICHI, Saint Francis WMICHI, St. Thomas UNLVXX). The
+  slot report (scratchpad roster/all-slots.mjs over teams-dump.mts: XML source, rows, unresolved bigfiles by DLC name
+  or archive FNV-1a hash) also lists sets with missing gloves/socks (Cal Poly, FAMU, Maine, Mercer, Penn, Wofford,
+  Western Carolina, Nicholls, UND, NDSU, SEMO, Illinois State, Incarnate Word, Montana, SDSU, UNI, The Citadel) —
+  not known to crash, but worth a look if one does.
+- Fix applied: `spike/blaze/tools/uniforms/make-stopgap-xml.mjs BALLST` wrote `BALLST_Pack0_MixAndMatch.XML` (a copy
+  of the Wagner stop-gap: D1AANW 2007 art, Home/Away rows) into FCS_DLC_NEC and beside the Wagner/Tuskegee XMLs.
+  Not yet seen in game. The PS3 and every member's install need the same file.
+- CHECKPOINT 2 IN-GAME PASSED (Eric, 2026-11-06 evening): with both roster entries on, the console loaded copy 330
+  (file 326 + 37 Duquesne and 29 Georgetown reserves), showed Duquesne at 99, and Eric played and completed the
+  Duquesne game with no issues (70 dressed from a 99-man roster; the BALLST stop-gap XML loaded too). The advance
+  and the upload after it are the remaining half (do the reserves survive the console's own save?).
+- CHECKPOINT 2 PASSED IN FULL (2026-11-06 17:02): the advance after the Duquesne game went through and the console's
+  upload (file 333, week 8, stride 100) carries Duquesne 99 and Georgetown 99 players, PLAY 8760/13000 (8694 + 66
+  reserves, max kept). 331 = the own-team package (PLAY 69/70, unchanged shape), 332 = a 3.8 KB non-zlib upload.
+  So: dynasty capacity 100 (99 slots), 70 dressed, console round trip intact. Open: the own-team package above 70,
+  the Cut Players week at 90 (needs an offseason), the site/bridge 90-limit for portal moves.
+- CHECKPOINT 3 PASSED (Eric, 2026-11-06 ~17:30): Holy Cross (his own team, TGID 18) filled 69 -> 90 through copy 335;
+  he played Georgetown and advanced with no issues. Upload 338 (week 9) keeps Holy Cross 90 / Duquesne 99 /
+  Georgetown 99, PLAY 8781/13000. The own-team package (336) came out PLAY 70/70: the builder fills its 70-row table
+  and drops the rest without failing the upload, so a member above 70 costs nothing (the dropped rows are the
+  undressed slots; see package-play.mts in the scratchpad for which ones). The 90-in-season model is therefore
+  usable now; the Cut Players week at 90 is the last untested piece (needs an offseason).
+- CORRECTION (2026-11-06 17:45): checkpoint 3 did NOT pass cleanly. The upload after the Georgetown game (file 338)
+  shows Holy Cross at 90 rows, but 20 of the original players are GONE (1800-1802, 1805-1807, 1809-1810, 1851, 1853,
+  1854-1863; Swanson the starting QB among them) and 20 exact copies of the reserves at slots 70-89 (Res02..Res21)
+  appeared under ids allocated in other teams' free ranges (8762-8780 = Eastern Washington 62-80, 269 = Howard 69).
+  24 depth-chart rows pointed at the missing players. Duquesne and Georgetown (CPU, 99) were untouched, so it is a
+  user-team path. The own-team package 336 (uploaded 22:22:11 UTC right after the game) already holds exactly the 70
+  survivors (all 21 reserves, 49 originals); the console's PLYZ push at the same second still carried 1800-1889 intact.
+  Working theory: the package builder's 70-row PLAY table wraps/overwrites when fed 90 rows, and the advance's "Checking
+  for team data" step reconciles the dynasty roster to the own team file it downloads back (rows missing from the
+  package deleted, rows at slots >= 70 re-created under new ids). Repair: `od repair --did 8 --tgid 18 --from 333`
+  (new: tdb removeRecord on indexed tables, addPlayer with an explicit pgid, DynastyPatchSet.removePlayers, RepairMemo)
+  published a copy of 338 with the 20 rows restored under their ids (every PLAY field from 333) and all 41 reserve rows
+  removed: Holy Cross 69, DCHT 0 dangling, Duquesne/Georgetown untouched. RULE until fixed: no user team above 70.
+- ROOT CAUSE CONFIRMED + SERVER FIX (2026-11-06 18:10): the capture shows the sequence: 22:22:10 locker upload of
+  the own .team package (336, 70 rows: the first 20 rows of the 90-row roster in file order were overwritten by rows
+  70-89 — a 70-slot table filled modulo 70), 22:22:11 PLYZ push with all 90 rows intact, EndDynastyUpdate UPDT 1 FID
+  336, 22:22:27 RequestAdvanceWeek, 22:22:28 the console DOWNLOADS 336 back ("Checking for team data"), 22:23:08 the
+  dynasty upload with the 20 rows gone and the 20 beyond slot 69 re-created under new ids. So the advance reconciles
+  the dynasty to the downloaded own package. Fix in the stub: spike/blaze/server/team-package.mjs
+  (completeTeamPackage: unwrap the .team blob = zlib of a 50,000-byte DB with no prefix, grow PLAY to 100, append the
+  rows the roster push names but the package lacks from the dynasty file the console is on, serialize padded to
+  50,000, re-deflate; packages/tdb/dist imported directly), hooked in dod.mjs EndDynastyUpdate UPDT 1 (fixTeamPackage:
+  d.rosterPush[team] = the PLYZ push's PGIDs captured in applyTableUpdate; fallback = every row of the team in the
+  dynasty file), blob replaced in place (locker.mjs readContentBlob/replaceContentBlob). Budget: 45,220 + 30 x 116 =
+  48,700 < 50,000. node --test spike/blaze/server/team-package.test.mjs replays 336 + 335 + the push: 70 -> 90 of 100,
+  ids = the push exactly. NEEDS a league-server restart (restart-league.cmd) while the console is out of the dynasty,
+  then a re-test with a small overage (fill 73, play, advance) with `od repair` ready.
+- CHECKPOINT 3 PASSED WITH THE SERVER FIX (Eric, 2026-11-06 18:50): league server restarted with team-package.mjs,
+  Holy Cross filled 69 -> 73 on top of the repair (copy 341), game vs Fordham played (first attempt died with a Vulkan
+  VK_ERROR_DEVICE_LOST in the RSX thread while the game loaded; the retry played through — treated as the driver) and
+  the advance went through. Log: package 342 uploaded with 70 rows, PLYZ push 73 rows, "team package 342 (team 18)
+  completed from dynasty file 341 and the 73-row roster push: PLAY 70 -> 73 of 100", the console downloaded the
+  completed 15,112-byte package at 23:49:37, upload 344 (week 10) keeps Holy Cross 73 (lost 0, gained 0, none outside
+  the range, DCHT 0 dangling) and the package carries exactly the upload's 73 ids. Bridge: the repair memo is one
+  batch (cleared once the console's file lacks any removed id; ids reused by later fills no longer count as "still
+  there"). Open: a user team at 90 for a full week (73 is the only data point), the Cut Players week at 90 (offseason),
+  the other members' installs (both patch entries, the stop-gap XMLs, the server fix is central).
+- MEMBER TEAM AT 90 PASSED (Eric, 2026-11-06 19:21): Holy Cross 73 -> 90 (copy 346), game vs Colgate (144@18 27-31)
+  played, advance to week 11. Log: package 347 uploaded with 70 rows, PLYZ push 90, "team package 347 (team 18)
+  completed from dynasty file 346 and the 90-row roster push: PLAY 70 -> 90 of 100", the console downloaded the
+  completed 16,245-byte package, upload 349 keeps Holy Cross 90. The in-season model (90 on a member team, 99 on CPU
+  teams, 70 dressed) is now exercised end to end; the Cut Players week at 90 (offseason) is the last untested piece.

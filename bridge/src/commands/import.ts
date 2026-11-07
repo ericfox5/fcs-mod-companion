@@ -12,7 +12,7 @@ const CHUNK = 400;
 // Sets added after the Worker's import specs; an older deployment answers "unknown table" for them.
 const OPTIONAL_SETS = new Set(['transfers', 'formationSubs']);
 
-// A player's identity across seasons: PGID is a roster slot (TGID * 70 + n) that changes when he transfers and is
+// A player's identity across seasons: PGID is a roster slot (TGID * PGID_STRIDE + n, packages/ncaa14 roster.ts) that changes when he transfers and is
 // reused by the recruit who takes his slot, while POID ("Org. Player ID") stays with him; POID plus hometown (RCHD)
 // tells him apart from a later occupant of the same original slot. Stat lines carry the uid of the player who held the
 // PGID in the same file, so a season's lines stay with the right person after transfers and graduations.

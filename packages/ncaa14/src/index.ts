@@ -13,3 +13,4 @@ export * from './decode/recruiting.js';
 export * from './decode/transfers.js';
 export { exportDynasty, type DynastyExport } from './export.js';
 export * from './playoff.js';
+export * from './roster.js';

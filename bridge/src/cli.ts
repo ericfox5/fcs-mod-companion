@@ -6,12 +6,13 @@ import { parseTdb, verifyTdb, type TdbFile, type FieldValue } from '@ncaa/tdb';
 import { exportDynasty, isPlayed } from '@ncaa/ncaa14';
 import { loadConfig } from './config.js';
 import { importSave } from './commands/import.js';
-import { odImport, odList, odWatch, syncWebEdits, odBackfillLogs, odOverhaul, odYear, odLock, odPlayoff } from './commands/od.js';
+import { odImport, odList, odWatch, syncWebEdits, odBackfillLogs, odOverhaul, odYear, odLock, odPlayoff, odStride, odPlayers, odRepair } from './commands/od.js';
 import { syncCaptures } from './commands/captures.js';
 import { loadOdStore } from './od.js';
 import { photosUpload } from './commands/photos.js';
 import { odInvite } from './commands/invite.js';
 import { logosUpload } from './commands/logos.js';
+import { rosterGrow, rosterAdd } from './commands/roster.js';
 
 const [, , cmd, ...rest] = process.argv;
 const flags = new Map<string, string>();
@@ -117,11 +118,26 @@ switch (cmd) {
     else if (args[0] === 'overhaul') await odOverhaul(cfg, { did, setExe: flags.get('set-exe'), clearExe: flags.has('clear-exe'), run: flags.has('run'), force: flags.has('force'), installRcat: flags.get('install-rcat'), restoreRcat: flags.has('restore-rcat'), archive: flags.get('archive'), preview: flags.has('preview') });
     // the calendar year new dynasties start in (the Dynasty Tool's Year Changer, applied through the dynasty-file copy): --default 2025 for every new dynasty, --did N --year 2025 for one at its first preseason
     else if (args[0] === 'year') await odYear(cfg, { did, year: flags.has('year') ? Number(flags.get('year')) : undefined, dflt: flags.get('default') });
+    // roster stride (100-player rosters): status, or queue a re-keyed dynasty file for one dynasty (docs/roster-stride-inventory.md)
+    else if (args[0] === 'stride') await odStride(cfg, { did, stride: flags.has('stride') ? Number(flags.get('stride')) : undefined, off: flags.has('off') });
+    // generated reserve players (100-player roster test): od players --did N --team "Abilene Christian" --fill 100
+    else if (args[0] === 'players') await odPlayers(cfg, { did, tgid: flags.has('tgid') ? Number(flags.get('tgid')) : undefined, team: flags.get('team'), fill: flags.has('fill') ? Number(flags.get('fill')) : undefined, prefix: flags.get('prefix'), clear: flags.has('clear') });
+    // put a team's roster back from an earlier locker file: od repair --did N --tgid T --from CID [--keep-reserves]
+    else if (args[0] === 'repair') await odRepair(cfg, { did, tgid: flags.has('tgid') ? Number(flags.get('tgid')) : undefined, from: flags.has('from') ? Number(flags.get('from')) : undefined, keepReserves: flags.has('keep-reserves') });
     // commissioner recruit lock: keeps a prospect's interest in a team above the commit threshold until he commits there
     else if (args[0] === 'lock') await odLock(cfg, { did, prsi: flags.has('prsi') ? Number(flags.get('prsi')) : undefined, tgid: flags.has('tgid') ? Number(flags.get('tgid')) : undefined, clear: flags.has('clear') });
     // the FCS playoff: status by default; --preview shows the projected field; --on/--off, --autobids "CAA,MVFC" or "default", --reset
     else if (args[0] === 'playoff') await odPlayoff(cfg, { did, on: flags.has('on'), off: flags.has('off'), autobids: flags.get('autobids'), preview: flags.has('preview'), reset: flags.has('reset'), skip: flags.has('skip') ? (flags.get('skip') === 'true' ? '' : flags.get('skip')) : undefined, hold: flags.has('hold') ? (flags.get('hold') === 'true' ? '' : flags.get('hold')) : undefined, release: flags.has('release') });
     else console.log('usage: ncaa-bridge od list | od edits [--did N] | od import [--did N] [--force] [--no-files] [--note N] | od backfill-logs [--did N] | od watch [--did N] [--interval s] [--settle s] | od overhaul [--set-exe EXE | --clear-exe] [--install-rcat DB [--archive AST] | --restore-rcat] [--run [--did N] [--force]] | od year [--default Y|off] [--did N --year Y]   (--od-dir overrides the stub store path)');
+    break;
+  }
+  case 'roster': { // roster files for the 100-player roster project (docs/roster-stride-inventory.md)
+    const num = (k: string) => (flags.has(k) ? Number(flags.get(k)) : undefined);
+    try {
+      if (args[0] === 'grow' && args[2]) rosterGrow(args[1]!, args[2], { stride: num('stride'), from: num('from'), allowOversize: flags.has('allow-oversize') });
+      else if (args[0] === 'add' && args[2] && flags.has('tgid')) rosterAdd(args[1]!, args[2], { tgid: Number(flags.get('tgid')), first: flags.get('first') ?? 'New', last: flags.get('last') ?? 'Player', pos: num('pos'), jersey: num('jersey'), template: num('template'), stride: num('stride') });
+      else console.log('usage: ncaa-bridge roster grow <in> <out> [--stride 100] [--from 70] [--allow-oversize] | roster add <in> <out> --tgid N --first F --last L [--pos P] [--jersey J] [--template PGID] [--stride S]');
+    } catch (e) { console.error((e as Error).message); process.exitCode = 1; }
     break;
   }
   case 'export': exportCmd(args[0]!); break;
@@ -130,5 +146,5 @@ switch (cmd) {
   case 'verify': verify(args[0]!); break;
   case 'diff': diff(args[0]!, args[1]!); break;
   default:
-    console.log('usage: ncaa-bridge import <USR-DATA> [--url U --token T --dynasty SLUG --name NAME --note N --no-files] | od list|import|watch [--did N] | info <USR-DATA> | export <USR-DATA> [--out file.json] | dump <USR-DATA> TABLE... [--rows n] [--json] | verify <USR-DATA> | diff <A> <B> [--table T] [--samples n]');
+    console.log('usage: ncaa-bridge import <USR-DATA> [--url U --token T --dynasty SLUG --name NAME --note N --no-files] | od list|import|watch [--did N] | roster grow|add ... | info <USR-DATA> | export <USR-DATA> [--out file.json] | dump <USR-DATA> TABLE... [--rows n] [--json] | verify <USR-DATA> | diff <A> <B> [--table T] [--samples n]');
 }

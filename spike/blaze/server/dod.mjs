@@ -16,7 +16,8 @@ import { T } from './tdf.mjs';
 import { log } from './log.mjs';
 import { noteConsoleOverride } from './supersim.mjs';
 import { GAME_FILTER, LAYOUTS as GAME_LAYOUTS, loadGameData, saveGameData, gameTableRows } from './gamedata.mjs';
-import { latestContent, publishContent, setDownloadHook } from './locker.mjs';
+import { latestContent, publishContent, setDownloadHook, readContentBlob, replaceContentBlob } from './locker.mjs';
+import { completeTeamPackage } from './team-package.mjs';
 import { isPublicDynasty, canSeeInSearch, matchesDynastyQuery, mayJoinDynasty } from './league-auth.mjs';
 
 export const DOD = 2148;
@@ -196,6 +197,22 @@ function registerConsoleGame(d, body, user) {
   (d.gameData ??= {})[wk] = [...(d.gameData[wk] ?? []).filter((x) => x.team !== team), { team, id, source: 'console' }];
   log('dod', `DID ${d.id}: console game week ${week} ${ginf.GATG}@${ginf.GHTG} ${ginf.GASC}-${ginf.GHSC} (GQTR ${ginf.GQTR}) kept as game data ${id} for team ${team}`);
 }
+// A member's uploaded .team package rebuilt with every row of its roster (team-package.mjs): the console's PLAY table
+// in it holds 70 rows and wraps when the team is larger, and the advance reconciles the dynasty to what it downloads
+// back. The roster push that preceded EndDynastyUpdate names the rows to keep (fallback: the team's rows in the dynasty
+// file the console is on, which can only be wrong after an offseason cut).
+function fixTeamPackage(d, team, cid) {
+  try {
+    const pkg = readContentBlob(cid); if (!pkg) return;
+    const onCid = d.patch && d.consoleLoadedCid === d.patch.cid ? d.patch.cid : (d.consoleFileId ?? d.fileId ?? 0);
+    const dyn = onCid ? readContentBlob(onCid) : null; if (!dyn) { log('dod', `DID ${d.id}: team package ${cid} not checked (no dynasty file ${onCid})`); return; }
+    const push = d.rosterPush?.[team]; const ids = push?.pgids ?? null;
+    const r = completeTeamPackage(pkg, dyn, team, ids);
+    if (!r) return;
+    replaceContentBlob(cid, r.blob);
+    log('dod', `DID ${d.id}: team package ${cid} (team ${team}) completed from dynasty file ${onCid}${ids ? ` and the ${ids.length}-row roster push` : ' (no roster push: every row of the team)'}: PLAY ${r.before} -> ${r.after} of ${r.max}${r.missing.length ? `, ${r.missing.length} did not fit: ${r.missing.join(' ')}` : ''}`);
+  } catch (e) { log('dod', `DID ${d.id}: team package ${cid} fix failed: ${e.stack ?? e.message}`); }
+}
 function applyTableUpdate(d, body, memberScope = null) {
   const table = name4(body.TABL);
   const upd = d.update ?? { updt: 0, touched: [] };
@@ -220,13 +237,20 @@ function applyTableUpdate(d, body, memberScope = null) {
     game.columns[table] ??= Object.fromEntries(COLUMN_LISTS.filter(([tag]) => body[tag]).map(([tag]) => [tag, items(body[tag]).map(name4)]));
   }
   let added = 0;
+  const pushed = [];
   for (const r of items(body.ROWS)) {
     const row = {};
     for (const [listTag, valueTag] of COLUMN_LISTS) {
       const cols = t.columns[listTag] ?? [], vals = items(r[valueTag]);
       vals.forEach((v, i) => { row[cols[i] ?? `${listTag}${i}`] = typeof v === 'bigint' ? Number(v) : v; });
     }
-    t.rows.push(row); if (game) game.tables[table].push({ ...row }); added++;
+    t.rows.push(row); if (game) game.tables[table].push({ ...row }); added++; pushed.push(row);
+  }
+  // the user's team rows (UPDT 1) name every PLAY row the console still has: kept in memory for the team package fix
+  if (table === 'PLYZ' && upd.updt === 1) {
+    const byTeam = d.rosterPush ?? (d.rosterPush = {});
+    const at = upd.startedAt ?? now();
+    for (const row of pushed) { const tg = num(row.TGID); if (!tg) continue; const e = byTeam[tg] && byTeam[tg].at === at ? byTeam[tg] : (byTeam[tg] = { at, pgids: [] }); e.pgids.push(num(row.PGID)); }
   }
   if (scopedFile) { fs.mkdirSync(path.dirname(scopedFile),{recursive:true}); fs.writeFileSync(scopedFile,JSON.stringify(t)); }
   else saveTable(d.id, t);
@@ -435,7 +459,7 @@ export function handleDod({ p, body, session, reply }) {
         if (num(body.UPDT) === 1) {
           const team = num(body.TMID);
           const m = team > 0 && team < 1023 ? (me ?? d.members.find((x) => x.team === team)) : null;
-          if (m) { m.team = team; m.teamFileId = num(body.FID, m.teamFileId ?? 0); }
+          if (m) { m.team = team; m.teamFileId = num(body.FID, m.teamFileId ?? 0); if (num(body.FID)) fixTeamPackage(d, team, num(body.FID)); }
         }
         else if (num(body.UPDT) === 0 && num(body.FID)) { d.fileId = d.consoleFileId = num(body.FID); d.patch = null; d.fileSavedAt = now(); }
         // UPDT 2 = a played game's stat tables + UploadGameResults; FID is 0 there and the dynasty file is unchanged (run 38 took it as file 0)

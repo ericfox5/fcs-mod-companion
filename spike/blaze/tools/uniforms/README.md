@@ -70,6 +70,15 @@ and Tuskegee):
 | --- | --- | --- | --- |
 | `D1AANW_Pack0_MixAndMatch.XML` | D1AANW | Wagner | the game's "FCS Northwest" set: gold NW helmet, green / white NORTHWEST jerseys, white pants |
 | `D1AAMW_Pack0_MixAndMatch.XML` | D1AAMW | Tuskegee | gray Midwest helmet, plain red home jersey, white Southeast away jersey, white pants |
+| `BALLST_Pack0_MixAndMatch.XML` | BALLST | Duquesne | the Wagner set again (Duquesne sits on Ball State's slot, whose mod XML is a one-row "Coming Soon" placeholder) |
+
+"Coming Soon" teams: the mod's archive XML for eleven FCS slots (Central Connecticut, Davidson, Drake, Duquesne,
+Long Island, Merrimack, Presbyterian, Richmond, Sacred Heart, Saint Francis, St. Thomas in the 2026-11-06 league file)
+declares a single "Coming Soon" row with the FCSXXX 2042 placeholder parts; the parts exist (FCS_DLC_CAA) but the
+set has no Home/Away rows, and such a team crashes when a game loads. `node make-stopgap-xml.mjs SLOT [SLOT ...]
+[--folder FCS_DLC_NEC]` writes a copy of the Wagner stop-gap under any slot name into the DLC folder (RPCS3 path from
+`~/.ncaa-bridge/config.json`) and beside this script; every member's install needs the same file. Check a league
+file's teams with the slot report in the project notes (2026-11-06) before relying on an opponent.
 
 Caveat: the mod's archive no longer holds the vanilla art under every generic-slot name (the "NW green helmet"
 entry is a West Virginia helmet, the Midwest jerseys are red/maroon/black, and so on); the Archive tab lists what

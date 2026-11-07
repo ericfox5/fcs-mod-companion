@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { parseTdb, serializeTdb, verifyTdb, type TdbFile, type TdbTable } from '@ncaa/tdb';
-import { DEPTH_SLOTS } from '@ncaa/ncaa14';
+import { DEPTH_SLOTS, addPlayer, removePlayers, detectStride, rekeyStride } from '@ncaa/ncaa14';
 import { openDynastyFile } from './od.js';
 import { applyRecruitClass, classTaken, sha256 } from './recruit-overhaul.js';
 
@@ -45,9 +45,17 @@ export interface RecruitPatch { file: string; sha: string; fields: string[]; int
 export interface RecruitEdit { prsi: number; firstName: string | null; lastName: string | null; pos: number | null; height: number | null; weight: number | null; stars: number | null; headId?: number | null; lockTgid?: number | null }
 // startYear: the calendar year a brand-new dynasty starts in (the game counts seasons from 2013)
 // playoff: the FCS playoff's re-weeked bowl rows and the rounds written so far (bridge/src/playoff.ts)
-export interface DynastyPatchSet { transfers: TransferPatch[]; depth: DepthPatch[]; eligible: number[]; recruits?: RecruitPatch; recruitEdits?: RecruitEdit[]; startYear?: number; playoff?: PlayoffPatch } // eligible: PGIDs whose redshirt (PRSD) is cleared
+// a player created on the site: a new PLAY row in a free slot of the team (packages/ncaa14 addPlayer), copied from the
+// template PGID (or the team's first row) with the names, position, jersey and any extra PLAY fields written over it.
+// New rows only reach the console through this file copy (PLYZ merges into existing rows), so this is the one channel.
+// pgid: restore the row under this id instead of allocating a slot (a row the console dropped; `od repair`).
+export interface CreatePlayerPatch { tgid: number; firstName: string; lastName: string; pos: number | null; jersey: number | null; template?: number | null; fields?: Record<string, number | string>; pgid?: number | null }
+// stride: re-key the whole file to PGID = TGID * stride + slot (the 100-player roster project; the console must run the
+// matching "FCS mod: 100-player rosters" patch). Applied last, after every edit that names players by their current ids.
+// removePlayers: PLAY rows deleted by PGID before anything is created (duplicate rows the console made; `od repair`)
+export interface DynastyPatchSet { transfers: TransferPatch[]; depth: DepthPatch[]; eligible: number[]; recruits?: RecruitPatch; recruitEdits?: RecruitEdit[]; startYear?: number; playoff?: PlayoffPatch; createPlayers?: CreatePlayerPatch[]; removePlayers?: number[]; stride?: number } // eligible: PGIDs whose redshirt (PRSD) is cleared
 export const emptyPatchSet = (): DynastyPatchSet => ({ transfers: [], depth: [], eligible: [] });
-export const patchSetEmpty = (s: DynastyPatchSet) => !s.transfers.length && !s.depth.length && !s.eligible.length && !s.recruits && !s.recruitEdits?.length && !s.startYear && !s.playoff;
+export const patchSetEmpty = (s: DynastyPatchSet) => !s.transfers.length && !s.depth.length && !s.eligible.length && !s.recruits && !s.recruitEdits?.length && !s.startYear && !s.playoff && !s.createPlayers?.length && !s.removePlayers?.length && !s.stride;
 export const RECRUIT_FIRST_MAX = 11, RECRUIT_LAST_MAX = 13, WEIGHT_BASE = 160;
 
 // Recruit edits from the site: RCPT rows by PRSI (name, position, height, weight, stars); applied after the overhaul so
@@ -158,6 +166,43 @@ function applyDepth(file: TdbFile, patches: DepthPatch[], changes: string[]) {
     changes.push(`team ${p.tgid} depth chart: ${set} slot(s) changed${missing ? `, ${missing} slot(s) not in DCHT` : ''}${subs}`);
   }
 }
+// New players: one PLAY row each in the first free slot of the team's PGID range. Returns the ids created so the
+// re-read can check them; a team with no free slot or a full PLAY table is reported and skipped.
+function applyCreatePlayers(file: TdbFile, list: CreatePlayerPatch[], changes: string[]): { pgid: number; lastName: string }[] {
+  const made: { pgid: number; lastName: string }[] = [];
+  for (const c of list) {
+    const fields: Record<string, number | string> = { ...(c.fields ?? {}), PFNA: c.firstName.slice(0, RECRUIT_FIRST_MAX), PLNA: c.lastName.slice(0, RECRUIT_LAST_MAX) };
+    if (c.pos !== null) fields.PPOS = Math.max(0, Math.min(31, c.pos));
+    if (c.jersey !== null) fields.PJEN = Math.max(0, Math.min(99, c.jersey));
+    try {
+      const { pgid } = addPlayer(file, { tgid: c.tgid, template: c.template ?? undefined, fields, pgid: c.pgid ?? undefined });
+      made.push({ pgid, lastName: String(fields.PLNA) });
+      changes.push(`${c.pgid ? 'restored' : 'new'} player ${fields.PFNA} ${fields.PLNA} on team ${c.tgid}: PGID ${pgid}${c.template ? ` (copied from PGID ${c.template})` : ''}`);
+    } catch (e) { changes.push(`new player ${c.firstName} ${c.lastName} on team ${c.tgid}: skipped, ${(e as Error).message}`); }
+  }
+  return made;
+}
+// Rows deleted by id (the console's duplicate rows, or generated reserves being taken back).
+function applyRemovePlayers(file: TdbFile, pgids: number[], changes: string[]): number[] {
+  if (!pgids.length) return [];
+  const play = file.table('PLAY'); const names = new Map<number, string>();
+  for (let i = 0; i < play.recordCount; i++) { const g = Number(play.get(i, 'PGID')); if (pgids.includes(g)) names.set(g, `${play.get(i, 'PFNA')} ${play.get(i, 'PLNA')} (team ${play.get(i, 'TGID')})`); }
+  const gone = removePlayers(file, pgids);
+  for (const g of gone) changes.push(`removed player ${names.get(g) ?? '?'}: PGID ${g}`);
+  for (const g of pgids) if (!gone.includes(g)) changes.push(`remove PGID ${g}: not in PLAY, skipped`);
+  return gone;
+}
+// Roster stride: every PGID re-keyed and PLAY grown (packages/ncaa14 rekeyStride). A file already at the stride is left
+// alone; a file at an unexpected stride is refused rather than guessed at.
+function applyStride(file: TdbFile, stride: number, changes: string[]): boolean {
+  const play = file.table('PLAY');
+  const current = detectStride(play);
+  if (current === stride) { changes.push(`stride ${stride}: already keyed that way`); return false; }
+  if (current === null) throw new Error('stride: the file is keyed with no known stride (PGID / 70 or / 100 == TGID on fewer than half the rows)');
+  const r = rekeyStride(file, { from: current, to: stride });
+  changes.push(`stride ${current} -> ${stride}: ${r.rekeyed} PGID cells re-keyed in ${r.perTable.length} tables, PLAY max ${r.playMax[0]} -> ${r.playMax[1]} (${r.teams} teams)${r.overflow ? `, ${r.overflow} ids left: overflow` : ''}`);
+  return true;
+}
 // Transfer eligibility: the redshirt the game put on a portal player at the rollover comes off (PRSD 1 -> 0).
 function applyEligible(file: TdbFile, pgids: number[], changes: string[]) {
   if (!pgids.length) return;
@@ -187,7 +232,11 @@ export function patchDynasty(blob: Uint8Array, set: DynastyPatchSet): { blob: Ui
   applyTransfers(o.file, set.transfers, changes);
   applyDepth(o.file, set.depth, changes);
   applyEligible(o.file, set.eligible, changes);
+  const removed = applyRemovePlayers(o.file, set.removePlayers ?? [], changes);
+  const created = applyCreatePlayers(o.file, set.createPlayers ?? [], changes);
   if (set.playoff) applyPlayoff(o.file, set.playoff, changes);
+  const strideSet = set.stride ? applyStride(o.file, set.stride, changes) : false;
+  if (strideSet) for (const c of created) c.pgid = -1; // created ids were re-keyed with everything else; checked by stride below
   const db = serializeTdb(o.file, { padTo: o.db.length });
   const problems = verifyTdb(db, o.file);
   if (problems.length) throw new Error(`patched dynasty file does not verify: ${JSON.stringify(problems.slice(0, 3))}`);
@@ -210,6 +259,9 @@ export function patchDynasty(blob: Uint8Array, set: DynastyPatchSet): { blob: Ui
   if (overhaul && !classTaken(back.file, overhaul)) throw new Error('patched dynasty file: the reshaped recruits did not read back');
   if (yearSet && Number(back.file.table('SEAI').get(0, 'SEYR')) !== set.startYear! - BASE_YEAR) throw new Error('patched dynasty file: the start year did not read back');
   if (set.playoff) { const problem = verifyPlayoff(back.file, set.playoff); if (problem) throw new Error(`patched dynasty file: ${problem}`); }
+  for (const c of created) { if (c.pgid < 0) continue; const bp = back.file.table('PLAY'); const i = findRow(bp, 'PGID', c.pgid); if (i < 0 || bp.get(i, 'PLNA') !== c.lastName) throw new Error(`patched dynasty file: new player PGID ${c.pgid} did not read back`); }
+  if (!strideSet) for (const g of removed) { if (findRow(back.file.table('PLAY'), 'PGID', g) >= 0 && !created.some((c) => c.pgid === g)) throw new Error(`patched dynasty file: removed player PGID ${g} is still there after re-read`); }
+  if (set.stride && detectStride(back.file.table('PLAY')) !== set.stride) throw new Error(`patched dynasty file: not keyed at stride ${set.stride} after re-read`);
   if (set.recruitEdits?.length && back.file.hasTable('RCPT')) {
     const bt = back.file.table('RCPT'); const want = new Map(set.recruitEdits.map((e) => [e.prsi, e]));
     for (let i = 0; i < bt.recordCount && want.size; i++) { const e = want.get(Number(bt.get(i, 'PRSI'))); if (!e) continue; want.delete(e.prsi); if (e.lastName !== null && bt.get(i, 'PLNA') !== e.lastName.slice(0, RECRUIT_LAST_MAX)) throw new Error(`patched dynasty file: recruit ${e.prsi} did not read back`); }

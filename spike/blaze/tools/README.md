@@ -12,3 +12,15 @@ All scripts take the decrypted `private/EBOOT.elf` as first argument and never m
 - `cmdtable.py` – lists the RpcJob response factories; `cmdswitch.py` – decodes cmpwi/beq switches (command names).
 - `ppcdis.py EBOOT.elf start end [...]` – disassembly with string annotations; `coderef.py` – who references a string/address;
   `vtdump.py` – dump a vtable around a function pointer; `dumptags.py` / `tagfind.py` / `elfstr.py` – raw helpers.
+- `jersey-zero-patch.py EBOOT.elf` – checks the five original words of the "FCS mod: jersey #0" patch and prints the
+  be32 lines with a before/after disassembly (word by word, so AltiVec opcodes do not stop capstone).
+- `ps3-eboot.mjs ORIGINAL.elf NEW.elf [--commissioner] [--jersey-zero]` (Node) – bakes the RPCS3 patch words into the
+  decrypted ELF for the real PS3; `node --test ps3-eboot.test.mjs` checks them against `private/rpcs3-patches.yml`.
+- `roster-stride-inventory.py EBOOT.elf out.csv out.md` – every executable site that depends on the 70-player stride
+  (docs/roster-stride-inventory.md); `roster-stride-patch.py EBOOT.elf --yml --words --json --report` – builds the
+  "FCS mod: 100-player rosters" patch (divisions, shift-add multiplies by coefficient tracking, package rows, save size)
+  and a report of what it declines; `--capacity --cut 90 --cap-yml --cap-words` adds the second entry "FCS mod: 100-player
+  rosters (capacity)" (per-team range ends and the team-management arrays go to 100, the offseason cut stage / auto-cut /
+  GetMaxTeamRosterSize / roster-editor checks go to the in-season limit `--cut`; functions that touch the in-game
+  `..GA` tables stay at 70); `ps3-eboot.mjs ... --roster-stride [--roster-capacity]` bakes those words
+  after the other patches.

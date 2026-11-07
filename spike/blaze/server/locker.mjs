@@ -93,6 +93,13 @@ export function latestContent({ group, suffix, since = 0, owners = [] }) {
 // called with the content record after every successful download (dod.mjs: the console's current dynasty file)
 let downloadHook = null;
 export const setDownloadHook = (fn) => { downloadHook = fn; };
+// The stored blob of an item, and replacing it in place (same cid: the console already holds the id).
+export const readContentBlob = (cid) => (find(cid) && fs.existsSync(blobPath(cid)) ? fs.readFileSync(blobPath(cid)) : null);
+export function replaceContentBlob(cid, bytes) {
+  const c = find(cid); if (!c) return false;
+  fs.writeFileSync(blobPath(cid), bytes); c.size = bytes.length; c.udat = now(); save();
+  return true;
+}
 export function publishContent(likeCid, bytes) {
   const like = find(likeCid);
   if (!like) return null;

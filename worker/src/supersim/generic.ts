@@ -9,6 +9,8 @@ import { headshotUrl } from '../pages/common.js';
 import type { PlayerInput } from './coach/types.js';
 
 export const SYNTHETIC_PGID_BASE = 900000;
+// slots per synthetic team above the base; a site-only layout, independent of the game's PGID_STRIDE (packages/ncaa14 roster.ts)
+export const SYNTHETIC_TEAM_STRIDE = 100;
 export const isSynthetic = (pgid: number) => pgid >= SYNTHETIC_PGID_BASE;
 
 export function autoDepthChart(players: PlayerInput[]): { pos: number; depth: number; pgid: number }[] {
@@ -57,7 +59,7 @@ export function syntheticRoster(tgid: number, seed: string): PlayerInput[] {
       for (let tries = 0; tries < 50 && (number === 0 || numbers.has(number)); tries++) number = lo + Math.floor(rng() * (hi - lo + 1));
       numbers.add(number);
       let head = 1 + Math.floor(rng() * 246); if (MISSING_FACES.has(head)) head = 1;
-      out.push({ id: SYNTHETIC_PGID_BASE + tgid * 100 + i, name: `${FIRST[Math.floor(rng() * FIRST.length)]} ${LAST[Math.floor(rng() * LAST.length)]}`, number, pos, overall: ratings.POVR, ratings, photoUrl: headshotUrl({ head_id: head }) });
+      out.push({ id: SYNTHETIC_PGID_BASE + tgid * SYNTHETIC_TEAM_STRIDE + i, name: `${FIRST[Math.floor(rng() * FIRST.length)]} ${LAST[Math.floor(rng() * LAST.length)]}`, number, pos, overall: ratings.POVR, ratings, photoUrl: headshotUrl({ head_id: head }) });
     }
   }
   return out;
