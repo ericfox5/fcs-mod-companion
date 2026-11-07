@@ -1836,3 +1836,18 @@ First full Supersim game on the new engine (Brown 37, Furman 36, week 1 of 2014,
   completed from dynasty file 346 and the 90-row roster push: PLAY 70 -> 90 of 100", the console downloaded the
   completed 16,245-byte package, upload 349 keeps Holy Cross 90. The in-season model (90 on a member team, 99 on CPU
   teams, 70 dressed) is now exercised end to end; the Cut Players week at 90 (offseason) is the last untested piece.
+
+## 2026-11-06 — FCS2026 roster save rebuilt at up to 90 per team
+
+- FCS/Rosters tools grew: `grow-control` (STABLEV1 -> 2026/control/USR-DATA: stride 100, teams padded to
+  min(90, scraped) with "Open Slot" copies of their own rows, rows re-sorted so each team is contiguous, padded to
+  0x1c0000), env overrides ROSTER_CONTROL_USR / _FILE_LENGTH / _DB_SIZE / _ROWS_PER_TEAM / _PGID_STRIDE /
+  _CONTROL_CSV_DIR (control.ts, validate.ts, ratings.py, body.py, faces_common.py), per-team row counts <= 90, the
+  match-rate gate over the rows that had a 2025 player. rekeyStride now re-keys PLAY.POID too (106c629).
+- Result: 126 teams assigned (the same ten low-match allowances as the 69-man build), 11,288 rows with a 2026 player,
+  123 teams at 90 (Miss Valley State 78, UTRGV? no: TGID 34 at 89, Saint Francis 69), 18 untouched 2025 rows, no
+  "Open Slot" left, no staff names (the 83 names flagged as coach leaks are real players scraped twice), ratings for
+  11,216 rows, 4,272 faces, 3,701 body rewrites, verify ok (11 warnings). Installed over the RPCS3 FCS2026 save
+  (69-man copy backed up in %LOCALAPPDATA%\ncaa-bridge\backups\2026-11-06-roster70); 69-man plans in 2026/_prev-70.
+  UNTESTED in game: Rosters -> Load Roster -> ROSTER-FCS2026 with the patches on, then a throwaway dynasty + advance
+  (the roster-save path at stride 100 / 0x1c0000 is the one remaining untested piece of the roster project).

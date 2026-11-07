@@ -38,3 +38,7 @@ worker/public/data/playbooks/
 worker/.dev-account.json
 # python bytecode caches
 __pycache__/
+
+# installer: generated payload (patch words from the game binary) and the built exe
+installer/generated/
+installer/dist/
