@@ -193,3 +193,51 @@ league server (spike/blaze/server/team-package.mjs, hooked at EndDynastyUpdate U
 rebuilt with PLAY grown to 100 and the rows the console's roster push names appended from the dynasty file the console
 is on, before the console pulls it back. Re-tested the same night with Holy Cross at 73: package 70 -> 73, upload
 intact. So members above 70 are fine as long as the league server runs that fix.
+
+## Mode databases: the 9,100-row player template (2026-11-07)
+
+The 90-man FCS 2026 roster file (11,306 PLAY rows, max 13,000) loaded in the Rosters screens with every team past
+physical row 9,100 empty. Not the save buffer (already 0x1c0000): the game loads a roster file as the `LEAG` database
+with the file's own table sizes (`0x21be68`: image load `0xa5da0c`, register `0xa59230`), but each mode database is
+built from templates in the standard-data database `STDA` (`0x44768c` walks the template list; `0x447320` runs
+`use 'ADTS' select into <db>.<table> * from <table>` per table) and is then filled from `LEAG` team by team
+(`0x4f3d88` -> `0x4e9984` -> `0x44a6f0`, record copies through the table map at `0x1c867bc`). The copy stops silently
+when the mode PLAY table is full, and the PLAY template holds 9,100 rows (130 x 70). ROST (Rosters, `0x4f3ff0` /
+`0x4f4540`), DYND (dynasty, `0x4f5d40` / `0x4f7fa0`) and EXHI (Play Now, `0x4f0818` / `0x4f0a64` / `0x4f1248`) are all
+built this way; the online dynasty file is loaded as an image, which is why a re-keyed 13,000-row dynasty was never
+affected.
+
+DB library table struct (`0xa4f000`-`0xa6b000`): +0 name (4CC as in SQL text, PLAY = `0x59414c50` 'YALP'), +4 max
+records (u16), +6 field count, +8 owning DB (DB +0x1c byte 1 = read-only / asset DB), +0xc record length, +0x10 next
+table, +0x24 record storage, +0x30 flags, +0x4c grown maximum. `0xa51750(db, name)` finds a table; `0xa56dbc(table,
+rows)` resizes one (refuses read-only DBs with 0x1f, malloc when max is 0 else realloc rows x length, stores rows at +4
+and +0x4c, returns 0 or 2); the game uses it itself before bulk copies (`0x3046e4`).
+
+Third entry **"FCS mod: 100-player rosters (player table)"** (`spike/blaze/tools/roster-table-patch.py`, v2, 35
+words). v1 resized PLAY inside the template copier `0x447320` and changed nothing in game: the ROST player table does
+not come through that copier. v2 grows PLAY in the finished database right before its indexes are built:
+
+| what | sites | replacement |
+|---|---|---|
+| Rosters builder `0x4f3ff0`: `bl 0x4f237c` (create ROST indexes) at `0x4f417c` | 1 | `bl` stub at `0x1678cec` (r3 = ROST, r11 = `0x4f237c`) |
+| new-dynasty builder `0x4f5d40`: `bl 0x4f4e44` (PLAY index prep) at `0x4f5e9c` | 1 | `bl` stub at `0x69a9fc` (r3 = DYND, r11 = `0x4f4e44`) |
+| shared routine (`0x13b4b40`, 14 of 15 padding words) | 14 | `FindTable 0xa57d68(db, 'YALP')`; skip if missing or >= 13,000; else jump to the resize |
+| shared routine (`0x16367a4`, 9 of 11 padding words) | 9 | `TableResize 0xa56dbc(table, 13000)`; restore the frame; tail-call the original through CTR |
+
+The insert path checks the maximum this resize sets (`0xa56f94`: free-list slot, else `+0x4e < +4`, else 0x13), and
+the indexes are built after it. All four code locations are the only provably unused inter-function padding runs in
+.text (filler words only, a function end before, a prologue after, nothing branches to or addresses them). Play Now
+(EXHI) fills the same way and is not covered yet. `ps3-eboot.mjs --roster-table` bakes it after the capacity words.
+In-game check (pending): Rosters -> Load ROSTER-FCS2026 -> Portland State / Weber State / Marist / ACU / Chattanooga
+at 90; save to a new slot and read it back (PLAY 13000, 11,306 rows); an offline dynasty from it; a new online
+dynasty from it.
+
+## League totals above 8,820 players (2026-11-07)
+
+126 teams x 70 caps a stock league at 8,820 players, so code sized for that never fails in stock play. Found while
+bringing up 90-man dynasties (about 11,300 players): Training Players' RCTN snapshot (8,820 rows, training skipped when
+it filled), graduation's TMLE temporary table (8,820 rows) and the recruiting passes' player lists (126 x 70 nodes) —
+all fixed by "FCS mod: 100-player rosters (offseason)" (`spike/blaze/tools/roster-offseason-patch.py`). The freeze at
+"generating recruits" seen at the same time was a separate, older bug: the FCS mod's long snappers (PPOS 24) fall
+outside the recruiting passes' 17 position groups and the list insert wrote out of bounds; fixed by "FCS mod: long
+snapper recruiting fix" (`spike/blaze/tools/ls-group-patch.py`). Play Now still copies into a 9,100-row player table.

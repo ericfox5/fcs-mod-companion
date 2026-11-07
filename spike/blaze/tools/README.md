@@ -24,3 +24,17 @@ All scripts take the decrypted `private/EBOOT.elf` as first argument and never m
   GetMaxTeamRosterSize / roster-editor checks go to the in-season limit `--cut`; functions that touch the in-game
   `..GA` tables stay at 70); `ps3-eboot.mjs ... --roster-stride [--roster-capacity]` bakes those words
   after the other patches.
+- `roster-table-patch.py [--yml OUT --words OUT]` – the third entry "FCS mod: 100-player rosters (player table)": the
+  Rosters screens and a new dynasty copy the loaded roster into databases whose PLAY table holds 9,100 rows, so a bigger
+  roster file loads only its first 9,100 players. v2 hooks the Rosters builder (`0x4f417c`) and the new-dynasty builder
+  (`0x4f5e9c`) right before their indexes are built and resizes PLAY to 13,000 rows with the library's own call
+  (`0xa56dbc`); the code sits in the four provably unused .text padding runs, which the generator re-verifies. Play Now
+  is not covered. `ps3-eboot.mjs ... --roster-table` bakes it last.
+- `ls-group-patch.py [--yml OUT --words OUT]` – "FCS mod: long snapper recruiting fix": the recruiting passes file
+  players into 17 position groups, and the mod's long snappers (PPOS 24) map outside them, so the list insert
+  (`0x50de60`) wrote a pointer outside its array (heap corruption; a freeze at "generating recruits"). Rewrites that
+  insert in place with a group check. Independent of the roster entries; `ps3-eboot.mjs ... --ls-group`.
+- `roster-offseason-patch.py [--yml OUT --words OUT]` – "FCS mod: 100-player rosters (offseason)": passes sized for
+  126 x 70 = 8,820 players. Training Players' snapshot now goes through the game's grow-then-copy helper (`0x3046e4`;
+  before, a full table made training silently skip), graduation's temporary table 8,820 -> 13,000 rows, the recruiting
+  player lists 126 x 70 -> 126 x 100. `ps3-eboot.mjs ... --roster-offseason` (after `--roster-table`).

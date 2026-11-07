@@ -31,10 +31,12 @@ export function branch(at, target, link = false) {
 // "FCS mod: jersey #0" (NOTES 2026-11-06): the in-game player editor counts its jersey-number list (0x17a3b4) and
 // builds it (0x177c84) from 1..99 plus the player's own number; with own = 0 the list is one entry short of the count
 // and the lookup of "0" (FindStringIndex 0x179188) reads past the end. The taken-number mask (0x483b1c) ignored 0 and
-// the decal placement (0x5e2678, 0x5e4fcc) drew 0 as two digits. Five one-word swaps make 0 behave like 1..9.
+// the decal placement (0x5e2678, 0x5e4fcc) drew 0 as two digits. Six one-word swaps make 0 behave like 1..9 (the sixth,
+// 2026-11-07, keeps the count's `1 << bit` constant, which the first version zeroed along with the loop start).
 export const JERSEY_ZERO_WORDS = [
   [0x483bb8, 0x28030001, 0x28030000, 'Taken-number mask accepts 0 (cmplwi r3,0)'],
   [0x17a3fc, 0x38a00001, 0x38a00000, 'Jersey list count loop starts at 0'],
+  [0x17a404, 0x60a40000, 0x38800001, 'Jersey list count keeps its bit constant 1 (it was copied from the loop start)'],
   [0x177d80, 0x63d80000, 0x3b000000, 'Jersey list builder loop starts at 0'],
   [0x5e2688, 0x4c460342, 0x4c400042, 'Decal placement A: 0 is a single digit'],
   [0x5e5064, 0x4c5a0342, 0x4c400042, 'Decal placement B: 0 is a single digit'],
@@ -45,10 +47,22 @@ export const JERSEY_ZERO_WORDS = [
 export const ROSTER_STRIDE_WORDS = new URL('../private/roster-stride-words.json', import.meta.url);
 // "FCS mod: 100-player rosters (capacity)": the dynasty-side 70 -> 100 limits (roster-stride-patch.py --capacity)
 export const ROSTER_CAPACITY_WORDS = new URL('../private/roster-capacity-words.json', import.meta.url);
+// "FCS mod: 100-player rosters (player table)": the mode databases' PLAY table grown to 13,000 rows by a 20-word routine
+// in zero-filled space of the executable segment (roster-table-patch.py); its words expect zeros there.
+export const ROSTER_TABLE_WORDS = new URL('../private/roster-table-words.json', import.meta.url);
+// "FCS mod: long snapper recruiting fix": the recruiting passes' list insert (0x50de60) rewritten in place with a
+// position-group bounds check, so the mod's PPOS 24 long snappers stop writing outside the list (ls-group-patch.py).
+export const LS_GROUP_WORDS = new URL('../private/ls-group-words.json', import.meta.url);
+// "FCS mod: 100-player rosters (offseason)": Training Players / graduation / recruiting lists sized past 8,820 players
+// (roster-offseason-patch.py).
+export const ROSTER_OFFSEASON_WORDS = new URL('../private/roster-offseason-words.json', import.meta.url);
 export const wordsFrom = u => JSON.parse(fs.readFileSync(u, 'utf8')).map(w => [Number(w.va), Number(w.old), Number(w.new)]);
 export function rosterStrideWords() { return wordsFrom(ROSTER_STRIDE_WORDS); }
 export function rosterCapacityWords() { return wordsFrom(ROSTER_CAPACITY_WORDS); }
-export function patchBaseline(input, { commissioner = false, jerseyZero = false, rosterStride = false, rosterCapacity = false } = {}) {
+export function rosterTableWords() { return wordsFrom(ROSTER_TABLE_WORDS); }
+export function lsGroupWords() { return wordsFrom(LS_GROUP_WORDS); }
+export function rosterOffseasonWords() { return wordsFrom(ROSTER_OFFSEASON_WORDS); }
+export function patchBaseline(input, { commissioner = false, jerseyZero = false, rosterStride = false, rosterCapacity = false, rosterTable = false, lsGroup = false, rosterOffseason = false } = {}) {
   if (sha256(input) !== INPUT_SHA256) throw new Error('Unsupported or already modified ELF: SHA-256 mismatch');
   const segments = elfSegments(input), output = Buffer.from(input), writes = [];
   const word = va => input.readUInt32BE(fileOffset(segments, va));
@@ -94,21 +108,24 @@ export function patchBaseline(input, { commissioner = false, jerseyZero = false,
   };
   if (rosterStride) putCurrent(rosterStrideWords(), 'Roster stride 100');
   if (rosterCapacity) { if (!rosterStride) throw new Error('--roster-capacity requires --roster-stride'); putCurrent(rosterCapacityWords(), 'Roster capacity 100'); }
+  if (rosterTable) { if (!rosterCapacity) throw new Error('--roster-table requires --roster-capacity'); putCurrent(rosterTableWords(), 'Roster player table 13000'); }
+  if (lsGroup) putCurrent(lsGroupWords(), 'Long snapper recruiting fix');
+  if (rosterOffseason) { if (!rosterTable) throw new Error('--roster-offseason requires --roster-table'); putCurrent(rosterOffseasonWords(), 'Roster offseason 8,820 limits'); }
   return { output, manifest: { format: 1, titleId: 'BLUS31159', update: '01.02',
-    purpose: 'All-Conference fix' + (commissioner ? ' + five-dynasty limit' : '') + (jerseyZero ? ' + jersey #0' : '') + (rosterStride ? ' + 100-player rosters' : '') + (rosterCapacity ? ' (capacity)' : ''),
+    purpose: 'All-Conference fix' + (commissioner ? ' + five-dynasty limit' : '') + (jerseyZero ? ' + jersey #0' : '') + (rosterStride ? ' + 100-player rosters' : '') + (rosterCapacity ? ' (capacity)' : '') + (rosterTable ? ' (player table)' : '') + (rosterOffseason ? ' (offseason)' : '') + (lsGroup ? ' + long snapper fix' : ''),
     psnDependencyRemoved: false, selfSigned: false, hardwareValidated: false,
     inputSha256: INPUT_SHA256, outputSha256: sha256(output), segments, writes } };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const [inputPath, outputPath, ...opts] = process.argv.slice(2);
-    if (!inputPath || !outputPath || opts.some(x => !['--commissioner', '--jersey-zero', '--roster-stride', '--roster-capacity'].includes(x)))
-      throw new Error('Usage: node ps3-eboot.mjs ORIGINAL.elf NEW.elf [--commissioner] [--jersey-zero] [--roster-stride [--roster-capacity]]');
+    if (!inputPath || !outputPath || opts.some(x => !['--commissioner', '--jersey-zero', '--roster-stride', '--roster-capacity', '--roster-table', '--roster-offseason', '--ls-group'].includes(x)))
+      throw new Error('Usage: node ps3-eboot.mjs ORIGINAL.elf NEW.elf [--commissioner] [--jersey-zero] [--roster-stride [--roster-capacity [--roster-table [--roster-offseason]]]] [--ls-group]');
     if (path.resolve(inputPath) === path.resolve(outputPath)) throw new Error('Refusing in-place patch');
     const manifestPath = outputPath + '.manifest.json';
     if (fs.existsSync(outputPath) || fs.existsSync(manifestPath)) throw new Error('Output already exists');
     const { output, manifest } = patchBaseline(fs.readFileSync(inputPath),
-      { commissioner: opts.includes('--commissioner'), jerseyZero: opts.includes('--jersey-zero'), rosterStride: opts.includes('--roster-stride'), rosterCapacity: opts.includes('--roster-capacity') });
+      { commissioner: opts.includes('--commissioner'), jerseyZero: opts.includes('--jersey-zero'), rosterStride: opts.includes('--roster-stride'), rosterCapacity: opts.includes('--roster-capacity'), rosterTable: opts.includes('--roster-table'), lsGroup: opts.includes('--ls-group'), rosterOffseason: opts.includes('--roster-offseason') });
     fs.writeFileSync(outputPath, output, { flag: 'wx' });
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
     console.log(JSON.stringify({ outputPath, sha256: manifest.outputSha256, writes: manifest.writes.length,

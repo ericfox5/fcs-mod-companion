@@ -19,6 +19,11 @@ PATCH = [
     # va,        original,   new,        what
     (0x483bb8, 0x28030001, 0x28030000, 'taken-number mask: cmplwi r3,1 -> cmplwi r3,0 (PJEN 0 sets bit 0)'),
     (0x17a3fc, 0x38a00001, 0x38a00000, 'jersey list count: li r5,1 -> li r5,0 (count 0..99)'),
+    # 2026-11-07: the count copies r5 into r4 right after (`ori r4,r5,0`) and uses r4 as the 1 in `1 << bit` for the
+    # free test and the own-number test. With r5 = 0 every number looked taken, the count was always 1, the editor
+    # allocated a one-entry list, the builder filled it with every free number (heap overflow), and the editor showed and
+    # saved the first free number as the player's own (seen as Koch #82 -> #17, Mannino #12 -> #17, and freezes).
+    (0x17a404, 0x60a40000, 0x38800001, 'jersey list count: ori r4,r5,0 -> li r4,1 (keep the bit constant 1)'),
     (0x177d80, 0x63d80000, 0x3b000000, 'jersey list builder: mr r24,r30 -> li r24,0 (list 0..99)'),
     (0x5e2688, 0x4c460342, 0x4c400042, 'decal placement A: crorc cr0eq,cr1eq,cr0lt -> crnor cr0eq,cr0lt,cr0lt (0 = one digit)'),
     (0x5e5064, 0x4c5a0342, 0x4c400042, 'decal placement B: crorc cr0eq,cr6eq,cr0lt -> crnor cr0eq,cr0lt,cr0lt (0 = one digit)'),

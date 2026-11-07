@@ -33,7 +33,7 @@ if (rosterDir) {
   const readme = path.join(rosterDir, '..', 'README.txt');
   roster = { dir: path.basename(rosterDir), files, note: fs.existsSync(readme) ? fs.readFileSync(readme, 'utf8').split('\n')[0] : '' };
 }
-const payload = { builtAt: new Date().toISOString().slice(0, 16).replace('T', ' '), site: 'https://ncaa-online.foxbros.workers.dev', ppuHash, patches: entries, uniforms, ...(roster ? { roster } : {}) };
+const payload = { builtAt: new Date().toISOString().slice(0, 16).replace('T', ' '), site: 'https://fcs-mod.online', ppuHash, patches: entries, uniforms, ...(roster ? { roster } : {}) };
 fs.mkdirSync(path.join(here, 'generated'), { recursive: true });
 fs.writeFileSync(path.join(here, 'generated', 'payload.json'), JSON.stringify(payload));
 console.log(`payload: ${entries.length} patch entries (${entries.reduce((a, e) => a + e.words, 0)} words), ${Object.keys(uniforms).length} uniform XMLs${roster ? `, roster save ${roster.dir} (${Object.keys(roster.files).length} files)` : ''}`);

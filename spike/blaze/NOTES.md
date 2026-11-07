@@ -1864,3 +1864,224 @@ First full Supersim game on the new engine (Brown 37, Furman 36, week 1 of 2014,
   the RPCN account (RPCS3 GUI) or run the league server without a checkout (host mode starts league.mjs from one).
 - Tests: a copy of the real config tree (entries "already current", no duplicate blocks, CRLF kept, RPCN host set),
   an empty fake install (files created, DLC/custom-config warnings), the real install read-only (all enabled).
+
+## 2026-11-07 — Rosters screen drops players past row 9,100: the mode databases' PLAY template, and the fix
+
+- Symptom: the 90-man ROSTER-FCS2026 save loads, but every team whose rows sit past physical PLAY row 9,100 (Abilene
+  Christian 9347.., Colgate, Wofford, Central Arkansas, Chattanooga, ...) shows an empty roster; Holy Cross (rows
+  1518..1607) is fine. The file is correct (11,306 rows, PLAY max 13,000, all ids in range).
+- Mechanism (static RE of the EBOOT): a roster file is opened as the 'LEAG' database with its own table sizes
+  (0x21be68: 0xa5da0c image load, 0xa59230 register). Each game mode builds its own database from templates in the
+  standard-data database 'STDA': 0x44768c walks STDA's table list and 0x447320 runs "use 'ADTS' select into
+  <db>.<table> * from <table>" per table, so ROST (Rosters screens, 0x4f3ff0 / 0x4f4540), DYND (dynasty, 0x4f5d40 /
+  0x4f7fa0) and EXHI (Play Now, 0x4f0818 / 0x4f0a64 / 0x4f1248) all get the template's capacity; PLAY's is 9,100
+  (130 x 70; every game-written save shows PLAY max 9100). The mode database is then filled from LEAG team by team
+  (0x4f3d88 -> 0x4e9984 -> 0x44a6f0, record copies through 0xa58bdc / 0xa58c44 / 0xa593b0 per the table map at
+  0x1c867bc) and the copy silently stops once the mode PLAY table is full. The roster save buffer (0x1c0000) was not
+  the limit: the stride entry already set it and the 1,835,008-byte file loaded.
+- Table struct (DB library, 0xa4f000-0xa6b000): +0 name (4CC as in SQL text, PLAY = 0x59414c50 'YALP'), +4 max records
+  (u16), +6 field count, +8 owning DB (DB +0x1c byte 1 = read-only / asset DB), +0xc record length, +0x10 next table,
+  +0x24 record storage, +0x30 flags, +0x4c grown maximum, +0x4e/+0x50/+0x52 counts. 0xa51750(db, name) finds a table,
+  0xa56dbc(table, rows) resizes it: refuses read-only DBs (0x1f), malloc when max == 0 else realloc(rows x length),
+  stores rows at +4 and +0x4c, returns 0 / 2 (allocation failed). The game itself uses it before bulk copies
+  (0x3046e4: grow destination to src+dst rows, then "insert into X * select * from Y").
+- Fix = third entry **"FCS mod: 100-player rosters (player table)"** (roster-table-patch.py, 23 words): 0x4473bc's
+  `bl 0xa694c4` (clear the copied table's read-only flag) now calls a 22-word routine that performs that call, then,
+  when the table's name is 'YALP', calls 0xa56dbc(table, 13000). So every template-built PLAY table (ROST, DYND, EXHI,
+  anything else built through 0x447320) holds 13,000 rows; other tables are untouched. The routine sits in two runs of
+  inter-function padding of .text: 15 x "b ." at 0x13b4b40 (between a blr and the next prologue) and 7 of 11 nops at
+  0x16367a4; the generator proves both are padding (filler words only, no branch / data pointer / lis-addi reference
+  into the run, a function end before, a prologue after). A first attempt used a zero-filled stretch of the segment's
+  read-only data (0x171f940): the ELF does have section headers and that stretch is in a non-executable section, so
+  RPCS3's analyser might not have compiled it; .text padding is safe on both platforms. Indexes are created after
+  the copy (0x4f237c), so they size to 13,000. Memory: +437 KB per mode database.
+- Installed and enabled in RPCS3 (backups in %LOCALAPPDATA%\ncaa-bridge\backups\2026-11-07-player-table),
+  private/rpcs3-patches.yml then 956 words in six entries, ps3-eboot.mjs `--roster-table` (test 9/9), ELF
+  `private/BLUS31159-1.02-allconf-commissioner-jersey0-roster100-table.elf` (956 writes; sha in its manifest).
+- Why dynasties were never affected: the online dynasty file is loaded as an image (its tables keep their own sizes),
+  so a re-keyed 13,000-row file survives; only databases *built from the templates and filled by copy* were capped,
+  which is exactly the Rosters screens and a dynasty *created* from a roster.
+- UNTESTED in game (next): Rosters -> Load ROSTER-FCS2026 -> late teams (Weber State, Marist, ACU, Chattanooga) at
+  90; save the roster to a new slot and read it back with the bridge (PLAY 13000 / 11,306 rows); start an offline
+  dynasty from it and check a late team; then a new online dynasty from the 90-man file.
+
+- 2026-11-07 (later): v1 did NOTHING in game. RPCS3.log shows the entry applied (23 words) and the FCS2026 USR-DATA
+  read in full (bufSize = fileSize = 1,835,008), yet Weber State and later stayed empty; Portland State (rows
+  9077..9166) is the expected 23-player straddler. The insert path checks the same field the resize sets (0xa56f94:
+  reuse a free-list slot, else +0x4e < +4, else 0x13 "full"), so a resize that runs does lift the cap: PLAY of ROST
+  therefore does not come through the template copier 0x447320 (it must come with the ROST database's own game data).
+  v2 (same entry name, Patch Version 2.0, 35 words) grows PLAY in the finished database instead, right before its
+  indexes are built and the roster is copied in, wherever the table came from:
+  `0x4f417c bl 0x4f237c` (Rosters builder: create ROST indexes) and `0x4f5e9c bl 0x4f4e44` (new-dynasty builder: PLAY
+  index prep before the DYND indexes) now call 5-word stubs (r3 = 'ROST'/'DYND', r11 = original callee) that enter a
+  shared routine: FindTable 0xa57d68(db, 'YALP'), skip if missing or already >= 13,000, else TableResize 0xa56dbc(t,
+  13000), then restore the frame and tail-call the original callee through CTR (both callees load their own r3). Code
+  sits in the only four provably unused padding runs of .text (0x13b4b40 x15, 0x16367a4 x11, 0x1678cec x5, 0x69a9fc
+  x5; `padscan` criteria in the generator). Play Now (EXHI, 0x4f0a64 -> 0x4e9984 with all teams) fills the same way
+  and is NOT covered: no padding left for a third stub. Installed (968 words in six entries), ELF re-baked, tests 9/9.
+
+## 2026-11-07 — player-table v2 PASSED in the Rosters screens; offline dynasty from the 90-man file crashes
+
+- v2 confirmed by Eric: every late team (Portland State, Weber State, Marist, ACU, Chattanooga) shows its full roster.
+  Saving to a new slot (TEST90MAN1) wrote all 11,306 rows (PLAY 11306/13000); the game also re-saved the FCS2026 slot
+  with identical bytes (sha 29bbd955…), so the original build lives only in FCS/Rosters/2026/out now.
+- New offline dynasty (Portland State) from TEST90MAN1 froze at "generating recruits":
+  `F {PPU[0x1000030] Thread () [0x00f68920]} VM: Access violation reading location 0x265db9ec`. Stack: 0x691c0c <-
+  0x1fae94 <- 0x1f4f68 <- 0x44c4d0 <- 0x505b54 <- 0x50554c <- 0x5050e0 (offseason "Rating Teams - %s" stage 0x505010)
+  <- 0x4b685c (RecruitPrefMan::RecruitPrefManUpdatePlayTimePitchValues 0x4b6328) <- 0x47d39c/0x47d278 (destroy the
+  play-time containers, first free = the node pool) <- 0x14635a4 <- 0x4345c8/0x434168 (heap: which sub-heap owns the
+  pointer) <- 0x1465a08 -> 0xf68918 (sub-heap object +0x8fc holds garbage). So the heap was overwritten earlier.
+- Play-time containers (0x47e6f4 -> 0x47e468(obj, 126 teams, 17 position groups, 70 | 35)): obj+0x10 = 126 team
+  pointers, +0x14 = 126 x 17 list heads, +0x18 = node pool of 126 x 70 = 8,820 eight-byte nodes, +0x1c = used. The
+  insert 0x50de60 is bounded (used < a x c), so players past 8,820 are silently skipped, not overflowed; list heads
+  are written unchecked at team x 17 + group (group from a virtual position mapper on the object at 0x1c88d90, not
+  resolvable statically). The four recruit-module divisions the stride entry changed (0x47cf84, 0x47e224, 0x47ee58,
+  0x47ef00) only turn a PGID into a TGID (no remainder), and the roster-needs pass 0x4810a0 bounds its per-player
+  writes (0x481488). Not found statically.
+- Data: PPOS 24 (long snapper) exists in every FCS roster (STABLEV1 19, 69-man FCS2026 68, 90-man 144); PYEA 0..3,
+  PRSD 0/2 as stock.
+- Bisect control installed: slot ROSTER-TEST69 = the 69-man FCS2026 build re-keyed to stride 100 (`roster grow
+  --stride 100 --allow-oversize`, 8,694 rows, PLAY max 13000, padded to 0x1c0000; scratchpad make-save.py clones a
+  slot's PARAM.SFO / HED-DATA / ICON0). A dynasty from it separates "dynasty creation under the patches" from "90-man
+  teams / more than 8,820-9,100 players".
+- TEST69 result (Eric): dynasty created, recruits generated, advanced to week 1, no crash. So dynasty creation under
+  the stride + capacity + player-table patches is fine; the crash needs bigger rosters. The crashing worker thread
+  (id 0x1000030, created 0.35 s before the fault by FGGameSim) runs 0x505a7c: 0x4af390 (recruiting indexes only),
+  then 0x505484 -> 0x505010 "Rating Teams" -> Play Time (0x4b6328) -> crash in the first free. RPCS3's dump shows the
+  heap-set object (r30 in 0x4340f4) starting with 0x00002274 = 8,820 = the play-time node-pool count word, i.e. the
+  heap's own bookkeeping already overlapped a block the pass allocated: corruption before or inside this pass.
+- With <= 70 per team, 126 teams can never exceed 8,820 = 126 x 70 players, so a vanilla buffer sized 126 x 70 is
+  always big enough; 90-man rosters break that. 8,820-row sizes found so far (all hazards for 90-man leagues):
+  play-time node pool (0x47e7d8 li r6,70; bounded insert, extra players skipped), RCTN table max 8,820 filled by
+  "Training Players" 0x4934c8 (`insert into RCTN * select * from PLAY` at 0x493544, offseason), graduation
+  0x4835a8 sizes table 'ELMT'/TMLE to 8,820 rows via 0xa57ce0 at 0x48368c (offseason).
+- Next control installed: slot ROSTER-TEST5X90 = TEST69 plus slots 69..89 of Holy Cross, Portland State, Weber State,
+  Abilene Christian, Chattanooga copied from the 90-man file (all PLAY fields), rows re-sorted by PGID: five 90-man
+  teams, 8,799 players (< 8,820). Crash -> a per-team > 70 overflow; no crash -> a total > 8,820 overflow.
+- TEST5X90 result (Eric): dynasty created and advanced to week 1, no crash. So per-team size above 70 is fine; the
+  crash needs a league total above 8,799 (the 90-man file has 11,306). Ruled out statically since: the play-time
+  containers (both use the bounded insert 0x50de60; the second holds recruit-board entries), the TEAM DATA
+  MANAGEMENT MODULE id lists (0x44968c, sized from the live table maximum), the 0x47cf84/0x47e224/0x47ee58/0x47ef00
+  divisions (PGID -> TGID only). Index inserts (0xa53a7c) take nodes from a virtual pool and fail with 2 when it is
+  empty; whether that pool is sized at index creation is not established.
+- Threshold slots installed (TEST69 + slots 69..89 copied from the 90-man file, rows sorted): ROSTER-T8841 (7 teams at
+  90, 8,841 players, just over 126 x 70 = 8,820), ROSTER-T9039 (17 teams, 9,039, over 128 x 70 = 8,960 and 9,000,
+  under 130 x 70 = 9,100), ROSTER-T9207 (25 teams, 9,207, over 9,100). Order: T9039 first; crash -> T8841; pass ->
+  T9207.
+- T9039 and T9207 PASSED (Eric): the limit is above 9,207 players, or the cause is in data the mixes did not carry.
+  Field-range comparison of the 90-man file against TEST69: only stray single ratings and 76 jersey-#0 extras (T9207
+  passed with 32 of them). The real 90-man file differs from "TEST69 + every team's extras" only in PLAY (other
+  players in slots 0..68: the 90-man build re-assigned them) and TEAM (team ratings TROV/TROF/TRQB/... that the game
+  recomputes on save); DCHT and every other table are identical.
+- Next slots: ROSTER-T11306 (TEST69 + slots 69..89 of all 126 teams = 11,306 players, same total as the crash) and
+  ROSTER-T10256 (75 teams, 10,256). T11306 crash -> a count limit between 9,207 and 11,306 (then T10256); T11306 pass
+  -> something in the 90-man build's own slot 0..68 players.
+- T11306 PASSED (Eric): 11,306 players, every team at 90 except the three short ones, no crash. So neither the total
+  nor per-team size is the trigger. T11306 and the crashing TEST90MAN1 are structurally identical (header, table
+  order and headers, PLAY sorted by PGID, POID == PGID, no duplicate ids); they differ only in which players fill
+  slots 0..68 and in TEAM ratings the game recomputes on save; per team/position counts match within a player or two.
+- The crash session differed in procedure, not data: Eric browsed late 90-man teams in the Rosters screen and SAVED
+  the roster (the game wrote FCS2026 and TEST90MAN1, 1,835,008 bytes each) before creating the dynasty; the test runs
+  only loaded a slot and created a dynasty. Next: (A) load T11306, view Portland State / Weber State rosters in the
+  Rosters screen, no save, create a dynasty; (B) load T11306, save to a new slot, create a dynasty.
+- Procedure ruled out (Eric): T11306 + viewing 90-man rosters, and T11306 + saving, both PASSED; TEST90MAN1 CRASHED
+  again at the identical point (same thread entry, fault reading 0x265db9ec, same registers): deterministic and tied
+  to the 90-man build's own players in slots 0..68. Long snappers (PPOS 24) appear on the low teams in both files.
+- Team bisect, round 1: ROSTER-HQ1..HQ4 = T11306 with TEST90MAN1's rows (by PGID) for TGID index ranges 0-31 (TGID
+  1..32), 32-63 (33..64), 64-94 (65..95), 95-125 (96..235). Scratchpad hybrid.mts builds them.
+- Round 1 result (Eric): HQ3 (TGID 65..95) CRASHED at the identical address; HQ1, HQ2, HQ4 passed. Same players
+  (names, positions, years) sit at the same PGIDs in both files; the 90-man build re-rated them, so the trigger is a
+  rating difference. Values in TGID 65..95 never seen in any passing data: 7514 Jake East SS PTHA 2, 7765 Stephon Hicks
+  LOLB PBTK 13, 9149 Diwonne Williams LOLB PBTK 13, 7952 Kauna'oa Kamakawiwoole QB PJMP 34.
+- Round 2 slots: H3A (TGID 65..72), H3B (73..80), H3C (81..88), H3D (89..95), and H3X = HQ3 with only those four
+  values set back to T11306's.
+- Round 2 (Eric): H3X CRASHED (the four rating outliers are not it); H3A (TGID 65..72) CRASHED; H3B..H3D not needed.
+  In 65..72 the two builds differ beyond ratings: 48 slots hold a different player (PFNA/PLNA, PPOS 37, PYEA 39,
+  PJEN 49, PHGT/PWGT, PRSD 9, body BS* fields). DCHT is the 69-man build's in both files; out-of-position depth rows
+  per team are similar in both files (20-27), and K/P/QB/LS counts are normal, so no obvious data anomaly.
+- Round 3 slots: ROSTER-T65 .. ROSTER-T72 = T11306 with one team each from TEST90MAN1 (Mercer, Central Connecticut,
+  Youngstown State, Robert Morris, Delaware State, Northern Iowa, Columbia, Harvard).
+- Round 3 (Eric): T65, T66 passed; T67 (Youngstown State) CRASHED at the identical address. In TGID 67 only one slot
+  holds a different person: PGID 6734 = Nate Boozer, LS (PPOS 24), senior, POVR 75, #44 in the crash file (WR Aidan
+  Stephens in T11306); the rest are re-ratings. Boozer is the league's highest-rated long snapper (75); every passing
+  file topped out at 74 (T11306: 640 John Blankenship 74).
+- Round 4 slots: V67OVR (T67 with Boozer POVR 75 -> 70), V67TE (T67 with Boozer PPOS 24 -> 4 TE), V640LS75 (T11306
+  with Blankenship's POVR 74 -> 75, a different team). Expect V67OVR/V67TE pass and V640LS75 crash if "an LS rated
+  75+" is the trigger.
+- Round 4 (Eric): V67OVR (Boozer stored POVR 70) CRASHED, V67TE (Boozer as TE) PASSED. ROOT CAUSE found in the dump:
+  the allocator pointer the free path followed (0x132f3a28) holds "00 01 13 c1 1a 4e 4b 03" = a play-time list node
+  for PGID 0x1a4e = 6734, OVR 0x4b = 75, year 3, and its index in the node pool ((0x132f3a28 - 0x132e7fe0) / 8 =
+  5961) is Boozer's physical row. The list insert 0x50de60 writes heads[team][group] without checking the group, and
+  the virtual PPOS -> group mapper (object at 0x1c88d90, slot +0x14) returns something outside 0..16 for PPOS 24 (the
+  FCS mod's long snapper, absent from stock rosters). Every LS among the first 8,820 players makes one stray pointer
+  write; most land on harmless memory, Youngstown State's lands on the heap record. Not a 90-man bug: any FCS roster
+  with LS players carries the same latent corruption in Play Time, roster needs (0x4810a0), 0x4c3e38 and 0x500348.
+- Fix = new entry "FCS mod: long snapper recruiting fix" (spike/blaze/tools/ls-group-patch.py, 23 words): the
+  24-word leaf 0x50de60 rewritten in place (cmplwi r5,17; bgelr up front; pool check kept; redundant clrldi dropped;
+  heads table loaded once). Both callers (0x50e030, 0x50e264) build 17-group containers (li r5,0x11 at 0x47e7d4 /
+  0x47e89c) and ignore the result; readers already skip groups >= obj+8. Installed + enabled in RPCS3 (backups
+  2026-11-07-ls-fix), mirror 991 words in seven entries, `ps3-eboot.mjs --ls-group` (10 tests), ELF
+  private/BLUS31159-1.02-allconf-commissioner-jersey0-roster100-table-ls.elf (991 writes).
+- Long snapper fix CONFIRMED (Eric): TEST90MAN1 and FCS2026 both create an offline dynasty, generate recruits and
+  advance to week 1. 90-man rosters now work in the Rosters screens and new dynasties.
+
+## 2026-11-07 — 8,820-player limits in the offseason: entry "FCS mod: 100-player rosters (offseason)"
+
+- 126 teams x 70 caps a stock league at 8,820 players, so passes sized for that never fail in stock play; a 90-man
+  league holds ~11,300. Fixed in spike/blaze/tools/roster-offseason-patch.py (10 words, no overlap with the other
+  entries, installed + enabled 2026-11-07, mirror 1001 words in eight entries, `ps3-eboot.mjs --roster-offseason`,
+  11 tests, full ELF private/BLUS31159-1.02-full-roster100.elf):
+  1. Training Players (0x4934c8): `insert into RCTN * select * from PLAY where PTYP != 3` into an 8,820-row RCTN (the
+     size is in every dynasty file); on failure 0x493828 skips training and zeroes the progression fields, i.e. no
+     player would progress. 0x49353c..0x493558 now call the game's grow-then-copy helper 0x3046e4(dest 'NTCR', src
+     'YALP') (count both, 0xa56dbc dest to the sum, insert all, current database = the dynasty; 0xa517f4(0) returns
+     the top of the use stack) and `cmpw r3,r3` replaces the error check. RCTN is read back only by PGID for the old
+     overall (0x2239d8, 0x223f24); no PTYP 3 players exist in the dynasty files seen, so dropping the filter is harmless.
+  2. Graduation (0x4835a8): temporary one-column table TMLE (PLAY.PGID descriptor via 0xa692e4) created with 8,820
+     rows by 0xa57ce0 -> 0xa5790c at 0x48368c; now 13,000.
+  3. Recruiting player lists (0x47e7d8): 126 x 70 -> 126 x 100 nodes (bounded insert; the pool is sized from these).
+- Still not covered: Play Now (EXHI) copies all teams into a 9,100-row player table (no code space left for a third
+  hook in the player-table entry). Untested in game: an offseason with 90-man teams (training, graduation, signing
+  day, Cut Players to 90).
+- Offseason PASSED (Eric): the FCS2026 offline dynasty (DEFAULT5, William & Mary) went through the offseason into
+  year 1 with no issue. File check against the pre-offseason snapshot: 8,481 returning players (same name + team),
+  7,841 improved, mean +2.63 OVR, 8,479 advanced a class year or redshirted; 2,943 of 3,283 seniors gone; 3,105
+  freshmen; departed players parked on TGID 1023 (667). RCTN max is now 8,595 (= PLAY rows at training time), proof
+  the grow-then-copy helper ran (only it resizes RCTN). Team sizes after: 71..92; 13 CPU teams at 91-92. Their
+  newest slots are freshmen and every one of them took 2-3 portal transfers from other teams, which land after the
+  Cut Players stage (the cut routines 0x502cf8 / 0x5041e4 / 0x503540 have every 70 constant patched and share the
+  patched PGID range). Same mechanism exists at 70 in stock play; not enforced further.
+
+## 2026-11-07 — dynasty player editor crash (Marist, slot 85)
+
+- Eric: new offline Marist dynasty from FCS2026, edit the lowest-rated player (Blake Landry, LOLB, PGID 10485, slot 85)
+  -> `F {PPU[0x1000015] Thread (FGGameSim) [0x00f6cdb0]} VM: Access violation reading location 0x38300030`.
+- Stack: script binding 0x87c918/0x87c99c -> 0x250cbc (dynasty adapter: "Create A Player Manager", ctor 0x173e70)
+  -> vtable +0xc = 0x17d5b8 (for each of 35 attribute ids at 0x1c72c24: count via vtable +0x64 (dispatcher 0x17a498),
+  malloc count x 4, fill via vtable +0x54 (dispatcher 0x178284)) -> 0x177648 ("Year Name" list, attribute 13, the
+  11th built) -> malloc 0x3f1974 -> heap internals (0x43c6c4 / 0x43b7cc / 0x437ef0 / 0x433f6c) -> fault. 0x38300030 is
+  ASCII "80\0" "0" used as a pointer: a string pointer landed on heap metadata, i.e. one of the lists built before
+  "Year Name" wrote past its array (ids 59, 2, 3, 4, 5, 7, 6, 8, 10, 9 in that order).
+- Checked consistent count vs builder: 6 jersey (0x17a3b4 / 0x177c84, mask 0x483b1c by TGID, all 90 players),
+  4 position list ("None" + 9 offense / + 3 other; count 10 / 4 / 1 locked), 2 primary position (loop bounded by
+  count 21 / 12 / 1), 3, 5, 7 (bounded), 9 hometown (bounded; strcpy into malloc(31) per name and the player's own
+  hometown at obj+0x1a, RCHT is game data). Not yet checked: 59 "Cas Uni Preset Name" (0x17654c; count = preset
+  vector size via 0x1ed0b4/0x1ed9b4: team uniform data), 8 handedness (inline), 10 (0x177700). Side finding: with a
+  locked position, attribute 2 looks up the name of the player's own PPOS (0xca768c), which for a long snapper (24)
+  may index past a 21-entry name table.
+- Landry's only out-of-stock value is PIMP 53 (stock 55..99). Next: in-game edits of Marist slot < 70 players
+  (Sonny Mannino QB slot 29, Lawson Koch TE slot 52) to separate team-wide (uniform presets) from slot-dependent.
+- ROOT CAUSE (not the 90-man rosters): a bug in my "FCS mod: jersey #0" 1.0. In the jersey-list count 0x17a3b4 the
+  loop start `li r5,1` (0x17a3fc) is copied into r4 by `ori r4,r5,0` (0x17a404) and r4 is the 1 in `1 << bit` for both
+  the free-number test and the own-number test. Patching the loop to start at 0 made that constant 0: every number
+  tested as taken, the count was always 1, 0x17d5b8 allocated a one-entry jersey list and the builder 0x177c84 (which
+  takes its constant from r30, untouched) wrote every free number into it -> heap overflow on EVERY in-game player edit
+  since 2026-11-06; the editor also displayed (and on save stored) list[0], the team's lowest free number. Seen as:
+  Landry freeze, Koch shown #17 then a crash on exit (0x68f574, a DataSourceFilter rebuild reading a string as a
+  pointer), Mannino silently #12 -> #17. Eric's Mannino edit "worked" only by heap luck.
+- Fix: jersey #0 1.1 adds 0x17a404 `ori r4,r5,0` -> `li r4,1` (0x38800001). jersey-zero-patch.py + ps3-eboot.mjs
+  JERSEY_ZERO_WORDS (6 words), tests updated (base entries 45 words, base+jersey output sha 4c359d83…), RPCS3 entry
+  replaced (backups 2026-11-07-jersey0-fix), 1002 words, full ELF re-baked (sha 6d3d1d29…). Checked while there: the
+  locked-position name lookup 0xca768c indexes a 6-byte abbreviation table that includes LS (24) and 3DRB (25), fine.
+- Consequence to tell members: any player edited in the in-game editor since the jersey #0 entry was installed may
+  have had his number replaced by his team's lowest free number when the edit was confirmed.
