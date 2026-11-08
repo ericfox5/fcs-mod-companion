@@ -16,7 +16,7 @@ news update every time the league advances a week.
   <img alt="Cloudflare Workers" src="https://img.shields.io/badge/site_runs_on-Cloudflare_Workers-F38020?logo=cloudflareworkers&logoColor=white">
 </p>
 
-<p align="center"><img src="docs/img/site-home.jpg" alt="The fcs-mod.online home page" width="90%"></p>
+<p align="center"><img src="docs/img/FloridaMan FCS thank-you banner.png" alt="The fcs-mod.online home page" width="90%"></p>
 
 ## What you get
 
