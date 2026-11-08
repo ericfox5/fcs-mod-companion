@@ -7,7 +7,8 @@
 // rosters' names (bridge/src/stda.ts, bundled in). Runs as a console wizard; every flag makes a step non-interactive.
 //
 //   FCS-online.exe                       menu
-//   FCS-online.exe join   [--rpcs3 DIR] [--server IP] [--rpcn HOST:PORT] [--yes]
+//   FCS-online.exe install [--rpcs3 DIR] [--roster false] [--yes]   (everything except the league network settings)
+//   FCS-online.exe join   [--rpcs3 DIR] [--server IP] [--rpcn HOST:PORT] [--roster false] [--yes]
 //   FCS-online.exe roster [--rpcs3 DIR] [--yes]
 //   FCS-online.exe host   [--project DIR]
 //   FCS-online.exe status [--rpcs3 DIR]
@@ -115,6 +116,7 @@ function patchStatus(rpcs3: string): string[] {
 // has two definitions.
 const dlcDir = (rpcs3: string) => path.join(rpcs3, 'dev_hdd0', 'game', GAME, 'USRDIR', 'DLC');
 const DLC_BACKUP = path.join(process.env.LOCALAPPDATA || os.homedir(), 'ncaa-bridge', 'uniforms', 'backup');
+const ROSTER_BACKUP = path.join(process.env.LOCALAPPDATA || os.homedir(), 'ncaa-bridge', 'backups', 'roster-saves');
 const sha1 = (b: Buffer) => createHash('sha1').update(b).digest('hex');
 function setAside(dlc: string, file: string): void { fs.mkdirSync(DLC_BACKUP, { recursive: true }); fs.renameSync(file, path.join(DLC_BACKUP, `${path.relative(dlc, file).replace(/[\\/]/g, '__')}.${stamp()}.bak`)); dlcBackups++; }
 let dlcBackups = 0;
@@ -232,13 +234,25 @@ function scorebugStatus(rpcs3: string): string {
 }
 
 // ---- roster save -------------------------------------------------------------------------------------------------
+// Installs the build's roster save once per roster: a later run with the same roster leaves the save alone (it changes
+// after install: the generic-team step writes into it, players save edits from the game). A build with a different
+// roster replaces it, the old folder kept under ROSTER_BACKUP (not in savedata, where the game would list it).
+const ROSTER_STATE = path.join(process.env.LOCALAPPDATA || os.homedir(), 'ncaa-bridge', 'roster-installed.json');
 function installRoster(rpcs3: string): string {
   if (!P.roster) return 'this build carries no roster save';
   const dir = path.join(rpcs3, 'dev_hdd0', 'home', '00000001', 'savedata', P.roster.dir);
-  if (fs.existsSync(dir)) { const b = `${dir}.bak-${stamp()}`; fs.renameSync(dir, b); }
+  const shipped = sha1(Buffer.concat(Object.keys(P.roster.files).sort().map((n) => Buffer.from(P.roster!.files[n]!, 'base64'))));
+  let state: Record<string, string> = {}; try { state = JSON.parse(fs.readFileSync(ROSTER_STATE, 'utf8')); } catch { /* first install */ }
+  const key = path.resolve(dir).toLowerCase(), remember = () => { state[key] = shipped; fs.mkdirSync(path.dirname(ROSTER_STATE), { recursive: true }); fs.writeFileSync(ROSTER_STATE, JSON.stringify(state, null, 1)); };
+  if (fs.existsSync(path.join(dir, 'USR-DATA')) && state[key] === shipped) return `roster save ${P.roster.dir}: this build's roster is already installed (changes made since are kept)`;
+  const same = (name: string, b64: string) => { const f = path.join(dir, name); return fs.existsSync(f) && fs.readFileSync(f).equals(Buffer.from(b64, 'base64')); };
+  if (fs.existsSync(dir) && Object.entries(P.roster.files).every(([n, b]) => same(n, b))) { remember(); return `roster save ${P.roster.dir}: already current`; }
+  let kept = '';
+  if (fs.existsSync(dir)) { const to = path.join(ROSTER_BACKUP, `${P.roster.dir}-${stamp()}`); fs.cpSync(dir, to, { recursive: true }); fs.rmSync(dir, { recursive: true }); kept = ` (the one it replaced is in ${to})`; }
   fs.mkdirSync(dir, { recursive: true });
   for (const [name, b64] of Object.entries(P.roster.files)) fs.writeFileSync(path.join(dir, name), Buffer.from(b64, 'base64'));
-  return `roster save ${P.roster.dir} installed (${Object.keys(P.roster.files).length} files). ${P.roster.note}`;
+  remember();
+  return `roster save ${P.roster.dir} installed (${Object.keys(P.roster.files).length} files)${kept}. ${P.roster.note}`;
 }
 
 // ---- host: the league server from a project checkout --------------------------------------------------------------
@@ -289,38 +303,54 @@ async function swapFlow(): Promise<void> {
 }
 
 // ---- flows -------------------------------------------------------------------------------------------------------
-async function joinFlow(): Promise<void> {
-  say(`\nFCS online: member setup (payload built ${P.builtAt})\n`);
+// The game files these steps write must not be open: wait for RPCS3 to be closed (or stop)
+async function rpcs3Closed(rpcs3: string): Promise<boolean> {
+  const files = [...gameArchives(rpcs3), scorebugArchive(rpcs3)].filter((f) => fs.existsSync(f));
+  while (rpcs3RunningOver(files)) {
+    if (YES) { say('RPCS3 is running from this install: close it, then run this again'); return false; }
+    if ((await rl.question('\nRPCS3 is open. Close the whole RPCS3 window, then press Enter here (or type q and Enter to stop): ')).trim().toLowerCase() === 'q') return false;
+  }
+  return true;
+}
+// install: everything a player needs for the FCS mod add-ons; join: the same plus the league's network settings and site
+async function setupFlow(online: boolean): Promise<void> {
+  say(online ? `\nJoin an online league (this build: ${P.builtAt})\n` : `\nInstall or update the FCS mod add-ons (this build: ${P.builtAt})\n`);
   const rpcs3 = await chooseRpcs3(); say(`RPCS3: ${rpcs3}`);
-  const server = await ask('League server address (the host PC\'s IP, or 127.0.0.1 on the host itself)', flags.get('server') ?? '127.0.0.1');
-  const rpcn = await ask('Private PSN (RPCN) server host:port', flags.get('rpcn') ?? `${server}:31313`);
-  say('\n1. Game patches');
+  let server = '', rpcn = '';
+  if (online) {
+    server = await ask('League server address (the host PC\'s IP, or 127.0.0.1 on the host itself)', flags.get('server') ?? '127.0.0.1');
+    rpcn = await ask('Private PSN (RPCN) server host:port', flags.get('rpcn') ?? `${server}:31313`);
+  }
+  if (!(await rpcs3Closed(rpcs3))) { say('Stopped; nothing was changed.'); return; }
+  let n = 0; const step = (t: string) => say(`\n${++n}. ${t}`);
+  step('Game patches');
   const r = installPatches(rpcs3);
-  for (const n of r.changed) say(`   installed/updated: ${n}`); for (const n of r.kept) say(`   already current:   ${n}`); say('   all entries enabled for 01.00 and 01.02 in config/patch_config.yml');
-  say('\n2. Uniforms (placeholder sets for the Coming Soon teams, stop-gap XMLs)');
+  for (const x of r.changed) say(`   installed/updated: ${x}`); for (const x of r.kept) say(`   already current:   ${x}`); say('   all entries enabled for 01.00 and 01.02 in config/patch_config.yml');
+  step('Uniforms (sets for the Coming Soon teams, stop-gap XMLs)');
   const u = installUniforms(rpcs3);
   if (u.missingDlc) say(`   the FCS mod DLC folder is missing (${dlcDir(rpcs3)}); install the FCS mod first, then run this again`);
   else {
-    for (const n of u.written) say(`   wrote ${n}`);
+    for (const x of u.written) say(`   wrote ${x}`);
     if (u.same.length) say(`   already current: ${u.same.join(', ')}`);
     if (u.bigfiles.written || u.bigfiles.same) say(`   uniform files: ${u.bigfiles.written} written, ${u.bigfiles.same} already current`);
-    for (const n of u.setAside) say(`   moved aside (same slot defined in another folder): ${n}`);
+    for (const x of u.setAside) say(`   moved aside (same slot defined in another folder): ${x}`);
     if (u.missingPack) say('   this exe has no uniform pack (built without it); only the stop-gap XMLs were installed');
     if (dlcBackups) say(`   ${dlcBackups} replaced file(s) backed up in ${DLC_BACKUP}`);
   }
-  say('\n3. Score bug (team names and colours)');
-  for (const n of installScorebug(rpcs3)) say(`   ${n}`);
-  say(`\n4. Generic teams' stored rosters (re-keyed for the 100-player patch${P.genericRosters ? ', real 2026 rosters' : ''})`);
-  for (const n of installGenericRosters(rpcs3)) say(`   ${n}`);
-  say('\n5. Network');
-  for (const n of configureNetwork(rpcs3, server, rpcn)) say(`   ${n}`);
-  if (P.roster && (flags.get('roster') === 'true' || (!YES && await confirm(`\n6. Install the roster save ${P.roster.dir} (up to 90 players per team; needs the patches above)?`, false)))) say(`   ${installRoster(rpcs3)}`);
-  say(`\n7. Generic teams: home stadiums and FBS swaps${P.swapPack ? ` (${swapPackSummary(P.swapPack)})` : ''}`);
-  for (const n of installSwaps(rpcs3)) say(`   ${n}`);
-  say(`\n8. Companion site: ${P.site}`);
-  say('   Create your account there (Sign in), then tell the commissioner your account name so they can link your team.');
-  if (!YES && await confirm('   Open it in the browser now?')) spawn('cmd', ['/c', 'start', '', P.site], { detached: true, stdio: 'ignore' }).unref();
-  say('\nDone. Start RPCS3, check Manage > Game Patches shows the FCS mod entries ticked, and load the game.');
+  step('Score bug (team names and colours)');
+  for (const x of installScorebug(rpcs3)) say(`   ${x}`);
+  step(`Generic teams' stored rosters (re-keyed for the 100-player patch${P.genericRosters ? ', real 2026 rosters' : ''})`);
+  for (const x of installGenericRosters(rpcs3)) say(`   ${x}`);
+  if (online) { step('Network'); for (const x of configureNetwork(rpcs3, server, rpcn)) say(`   ${x}`); }
+  if (P.roster && flags.get('roster') !== 'false') { step(`Roster save ${P.roster.dir} (up to 90 players per team)`); say(`   ${installRoster(rpcs3)}`); }
+  step(`Generic teams: home stadiums and FBS swaps${P.swapPack ? ` (${swapPackSummary(P.swapPack)})` : ''}`);
+  for (const x of installSwaps(rpcs3)) say(`   ${x}`);
+  if (online) {
+    step(`Companion site: ${P.site}`);
+    say('   Create your account there (Sign in), then tell the commissioner your account name so they can link your team.');
+    if (!YES && await confirm('   Open it in the browser now?')) spawn('cmd', ['/c', 'start', '', P.site], { detached: true, stdio: 'ignore' }).unref();
+  }
+  say(`\nDone. Start RPCS3, check Manage > Game Patches shows the FCS mod entries ticked, and start the game${P.roster ? `; in the game, load the roster ${P.roster.dir.replace(/^BLUS31159-/, '')}` : ''}.`);
 }
 async function statusFlow(): Promise<void> {
   const rpcs3 = await chooseRpcs3(); say(`RPCS3: ${rpcs3}`);
@@ -343,15 +373,17 @@ async function statusFlow(): Promise<void> {
 async function main(): Promise<void> {
   let mode = words[0] ?? flags.get('mode');
   if (!mode) {
-    say(`FCS online league setup (built ${P.builtAt})\n  1. Join a league: set this PC's RPCS3 up (patches, uniform sets, server address, PSN server)\n  2. Install the FCS2026 roster save${P.roster ? '' : ' (not in this build)'}\n  3. Host a league: start the league server from a project checkout\n  4. Status of this PC's setup\n  5. Swap an FBS team into a generic slot (commissioner)\n  6. Quit`);
-    mode = { '1': 'join', '2': 'roster', '3': 'host', '4': 'status', '5': 'swap' }[await ask('Choice', '1')] ?? 'quit';
+    say(`FCS mod add-ons (this build: ${P.builtAt})\n  1. Install or update: game patches, uniforms, score bug${P.roster ? ', 2026 roster' : ''}  <- start here\n  2. Join an online league: everything in 1, plus your league's server settings\n  3. Host a league (commissioner): start the league server from a project checkout\n  4. Status of this PC's setup\n  5. Swap an FBS team into a generic slot (commissioner)\n  6. Quit`);
+    mode = { '1': 'install', '2': 'join', '3': 'host', '4': 'status', '5': 'swap' }[await ask('Choice', '1')] ?? 'quit';
   }
-  if (mode === 'join') await joinFlow();
+  if (mode === 'install') await setupFlow(false);
+  else if (mode === 'join') await setupFlow(true);
   else if (mode === 'roster') { const rpcs3 = await chooseRpcs3(); say(installRoster(rpcs3)); }
   else if (mode === 'host') await hostFlow();
   else if (mode === 'status') await statusFlow();
   else if (mode === 'swap') await swapFlow();
-  else if (mode !== 'quit') say(`unknown mode ${mode}; use join | roster | host | status | swap`);
-  rl.close();
+  else if (mode !== 'quit') say(`unknown mode ${mode}; use install | join | roster | host | status | swap`);
 }
-main().catch((e: Error) => { console.error(`error: ${e.message}`); rl.close(); process.exitCode = 1; });
+// started by double-clicking (no mode on the command line): keep the window open until the reader is done
+const holdWindow = async () => { if (!words[0] && !flags.has('mode') && !YES) await rl.question('\nPress Enter to close this window.'); };
+main().then(holdWindow, async (e: Error) => { console.error(`error: ${e.message}`); process.exitCode = 1; await holdWindow(); }).finally(() => rl.close());

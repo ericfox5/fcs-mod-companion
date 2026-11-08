@@ -2475,3 +2475,17 @@ First full Supersim game on the new engine (Brown 37, Furman 36, week 1 of 2014,
     Abilene-dome painter; Presbyterian red 8 + blue 44 per side). The four helmets rebuild byte-identical to the
     15-10 backups (993a955e / e90f9f83 / a0066902 / 689cc7ab), installed with the guard, live = dist for all 102.
     The centre-line script is kept in the scratchpad (conflogo/script-centreline.mjs).
+- 2026-11-08 ~11:45: site download R2 ncaa-online-saves/downloads/FCS-2026-Roster.zip replaced with the team-name
+  fixes (only diff vs the previous zip: TEAM TMNA Duquesne Dukes, Stonehill TMNC Skyhawks / TSNA STO, Austin Peay TMNC
+  Governors; USR-DATA dc591741 -> 542ba295; same layout and README; zip sha eb15eba3…, read back from R2 and from
+  fcs-mod.online identical). Previous zip in %LOCALAPPDATA%\ncaa-bridge\backups\2026-11-08-roster-download-teamnames.
+- 2026-11-08 ~12:30: GitHub Releases. FCS-online.exe gets a menu option 1 "Install or update" (everything join does
+  except the network settings and the site step; join is now option 2, roster-only stays as the `roster` word). Both
+  wait for RPCS3 to be closed before writing, install the roster save once per shipped roster (state in
+  %LOCALAPPDATA%\ncaa-bridge\roster-installed.json, so later runs keep the player's edits and the generic-team rows;
+  a new roster replaces it, the old folder moved to %LOCALAPPDATA%\ncaa-bridge\backups\roster-saves instead of a .bak
+  folder in savedata), and keep the console open at the end when double-clicked. `npm run release`
+  (installer/release.mjs): needs a clean, pushed commit; builds the exe, tags v<yyyy.mm.dd>[-n] on that commit and
+  `gh release create`s it with installer/RELEASE.md (player guide) as notes. Eric chose to publish the exe as it is
+  (patches, uniform pack, score bug, roster, PHOENIX26 included) on the public repo; the site's download is unchanged.
+  README: Download badge (latest release), Install section, Join points at the release.

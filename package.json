@@ -14,7 +14,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b",
     "archive:fetch": "node tools/archive-fetch.mjs",
-    "build:installer": "node installer/build.mjs"
+    "build:installer": "node installer/build.mjs",
+    "release": "node installer/release.mjs"
   },
   "engines": {
     "node": ">=20"
