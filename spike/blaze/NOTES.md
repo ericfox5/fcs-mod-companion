@@ -2144,3 +2144,104 @@ First full Supersim game on the new engine (Brown 37, Furman 36, week 1 of 2014,
   WYOMIN XML in NEC moved aside, second run all current, files byte-identical to the live DLC) and exe status on the real
   install (71/71 current). 122 MB, sha256 7f65c7d7…; copy at Desktop\FCS\FCS-online.exe (previous one
   .bak-2026-11-07-pre-uniforms).
+- Generic opponents (TGID 160-164, TEAM.TTYP 1, CGID 17, SGID 1023, no PLAY or DCHT rows in FCS2026 nor in a dynasty):
+  make-coming-soon-sets.mjs now builds sets for D1AAEX Mercyhurst, D1AAWX West Florida, D1AAMW Tuskegee, D1AASE Delta
+  State (the mod's TEAM colours, lettermark helmets M / UWF / T / DSU set in the jersey name font with an outline) and
+  D1AANW Wagner (Teambuilder save NEC TEAM-009). They replace the D1AANW / D1AAMW stop-gaps (backed up), so the exe now
+  ships no stop-gap XMLs: 101 files, 44.6 MB, exe 135 MB; copy at Desktop\FCS\FCS-online.exe (.bak-2026-11-07-pre-generic).
+- Generic-roster test (CFBR swap feasibility; Bowersrd's NCAA 14 Dynasty Tool v2.2.1 Team Swapper only rewrites TEAM +
+  STAD rows, never PLAY, from a built-in list of CFBR v21 FCS schools): two roster saves from FCS2026 installed in RPCS3
+  savedata, BLUS31159-ROSTER-GENTEST1 (Montana State's 70 best, depth-chart players first, cloned onto TGID 162 as
+  PGIDs 16200-16269 with last name "Gentest", their 88 DCHT rows re-pointed) and GENTEST2 (the same plus TTYP 1 -> 0 and
+  OCAP/TPIO 16200, DCAP 16201). Result pending: Rosters screen and a Play Now game vs Wagner.
+- Found on the way: FCS2026's TEAM.DCAP / OCAP / TPIO still hold stride-70 PGIDs (Duquesne DCAP 719 = team 10 slot 19
+  at 70, but team 7's slot 19 at stride 100); rekeyStride only re-keys PGID/POID columns. Not fixed yet.
+- GENTEST1 result (Eric): generic teams are only playable in dynasty; a dynasty from GENTEST1 crashed advancing to week
+  1 at "rating playing time": `F {PPU[0x1000023]} [0x0050e00c] VM: Access violation reading location 0xc562000` (an
+  earlier run: 0x1b). Cause, statically: the Play Time containers are built for a fixed 126 teams (`li r4,0x7e` at
+  0x47e7d0 and 0x47e898 into 0x47e468: 126 team pointers, 126 x 17 list heads, 126 x 70 / 35 nodes). The pass maps a
+  player's TGID to an index through the full team list (0x1c86918, count 0x1c86920, 12-byte entries) that includes the
+  generic teams after the 126, so team 162's players insert at index >= 126 through 0x50de60 (group-bounded since the
+  LS fix, team-unbounded), writing past the heads array; the next virtual call through the corrupted mapper object at
+  0x50e008 faults. TTYP plays no part, so GENTEST2 would fail the same way (not run). Real players on generic teams need
+  an EBOOT patch (at least those two sizes to 131, likely more 126-team passes); swaps stay cosmetic until then.
+- Player-id columns besides PGID/POID (value / stride = the row's TGID in real saves): TEAM.OCAP/DCAP (captains, no
+  stored field predicts them), TPIO/TSI1 (best / second offensive player by POVR), TMPI/TSI2 (same on defense),
+  SSUM.SSFI/SSPI/SSTI. packages/ncaa14 PGID_ALIASES makes rekeyStride re-key them; setTeamPlayerRefs + `ncaa-bridge roster
+  stars` set the TEAM six from each team's players (stars by rating, captains = best senior per side; player-less teams
+  keep an id in their own range). FCS2026 out/USR-DATA fixed (831 cells; sha dc591741…, backup in
+  %LOCALAPPDATA%\ncaa-bridge\backups\2026-11-07-team-player-refs), Rosters rebuild-90.sh gained a team-refs step and
+  validate.ts allows those six fields to change to own-team ids (verify: all hard gates pass). Exe rebuilt (sha 9751d48e…,
+  Desktop copy; .bak-2026-11-07-pre-teamrefs).
+- Live league (locker 349.bin): the console recomputes TPIO/TMPI/TSI1/TSI2 and SSUM weekly (already stride 100) but not
+  the captains: OCAP/DCAP are stride-70 on all 131 teams (as-is: 1 own-team, ~84 another team's player, ~41 nobody).
+  Re-keyed by arithmetic, all 126 teams get their original captain back (players keep slots in a dynasty re-key).
+  Publishing that copy is pending Eric's go.
+- GENTEST1/2 roster saves removed from RPCS3 savedata (2026-11-07).
+- Generic rosters are not generated: they are the PLST table (970 rows) and its depth chart DCST (973 rows: PGID TGID
+  PPOS ddep) in the game's standard-data DB, archive entry b57b5e0ae8e74714 in both qkl_boot.ast and qkl_fe2ig.ast
+  (stored uncompressed, 7,966,280 bytes, 111 tables; the two copies differ only in RCAT). PLST rows: TGID 160-164 (55,
+  62, 57, 55, 59 players named by position + jersey, "WR #24", POVR median ~66) and 610-619 (68 each, Road to Glory
+  style teams; 610 has real names). No roster, dynasty or other archive DB holds generic players (175 DBs scanned; the
+  default roster in qkl_boot has 8,694 players on 126 teams). Code: 0x232cd8 takes a player id, maps it to a team with
+  0x44098c, reads that team's TTYP (0x447da4) and pulls the player from PLST when TTYP == 1, else from PLAY; 0x9ed14
+  runs "insert into 'YALP' * select * from 'TSLP' where <cond>" and the DCHT <- DCST twin (condition built from 610).
+  Within the standard-data DB only PLST.PGID, PLST.POID and DCST.PGID hold these ids.
+- LATENT 90-MAN BUG: 0x44098c (PGID -> TGID) divides by 100 under the stride patch (magic 0x47ae147b; stock 0xd41d41d5 =
+  /70), but PLST/DCST are still keyed at 70 (generic 11200..11538, 610s 42700..43397). So a generic player resolves to
+  team 112..115 (TTYP 0) and is read from PLAY at that id: a real player of another team, or nothing. Fix: re-key the
+  three columns to stride 100 (16000..16499, 61000..61967; PGID is 16 bits), same size, written in place in both
+  archives. Not done yet.
+- Generic -> FBS swap (CFBR) is then a data edit in the same entry: overwrite one generic team's PLST rows (keep its
+  count) with the FBS team's best players and its DCST rows, plus the TEAM row identity and uniforms as before; no code
+  patch, nothing in the dynasty passes (generic players never enter the dynasty PLAY).
+- Generic rosters re-keyed for the 100-player patch (built 2026-11-07, two agents in parallel, merged by hand):
+  packages/ncaa14 stda.ts `rewriteStandardData` re-keys PLST.PGID/POID and DCST.PGID of the standard-data DB (entry
+  b57b5e0ae8e74714: qkl_boot.ast entry 826 at 78241374, qkl_fe2ig.ast entry 4664 at 3556361770, both stored, 7,966,280
+  bytes) from TGID x 70 + slot to TGID x 100 + slot: 2,913 cells, teams 160-164 and 610-619. serializeTdb round-trips
+  that 111-table DB byte for byte (extra-data tables THBT LGML HEAD RCFN RCLN included), so the rewrite is parse, edit,
+  serialize, verify, and it refuses any byte change outside PLST/DCST data and the priorCrc words covering them (DCSB,
+  PTMP). An optional `edit` runs on the re-keyed DB under the same checks. bridge/src/stda.ts + `ncaa-bridge stda
+  status|rekey|restore [--rpcs3 DIR | --archive FILE]` write only the changed ranges after backing up the entry, its TOC
+  record and a manifest to %LOCALAPPDATA%\ncaa-bridge\backups\<stamp>-stda\, read back, and refuse while that install's
+  RPCS3 runs. FCS-online.exe `join` step 3 does the same; `status` prints each copy's stride. DLC/qkl_patch.ast does
+  not carry the entry. `od overhaul --restore-rcat` puts back an older copy of entry 4664 (undoes the re-key): run
+  `stda rekey` after it. Exe rebuilt (sha 2e7d3766…, 135 MB; Desktop copy, .bak-2026-11-07-pre-stda); tested on a fake
+  install (join re-keys, second join "already at stride 100", status stride 100). NOT yet applied to the real install:
+  RPCS3 was running.
+- Generic -> real team swap: packages/ncaa14 generic-swap.ts `swapGenericTeam` overwrites a generic team's PLST rows in
+  place (count kept, 57 for 162) with the donor's best by the generic team's own position quota (shortfalls: a depth
+  specialist the quota lacks such as LS, then nearest stand-ins, then best left), copies every PLST field by name from
+  the donor PLAY row (all 131 shared, same widths), PGID/POID = TGID x stride + slot, and re-points its DCST rows (donor
+  depth order at the position first, then the donor's other players there, the rest of its depth, stand-ins).
+  `copyTeamIdentity` puts the donor's names/colours into the generic TEAM row of a roster/dynasty file.
+  `ncaa-bridge generic extract|swap|team|install`; `install` re-keys and swaps every archive copy in place through the
+  stda writer (same backups; `stda restore` undoes). Test on a scratch qkl_boot.ast: Montana State (106) into 162, OVR
+  top/mean 78/65 -> 95/80, PLST/DCST byte-identical to the independent artifact (scratchpad agent2/stda-s100-msu162.bin,
+  sha 807c541c…), 10,576 bytes changed inside the entry and 0 outside, restore returns the exact original archive.
+  The generic teams carry no long snapper although their depth chart has an LS spot.
+- Step 1 APPLIED to the real install (RPCS3 closed): `ncaa-bridge stda rekey` re-keyed both copies (2,913 ids each;
+  qkl_boot.ast entry sha now 583683d0…, qkl_fe2ig.ast 6d4da52c… = the agent's independent scratch re-key); backup
+  %LOCALAPPDATA%\ncaa-bridge\backups\2026-11-08T01-05-16-stda. Read-back: 0 verify problems, every PLST/DCST id at
+  /100, every other table byte-identical to the backup. In-game check pending (a dynasty game vs a generic team).
+- Step 1 CONFIRMED IN GAME (Eric, offline dynasty DEFAULT): played Tuskegee (163) and advanced. The QBs #12 / #10 and FBs
+  #47 / #45 he saw are PLST 163's rows (PGIDs 16334 / 16335 / 16311 / 16312 after the re-key, OVR 73 / 66 / 68 / 62).
+  PLST names are placeholders ("QB #12", empty first name); the game names generic players at run time (James White,
+  Napoleon Williams, Shawn McDowell, Tavares Harrington exist in no roster or dynasty PLAY). The dynasty's box score /
+  season stat tables (BOFF BDEF BKIC BKPR BOLN PRST SDEF BSCS.SS*I) now hold ids 16300-16399, a range only generic 163
+  has at stride 100. Open for the swap: whether run-time naming also replaces real names in PLST (the Montana State
+  test into 162 answers it).
+- 2026-11-07 evening, published:
+  - Live league captains: `ncaa-bridge od captains --did 8` (new: DynastyPatchSet.captains, applyCaptains re-keys
+    TEAM.OCAP/DCAP that belong to their team at 70 but not at the file's stride, PATCH_FORMAT 6, memo retired by
+    maybeCaptainsTaken once a console upload has none left). DID 8 coach1, console file 349: 260 cells; dry run 252/252
+    real-team captains back on their own team, no other cell or table changed. web-edits/8/DYNASTY.patch.bin built at
+    20:26 (2,682,794 bytes); the console takes it at its next hub load. Other dynasties (stride 70) have none.
+    bridge/test/captains.test.ts covers it on the DYNASTY-2 fixture.
+  - Site download: R2 ncaa-online-saves/downloads/FCS-2026-Roster.zip replaced (same layout and README, USR-DATA
+    dc591741… with the TEAM player refs fixed; zip sha 364a6b86…, read back identical). Previous zip (USR-DATA
+    93a7e59d…) in %LOCALAPPDATA%\ncaa-bridge\backups\2026-11-07-roster-download-teamrefs.
+  - Montana State test swap installed into generic 162 (Wagner's slot) on the real install: `ncaa-bridge generic
+    install --donor FCS2026 --donor-tgid 106 --tgid 162`; qkl_boot.ast entry 583683d0 -> aa665e48, qkl_fe2ig.ast
+    6d4da52c -> 807c541c (= the agent's independent artifact). Backup 2026-11-08T01-27-59-stda (restore returns to the
+    stride-100 fix). Pending: in game, does Wagner show Montana State's real names or run-time generic names.

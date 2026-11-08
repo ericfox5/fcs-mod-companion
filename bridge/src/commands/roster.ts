@@ -1,10 +1,11 @@
 // Roster-file tooling for the 100-player roster project (docs/roster-stride-inventory.md):
 //   roster grow <in> <out> [--stride 100] [--from 70] [--allow-oversize]   re-key every PGID to a new stride, grow PLAY
 //   roster add  <in> <out> --tgid N --first F --last L [--pos P] [--jersey J] [--template PGID] [--stride S]
+//   roster stars <in> <out> [--allow-oversize]   TEAM captains / featured players from each team's own players
 // Input is a plain EA DB (an offline USR-DATA) or a locker dynasty file (zlib, 4-byte prefix); the output keeps the form.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseTdb, serializeTdb, verifyTdb, type TdbFile, type TdbTable } from '@ncaa/tdb';
-import { PGID_STRIDE, addPlayer, detectStride, rekeyStride } from '@ncaa/ncaa14';
+import { PGID_STRIDE, addPlayer, detectStride, rekeyStride, setTeamPlayerRefs } from '@ncaa/ncaa14';
 import { openDynastyFile } from '../od.js';
 import { buildDynastyFile } from '../dynasty-patch.js';
 
@@ -52,6 +53,16 @@ export function rosterGrow(inPath: string, outPath: string, opts: { stride?: num
   const buffer = bufferOf(o);
   console.log(`re-keyed ${fmt(r.rekeyed)} PGID cells (${r.kept} sentinels kept${r.overflow ? `, ${r.overflow} left unchanged: overflow` : ''}) in: ${r.perTable.join(', ')}`);
   console.log(`PLAY max ${r.playMax[0]} -> ${r.playMax[1]}; dbSize ${fmt(dbSize)} vs console buffer ${fmt(buffer)} (${dbSize <= buffer ? `${fmt(buffer - dbSize)} spare` : `${fmt(dbSize - buffer)} OVER`})`);
+  console.log(`wrote ${outPath} (${fmt(bytes)} bytes)`);
+}
+
+// The roster builds refill slots after the stride re-key, so TEAM's player references (OCAP/DCAP/TPIO/TMPI/TSI1/TSI2)
+// would name whoever now holds the old slot (or, before PGID_ALIASES, another team's player): set them from the team.
+export function rosterStars(inPath: string, outPath: string, opts: { allowOversize?: boolean } = {}): void {
+  const o = open(inPath);
+  const r = setTeamPlayerRefs(o.file);
+  console.log(`${inPath}: TEAM player references set for ${r.teams} teams with players (${r.changed} cells changed)`);
+  const { bytes } = save(outPath, o, { allowOversize: Boolean(opts.allowOversize) });
   console.log(`wrote ${outPath} (${fmt(bytes)} bytes)`);
 }
 

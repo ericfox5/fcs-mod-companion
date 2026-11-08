@@ -6,13 +6,15 @@ import { parseTdb, verifyTdb, type TdbFile, type FieldValue } from '@ncaa/tdb';
 import { exportDynasty, isPlayed } from '@ncaa/ncaa14';
 import { loadConfig } from './config.js';
 import { importSave } from './commands/import.js';
-import { odImport, odList, odWatch, syncWebEdits, odBackfillLogs, odOverhaul, odYear, odLock, odPlayoff, odStride, odPlayers, odRepair } from './commands/od.js';
+import { odImport, odList, odWatch, syncWebEdits, odBackfillLogs, odOverhaul, odYear, odLock, odPlayoff, odStride, odPlayers, odRepair, odCaptains } from './commands/od.js';
 import { syncCaptures } from './commands/captures.js';
 import { loadOdStore } from './od.js';
 import { photosUpload } from './commands/photos.js';
 import { odInvite } from './commands/invite.js';
 import { logosUpload } from './commands/logos.js';
-import { rosterGrow, rosterAdd } from './commands/roster.js';
+import { rosterGrow, rosterAdd, rosterStars } from './commands/roster.js';
+import { stdaCli } from './stda.js';
+import { genericCli } from './commands/generic.js';
 
 const [, , cmd, ...rest] = process.argv;
 const flags = new Map<string, string>();
@@ -120,6 +122,8 @@ switch (cmd) {
     else if (args[0] === 'year') await odYear(cfg, { did, year: flags.has('year') ? Number(flags.get('year')) : undefined, dflt: flags.get('default') });
     // roster stride (100-player rosters): status, or queue a re-keyed dynasty file for one dynasty (docs/roster-stride-inventory.md)
     else if (args[0] === 'stride') await odStride(cfg, { did, stride: flags.has('stride') ? Number(flags.get('stride')) : undefined, off: flags.has('off') });
+    // captains a stride re-key left at 70 (TEAM.OCAP/DCAP): status, or queue the fix for one dynasty
+    else if (args[0] === 'captains') await odCaptains(cfg, { did, off: flags.has('off') });
     // generated reserve players (100-player roster test): od players --did N --team "Abilene Christian" --fill 100
     else if (args[0] === 'players') await odPlayers(cfg, { did, tgid: flags.has('tgid') ? Number(flags.get('tgid')) : undefined, team: flags.get('team'), fill: flags.has('fill') ? Number(flags.get('fill')) : undefined, prefix: flags.get('prefix'), clear: flags.has('clear') });
     // put a team's roster back from an earlier locker file: od repair --did N --tgid T --from CID [--keep-reserves]
@@ -136,10 +140,13 @@ switch (cmd) {
     try {
       if (args[0] === 'grow' && args[2]) rosterGrow(args[1]!, args[2], { stride: num('stride'), from: num('from'), allowOversize: flags.has('allow-oversize') });
       else if (args[0] === 'add' && args[2] && flags.has('tgid')) rosterAdd(args[1]!, args[2], { tgid: Number(flags.get('tgid')), first: flags.get('first') ?? 'New', last: flags.get('last') ?? 'Player', pos: num('pos'), jersey: num('jersey'), template: num('template'), stride: num('stride') });
-      else console.log('usage: ncaa-bridge roster grow <in> <out> [--stride 100] [--from 70] [--allow-oversize] | roster add <in> <out> --tgid N --first F --last L [--pos P] [--jersey J] [--template PGID] [--stride S]');
+      else if (args[0] === 'stars' && args[2]) rosterStars(args[1]!, args[2], { allowOversize: flags.has('allow-oversize') });
+      else console.log('usage: ncaa-bridge roster grow <in> <out> [--stride 100] [--from 70] [--allow-oversize] | roster add <in> <out> --tgid N --first F --last L [--pos P] [--jersey J] [--template PGID] [--stride S] | roster stars <in> <out> [--allow-oversize]');
     } catch (e) { console.error((e as Error).message); process.exitCode = 1; }
     break;
   }
+  case 'stda': try { stdaCli(args[0], flags); } catch (e) { console.error((e as Error).message); process.exitCode = 1; } break; // generic rosters in the game archives: status | rekey | restore
+  case 'generic': try { genericCli(args[0], flags); } catch (e) { console.error((e as Error).message); process.exitCode = 1; } break; // generic opponents -> real teams: extract | swap | team | install
   case 'export': exportCmd(args[0]!); break;
   case 'info': info(args[0]!); break;
   case 'dump': dump(args[0]!, args.slice(1)); break;

@@ -43,6 +43,14 @@ const SETS = [
   { slot: 'CMICHI', team: 'Sacred Heart', save: 'Sacred Heart', folder: 'FCS_DLC_NEC', chest: 'PIONEERS' },
   { slot: 'WMICHI', team: 'Saint Francis', save: 'Saint Francis', folder: 'FCS_DLC_NEC', chest: 'RED FLASH' },
   { slot: 'HAWAII', team: 'Presbyterian', save: 'Presbyterian', folder: 'FCS_DLC_PIONEER', chest: 'BLUE HOSE' },
+  // The five generic opponent slots (TGID 160-164, TEAM.TTYP 1). Wagner has a Teambuilder save; the other four are
+  // Division II schools in neither the library nor the ESPN FCS logos: the mod's own TEAM colours (FCS2026 roster save)
+  // and a lettermark in the jersey's name font (`mark`) instead of a logo.
+  { slot: 'D1AAEX', team: 'Mercyhurst', colours: { P: 0xa71f23, S: 0xffd61b }, mark: 'M', folder: 'FCS_DLC_NEC', chest: 'MERCYHURST' },
+  { slot: 'D1AAWX', team: 'West Florida', colours: { P: 0x017dc3, S: 0x07b085 }, mark: 'UWF', folder: 'FCS_DLC_NEC', chest: 'ARGONAUTS' },
+  { slot: 'D1AANW', team: 'Wagner', save: 'Wagner', folder: 'FCS_DLC_NEC', chest: 'SEAHAWKS' },
+  { slot: 'D1AAMW', team: 'Tuskegee', colours: { P: 0xa32035, S: 0xeda900 }, mark: 'T', folder: 'FCS_DLC_NEC', chest: 'TUSKEGEE' },
+  { slot: 'D1AASE', team: 'Delta State', colours: { P: 0x007529, S: 0x101010 }, mark: 'DSU', folder: 'FCS_DLC_NEC', chest: 'STATESMEN' },
 ];
 // Extra helmets for teams that have their own art: the donor (archive or DLC) recoloured outside its logos and added to
 // the team's XML (the archive one copied to the DLC folder if it has none) as a non-official option. Villanova's white
@@ -234,6 +242,9 @@ const loadBig = (scene) => C.parseBigfile(new Uint8Array(fs.readFileSync(bigPath
 const entry = (big, suffix) => big.entries.find((e) => e.name.toUpperCase().endsWith(suffix));
 async function texture(big, suffix) { const e = entry(big, suffix); const t = C.parseTexture(await C.loadEntry(e), e.name); return { e, t, img: C.decodeMip(t, 0) }; }
 function put(e, t, img) { const enc = C.encodeTexture(t, img.rgba); e.data = enc.bytes; e.dirty = true; return enc; }
+// The donor jersey's name font (NAME_DECAL + its kerning table), read once.
+let FONT = null;
+async function nameFont() { if (!FONT) { const jb = loadBig(DONOR.jersey); FONT = { img: (await texture(jb, '_NAME_DECAL')).img, kerning: await C.loadEntry(entry(jb, '_NAME')) }; } return FONT; }
 // A renamed copy of a donor (full-name map: entry names, hashes and scene paths), as the studio's New set does.
 async function cloneAs(donor, name) { const big = loadBig(donor); await C.renameBigfile(big, [{ from: donor, to: name }]); return big; }
 // qkl_fe2ig.ast entries by name (FNV-1a 64 of the upper-cased name), for donors and XMLs that only live in the archive.
@@ -270,14 +281,33 @@ function cleanLogo(logo) {
 
 // The jersey's own name font (NAME_DECAL: 64x128 cells, two per row, in the kerning table's character order) set as a
 // small word at CHEST, in the number colour. Glyph widths come from their alpha; letters sit on rows 14..107 of a cell.
-function chestText(img, font, text, colour) {
+function fontGlyphs(font, text) {
   const order = new TextDecoder().decode(font.kerning).split(/\r?\n/)[2], top = 14, bottom = 107;
-  const glyphs = [...text.toUpperCase()].map((ch) => {
+  return [...text.toUpperCase()].map((ch) => {
     const i = order.indexOf(ch); if (ch === ' ' || i < 0) return null;
     const cx = (i % 2) * 64, cy = ((i / 2) | 0) * 128; let l = 64, r = 0;
     for (let y = cy + top; y < cy + bottom; y++) for (let x = cx; x < cx + 64; x++) if (font.img.rgba[(y * font.img.width + x) * 4 + 3] > 64) { l = Math.min(l, x - cx); r = Math.max(r, x - cx + 1); }
     return { x: cx + l, y: cy + top, w: Math.max(1, r - l) };
   });
+}
+// A helmet lettermark for teams without a logo: the text in the name font at its own size (93px letters), filled with
+// `fill` over an outline `pad` pixels wide; stamp() scales it into the helmet's logo boxes.
+function letterLogo(font, text, fill, outline, pad = 8) {
+  const glyphs = fontGlyphs(font, text).filter(Boolean), gap = 6, h = 93;
+  const width = glyphs.reduce((a, g) => a + g.w + gap, -gap) + 2 * pad, height = h + 2 * pad, cov = new Float32Array(width * height);
+  let ox = pad;
+  for (const g of glyphs) { for (let y = 0; y < h; y++) for (let x = 0; x < g.w; x++) cov[(pad + y) * width + ox + x] = font.img.rgba[((g.y + y) * font.img.width + g.x + x) * 4 + 3] / 255; ox += g.w + gap; }
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    let o = 0; for (let dy = -pad; dy <= pad && o < 1; dy++) for (let dx = -pad; dx <= pad; dx++) { if (dx * dx + dy * dy > pad * pad) continue; const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < height && xx < width) o = Math.max(o, cov[yy * width + xx]); }
+    const a = cov[y * width + x], p = (y * width + x) * 4;
+    for (let j = 0; j < 3; j++) rgba[p + j] = fill[j] * a + outline[j] * (1 - a);
+    rgba[p + 3] = 255 * Math.max(a, o);
+  }
+  return { rgba, width, height };
+}
+function chestText(img, font, text, colour) {
+  const top = 14, bottom = 107, glyphs = fontGlyphs(font, text);
   let s = CHEST.height / (bottom - top); const gap = 0.16 * CHEST.height, space = 0.45 * CHEST.height;
   const width = (k) => glyphs.reduce((a, g) => a + (g ? g.w * k : space) + gap, -gap);
   if (width(s) > CHEST.maxWidth) s *= CHEST.maxWidth / width(s);
@@ -360,6 +390,12 @@ async function buildSet(s) {
     const dir = findSave(s.save); const { logos, team, tuni } = readTeamSave(dir); k = colours(team, tuni);
     logo = logos.find((l) => l.width === (s.logo || 128)) || logos[logos.length - 1];
     console.log(`${s.team} (${s.slot}) from ${path.relative(library, dir)}: ${team.TDNA} ${team.TMNA}`);
+  } else if (s.mark) {
+    k = schoolColours(s.colours);
+    const lum = (c) => (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255;
+    const fill = lum(k.S) > 0.45 && dist(k.S, k.helmet) > 60 ? k.S : WHITE, outline = fill === WHITE ? apart(k.helmet, [k.S, [16, 16, 16]]) : WHITE;
+    logo = letterLogo(await nameFont(), s.mark, fill, outline);
+    console.log(`${s.team} (${s.slot}) from the mod's colours and a "${s.mark}" lettermark`);
   } else {
     k = schoolColours(s.colours); logo = cleanLogo(readPng(fs.readFileSync(path.join(LOGOS, `${s.espn}.png`))));
     console.log(`${s.team} (${s.slot}) from school colours and ESPN logo ${s.espn}`);

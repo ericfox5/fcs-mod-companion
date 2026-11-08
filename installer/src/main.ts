@@ -2,8 +2,9 @@
 // the uniform sets and stop-gap uniform files, the league server address, the private PSN server), installs the FCS2026
 // roster save, and starts the league server on the host's PC. Built into a single .exe by installer/build.mjs (Node
 // SEA); the payload (patch entries, uniform XMLs, optional roster save) is generated at build time from the project's
-// private files and embedded, the uniform sets' bigfiles as the SEA asset uniform-pack.bin. Runs as a console wizard;
-// every flag makes a step non-interactive.
+// private files and embedded, the uniform sets' bigfiles as the SEA asset uniform-pack.bin. `join` also re-keys the
+// generic teams' stored rosters in the game archives to the 100-player stride (bridge/src/stda.ts, bundled in). Runs
+// as a console wizard; every flag makes a step non-interactive.
 //
 //   FCS-online.exe                       menu
 //   FCS-online.exe join   [--rpcs3 DIR] [--server IP] [--rpcn HOST:PORT] [--yes]
@@ -17,6 +18,7 @@ import readline from 'node:readline/promises';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import payload from '../generated/payload.json';
+import { findStdaCopies, gameArchives, newStdaBackupDir, rekeyStdaArchive, rpcs3RunningOver } from '../../bridge/src/stda.js';
 
 interface UniformFile { folder: string; name: string; offset: number; size: number; sha1: string }
 interface Payload { builtAt: string; site: string; ppuHash: string; patches: { name: string; block: string; words: number }[]; uniforms: Record<string, string>; uniformSets?: UniformFile[]; roster?: { dir: string; files: Record<string, string>; note: string } }
@@ -167,6 +169,27 @@ function configureNetwork(rpcs3: string, server: string, rpcn: string): string[]
   return notes;
 }
 
+// ---- generic rosters: the stored rosters of the generic teams (PLST / DCST in the standard-data entry of the game
+// archives) re-keyed to the 100-player patch's stride, every copy in place, originals backed up first -------------------
+function installGenericRosters(rpcs3: string): string[] {
+  const archives = gameArchives(rpcs3), copies = findStdaCopies(archives);
+  if (!copies.length) return [`no game archive with the standard-data entry found under ${rpcs3} (${archives.length} archive(s) checked)`];
+  if (copies.every((c) => c.stride === 100)) return copies.map((c) => `${path.basename(c.archive)}: already at stride 100`);
+  if (rpcs3RunningOver(archives)) return ['RPCS3 is running from this install: close it, then run join again to re-key the generic rosters'];
+  const dir = newStdaBackupDir(), notes: string[] = [];
+  for (const c of copies) {
+    try { const r = rekeyStdaArchive(c.archive, dir, { to: 100, tool: 'FCS-online.exe join' }); notes.push(`${path.basename(c.archive)}: ${r.status === 'rekeyed' ? `re-keyed, ${r.note}` : r.status === 'already' ? 'already at stride 100' : `skipped (${r.note})`}`); }
+    catch (e) { notes.push(`${path.basename(c.archive)}: NOT changed: ${(e as Error).message}`); }
+  }
+  if (fs.existsSync(path.join(dir, 'manifest.json'))) notes.push(`original entries backed up in ${dir} (ncaa-bridge stda restore --backup "${dir}" puts them back)`);
+  return notes;
+}
+function genericRosterStatus(rpcs3: string): string[] {
+  const copies = findStdaCopies(gameArchives(rpcs3));
+  if (!copies.length) return ['generic rosters: no game archive with the standard-data entry found'];
+  return copies.map((c) => `generic rosters in ${path.basename(c.archive)}: ${c.error ?? (c.stride === 100 ? 'stride 100 (current)' : `stride ${c.stride ?? '?'} (join re-keys them)`)}`);
+}
+
 // ---- roster save -------------------------------------------------------------------------------------------------
 function installRoster(rpcs3: string): string {
   if (!P.roster) return 'this build carries no roster save';
@@ -217,10 +240,12 @@ async function joinFlow(): Promise<void> {
     if (u.missingPack) say('   this exe has no uniform pack (built without it); only the stop-gap XMLs were installed');
     if (dlcBackups) say(`   ${dlcBackups} replaced file(s) backed up in ${DLC_BACKUP}`);
   }
-  say('\n3. Network');
+  say('\n3. Generic teams\' stored rosters (re-keyed for the 100-player patch)');
+  for (const n of installGenericRosters(rpcs3)) say(`   ${n}`);
+  say('\n4. Network');
   for (const n of configureNetwork(rpcs3, server, rpcn)) say(`   ${n}`);
-  if (P.roster && (flags.get('roster') === 'true' || (!YES && await confirm(`\n4. Install the roster save ${P.roster.dir} (up to 90 players per team; needs the patches above)?`, false)))) say(`   ${installRoster(rpcs3)}`);
-  say(`\n5. Companion site: ${P.site}`);
+  if (P.roster && (flags.get('roster') === 'true' || (!YES && await confirm(`\n5. Install the roster save ${P.roster.dir} (up to 90 players per team; needs the patches above)?`, false)))) say(`   ${installRoster(rpcs3)}`);
+  say(`\n6. Companion site: ${P.site}`);
   say('   Create your account there (Sign in), then tell the commissioner your account name so they can link your team.');
   if (!YES && await confirm('   Open it in the browser now?')) spawn('cmd', ['/c', 'start', '', P.site], { detached: true, stdio: 'ignore' }).unref();
   say('\nDone. Start RPCS3, check Manage > Game Patches shows the FCS mod entries ticked, and load the game.');
@@ -235,6 +260,7 @@ async function statusFlow(): Promise<void> {
     for (const u of P.uniformSets) { const f = path.join(dlc, u.folder, u.name); const s = !fs.existsSync(f) ? 'missing' : sha1(fs.readFileSync(f)) === u.sha1 ? 'current' : 'different'; st[s]++; if (s !== 'current' && /_MixAndMatch\.XML$/i.test(u.name)) off.push(`${u.folder}\\${u.name} ${s}`); }
     say(`  uniform sets: ${st.current} of ${P.uniformSets.length} files current, ${st.different} different, ${st.missing} missing${off.length ? ` (${off.join('; ')})` : ''}`);
   }
+  for (const l of genericRosterStatus(rpcs3)) say(`  ${l}`);
   const custom = path.join(rpcs3, 'config', 'custom_configs', `config_${GAME}.yml`);
   if (fs.existsSync(custom)) { const t = fs.readFileSync(custom, 'utf8'); for (const k of ['Internet enabled', 'PSN status', 'IP swap list']) say(`  Net ${k}: ${/^  (Internet enabled|PSN status|IP swap list): (.*)$/m.exec(t.split('\n').find((l) => l.startsWith(`  ${k}:`)) ?? '')?.[2] ?? '?'}`); } else say('  no custom game config');
   const rp = path.join(rpcs3, 'config', 'rpcn.yml'); say(`  RPCN: ${fs.existsSync(rp) ? `host ${/^Host: (.*)$/m.exec(fs.readFileSync(rp, 'utf8'))?.[1] ?? '?'}, account ${/^NPID: "?([^"\n]+)"?$/m.test(fs.readFileSync(rp, 'utf8')) ? 'present' : 'none'}` : 'no rpcn.yml'}`);

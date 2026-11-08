@@ -91,6 +91,7 @@ dresses it in Delaware's art), a real set to start from:
 | NMEXST | Richmond | XML for the mod's own RICHMO art (already in FCS_DLC_PATRIOT, nothing pointed at it) |
 | TOLEDO | Long Island | XML for the mod's own LIUXXX art; its blue jersey ships under a helmet name and is copied as `LIUXXX_JERSEY_2020_BLUEX` |
 | DUKEXX | Villanova | its own XML (copied from the archive) plus a navy helmet option, `DUKEXX_HELMET_2026_NAVYBL`: the white helmet with the shell turned V navy and the V left where it is |
+| D1AAEX, D1AAWX, D1AANW, D1AAMW, D1AASE | Mercyhurst, West Florida, Wagner, Tuskegee, Delta State (the generic opponent slots) | placeholder sets; Wagner from its Teambuilder save, the other four (Division II, no logo on hand) in the mod's colours with a lettermark helmet (M, UWF, T, DSU) in the jersey's name font. They replace the Wagner and Tuskegee stop-gaps |
 
 Teambuilder saves carry no uniform art, only a recipe (colours, stripe and font numbers) the game draws at run time and
 two logos. The script reads the colours and the 128px logo from the save and paints them onto the mod's FCSXXX

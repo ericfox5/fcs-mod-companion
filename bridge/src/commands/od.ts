@@ -10,7 +10,7 @@ import { exportDynasty, decodeSeason, isPlayed, detectStride, freePgids, rosterS
 import { WorkerApi } from '../api.js';
 import type { BridgeConfig } from '../config.js';
 import { loadOdStore, lockerIndex, lockerIndexAll, readLockerBlob, readLockerBlobAny, openDynastyFile, odFingerprint, odSlug, odName, consoleFileId, seasonGames, type OdDynasty, type OdGameResult, type OpenedDynastyFile } from '../od.js';
-import { patchDynasty, PATCH_FORMAT, NEW_TRANSFER_WEIGHT, BASE_YEAR, RECRUIT_FIRST_MAX, RECRUIT_LAST_MAX, WEIGHT_BASE, patchSetEmpty, type TransferPatch, type DepthPatch, type DynastyPatchSet, type RecruitPatch, type RecruitEdit, type CreatePlayerPatch } from '../dynasty-patch.js';
+import { patchDynasty, PATCH_FORMAT, NEW_TRANSFER_WEIGHT, BASE_YEAR, RECRUIT_FIRST_MAX, RECRUIT_LAST_MAX, WEIGHT_BASE, patchSetEmpty, staleCaptains, type TransferPatch, type DepthPatch, type DynastyPatchSet, type RecruitPatch, type RecruitEdit, type CreatePlayerPatch } from '../dynasty-patch.js';
 import { pushExport, playerUids } from './import.js';
 import { syncCaptures } from './captures.js';
 import { loadPhotoIndex, attachPhotoKeys, photoDirsOf } from '../photos.js';
@@ -47,7 +47,10 @@ type QueuedPlayer = CreatePlayerPatch & { batch?: string };
 interface PlayersMemo { pending: QueuedPlayer[]; at: string; base: number }
 // PLAY rows the bridge takes back out through the dynasty-file copy (`od repair`), until a console upload lacks them all
 interface RepairMemo { remove: number[]; restores?: number[]; at: string; base: number; note: string }
-interface OdState { [did: string]: { fingerprint: string; slug: string; importId: number; at: string; eligibility?: { year: number; pending: number[]; done: number[] }; overhaul?: OverhaulMemo; startYear?: StartYearMemo; locks?: LockMemo[]; playoff?: PlayoffMemo; firstYear?: number; stride?: StrideMemo; players?: PlayersMemo; repair?: RepairMemo } }
+// captains: TEAM.OCAP / DCAP left at stride 70 by an earlier re-key (`od captains`), re-keyed through the dynasty-file
+// copy until a console upload carries them at its stride
+interface CaptainsMemo { at: string; base: number; taken?: number }
+interface OdState { [did: string]: { fingerprint: string; slug: string; importId: number; at: string; eligibility?: { year: number; pending: number[]; done: number[] }; overhaul?: OverhaulMemo; startYear?: StartYearMemo; locks?: LockMemo[]; playoff?: PlayoffMemo; firstYear?: number; stride?: StrideMemo; players?: PlayersMemo; repair?: RepairMemo; captains?: CaptainsMemo } }
 const loadState = (): OdState => (existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, 'utf8')) : {});
 const saveState = (s: OdState): void => { mkdirSync(STATE_DIR, { recursive: true }); writeFileSync(STATE_FILE, JSON.stringify(s, null, 2)); };
 const stamp = () => new Date().toTimeString().slice(0, 8);
@@ -127,8 +130,8 @@ export async function syncWebEdits(cfg: BridgeConfig, d: OdDynasty, api = new Wo
   const plyz = new Map<number, PlyzRow>(players.map((r) => [r.PGID, r]));
   for (const r of transfers.plyz) plyz.set(r.PGID, { ...(plyz.get(r.PGID) ?? r), PLFL: r.PLFL as number, PTYP: r.PTYP as number });
   for (const r of eligible.plyz) plyz.set(r.PGID, { ...(plyz.get(r.PGID) ?? r), PRSD: 0 });
-  const recruits = pendingOverhaul(cfg, d); const startYear = pendingStartYear(cfg, d); const stride = pendingStride(cfg, d); const createPlayers = pendingCreatePlayers(cfg, d); const removePlayers = pendingRemovePlayers(cfg, d);
-  const patch: DynastyPatchSet = { transfers: transfers.newRows ? transfers.patches : [], depth, eligible: eligible.pgids, ...(recruits ? { recruits } : {}), ...(recruitEdits.length ? { recruitEdits } : {}), ...(startYear ? { startYear } : {}), ...(playoff ? { playoff } : {}), ...(stride ? { stride } : {}), ...(createPlayers.length ? { createPlayers } : {}), ...(removePlayers.length ? { removePlayers } : {}) };
+  const recruits = pendingOverhaul(cfg, d); const startYear = pendingStartYear(cfg, d); const stride = pendingStride(cfg, d); const createPlayers = pendingCreatePlayers(cfg, d); const removePlayers = pendingRemovePlayers(cfg, d); const captains = pendingCaptains(cfg, d);
+  const patch: DynastyPatchSet = { transfers: transfers.newRows ? transfers.patches : [], depth, eligible: eligible.pgids, ...(recruits ? { recruits } : {}), ...(recruitEdits.length ? { recruitEdits } : {}), ...(startYear ? { startYear } : {}), ...(playoff ? { playoff } : {}), ...(stride ? { stride } : {}), ...(createPlayers.length ? { createPlayers } : {}), ...(removePlayers.length ? { removePlayers } : {}), ...(captains ? { captains } : {}) };
   // while a stride change is on its way the change tables name players by ids the console is about to change: held back
   if (stride && (plyz.size || transfers.traz.length || transfers.plsz.length)) notes.push(` DID ${d.id}: player/transfer change tables held until the console takes stride ${stride}`);
   const changed = [
@@ -579,6 +582,36 @@ function maybeStrideTaken(cfg: BridgeConfig, d: OdDynasty, opened: OpenedDynasty
   const memo = state[sk(cfg, d)]?.stride; if (!memo || memo.taken) return;
   if (detectStride(opened.file.table('PLAY')) === memo.stride) { memo.taken = fileId; saveState(state); console.log(`${stamp()} DID ${d.id}: the console's file ${fileId} is keyed at stride ${memo.stride}; the switch is done`); }
 }
+// Captains still to reach the console (od captains --did N).
+function pendingCaptains(cfg: BridgeConfig, d: OdDynasty): boolean {
+  const m = loadState()[sk(cfg, d)]?.captains;
+  return Boolean(m && !m.taken);
+}
+// A console upload with no captain left at 70: the fix is in, the copy is withdrawn by the next syncWebEdits.
+function maybeCaptainsTaken(cfg: BridgeConfig, d: OdDynasty, opened: OpenedDynastyFile, fileId: number, state: OdState): void {
+  const memo = state[sk(cfg, d)]?.captains; if (!memo || memo.taken || fileId === memo.base) return;
+  if (!staleCaptains(opened.file)) { memo.taken = fileId; saveState(state); console.log(`${stamp()} DID ${d.id}: the console's file ${fileId} carries every captain at its stride; the captain fix is done`); }
+}
+// ncaa-bridge od captains [--did N | --did N --off]: queue the captain re-key for one dynasty (status without --did).
+export async function odCaptains(cfg: BridgeConfig, opts: { did?: number; off: boolean }): Promise<void> {
+  const store = loadOdStore(cfg.odDir); const state = loadState();
+  const list = Object.values(store.dynasties).filter((d) => opts.did === undefined || d.id === opts.did);
+  if (opts.did === undefined) {
+    for (const d of list) { const m = state[sk(cfg, d)]?.captains; const blob = readLockerBlobAny(cfg.odDir, consoleFileId(d)); const stale = blob ? staleCaptains(openDynastyFile(blob).file) : null; console.log(`DID ${d.id} ${odName(d)}: ${stale === null ? 'no console file' : `${stale} captains at stride 70 in console file ${consoleFileId(d)}`}${m ? `; fix ${m.taken ? `taken (console file ${m.taken})` : `queued since ${m.at}`}` : ''}`); }
+    return;
+  }
+  const d = list[0]; if (!d) throw new Error(`no dynasty DID ${opts.did} in ${cfg.odDir}`);
+  const memo = state[sk(cfg, d)] ?? (state[sk(cfg, d)] = { fingerprint: '', slug: '', importId: 0, at: '' });
+  if (opts.off) { delete memo.captains; saveState(state); console.log(`DID ${d.id}: captain fix cleared (files already published are left as they are)`); }
+  else {
+    const blob = readLockerBlobAny(cfg.odDir, consoleFileId(d)); if (!blob) throw new Error(`DID ${d.id}: console file ${consoleFileId(d)} is not in the locker`);
+    const stale = staleCaptains(openDynastyFile(blob).file);
+    if (!stale) { console.log(`DID ${d.id}: console file ${consoleFileId(d)} has no captain at stride 70; nothing to queue`); return; }
+    memo.captains = { at: new Date().toISOString(), base: consoleFileId(d) }; saveState(state);
+    console.log(`DID ${d.id}: captain fix queued for ${stale} TEAM.OCAP/DCAP cells (console file ${consoleFileId(d)}); the watcher publishes the patched dynasty file and the console takes it at its next load from the hub`);
+  }
+  await syncWebEdits(cfg, d, new WorkerApi(cfg)).catch((e: Error) => console.error(`${stamp()} DID ${d.id} web edits: ${e.message}`));
+}
 // ncaa-bridge od stride [--did N --stride 100 | --did N --off]: queue a roster-stride change for one dynasty (status without flags).
 export async function odStride(cfg: BridgeConfig, opts: { did?: number; stride?: number; off: boolean }): Promise<void> {
   const store = loadOdStore(cfg.odDir); const state = loadState();
@@ -947,6 +980,7 @@ export async function odImportOne(cfg: BridgeConfig, d: OdDynasty, opts: OdImpor
   saveState(state);
   console.log(`${stamp()}   committed in ${((Date.now() - t0) / 1000).toFixed(1)}s -> ${cfg.workerUrl}/d/${dynasty.slug}`);
   maybeStrideTaken(cfg, d, opened, fileId, state);
+  maybeCaptainsTaken(cfg, d, opened, fileId, state);
   maybePlayersTaken(cfg, d, ex, state);
   maybeRemovalsTaken(cfg, d, ex, state);
   // the start year first: a console file that took it moves the reshaped class to the new year before the overhaul looks

@@ -28,6 +28,15 @@ export function detectStride(play: TdbTable, candidates: readonly number[] = STR
 }
 
 export interface RekeyResult { from: number; to: number; rekeyed: number; kept: number; overflow: number; perTable: string[]; playMax: [number, number]; teams: number }
+// Columns that hold a PGID under another name, re-keyed with every PGID column. Found by matching value / stride to the
+// row's TGID in real saves: PLAY.POID (the id a player was created with; the roster tooling and offline roster saves
+// keep POID == PGID), TEAM's captains and featured players (OCAP/DCAP; TPIO best and TSI1 second-best offensive player,
+// TMPI best and TSI2 second-best defensive player) and SSUM's season-summary player ids.
+export const PGID_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  PLAY: ['POID'],
+  TEAM: ['OCAP', 'DCAP', 'TPIO', 'TMPI', 'TSI1', 'TSI2'],
+  SSUM: ['SSFI', 'SSPI', 'SSTI'],
+};
 // Re-key every PGID column of every table from one stride to another by arithmetic (team = id / from, slot = id % from),
 // and grow PLAY to teams x to. PGID_NONE, 0 and ids that would not fit their field are left as they are.
 export function rekeyStride(file: TdbFile, opts: { from: number; to: number }): RekeyResult {
@@ -36,11 +45,9 @@ export function rekeyStride(file: TdbFile, opts: { from: number; to: number }): 
   const play = file.table('PLAY');
   const teams = Math.floor(play.header.maxRecords / from);
   let rekeyed = 0, kept = 0, overflow = 0; const perTable: string[] = [];
-  // PGID everywhere; PLAY.POID too (the id a player was created with, keyed the same way: the roster tooling and the
-  // offline roster saves keep POID == PGID)
   for (const t of file.tables) {
-    for (const col of ['PGID', 'POID']) {
-      if (!t.fieldMap.has(col) || (col === 'POID' && t.name !== 'PLAY')) continue;
+    for (const col of ['PGID', ...(PGID_ALIASES[t.name] ?? [])]) {
+      if (!t.fieldMap.has(col)) continue;
       const f = t.field(col); const limit = 2 ** f.bits; let n = 0, k = 0, ov = 0;
       for (let i = 0; i < t.recordCount; i++) {
         const v = Number(t.get(i, col));
@@ -50,7 +57,7 @@ export function rekeyStride(file: TdbFile, opts: { from: number; to: number }): 
         t.set(i, col, nv); n++;
       }
       rekeyed += n; kept += k; overflow += ov;
-      if (n || ov) perTable.push(`${t.name}${col === 'POID' ? '.POID' : ''} ${n}${ov ? ` (${ov} left: would overflow ${f.bits} bits)` : ''}`);
+      if (n || ov) perTable.push(`${t.name}${col === 'PGID' ? '' : `.${col}`} ${n}${ov ? ` (${ov} left: would overflow ${f.bits} bits)` : ''}`);
     }
   }
   const oldMax = play.header.maxRecords;
@@ -100,6 +107,41 @@ export function addPlayer(file: TdbFile, p: NewPlayer): { pgid: number; row: num
   if (play.fieldMap.has('POID')) values.POID = pgid;
   const row = play.appendRecord(values);
   return { pgid, row };
+}
+
+// TEAM's player references from the team's own players, for a roster whose slots were refilled (the 90-man build puts
+// different people in the slots a stride re-key keeps): TPIO / TSI1 the best and second-best offensive player (PPOS
+// 0..9) by POVR, TMPI / TSI2 the same on defense (10..18), as in stock saves; OCAP / DCAP the best-rated senior on each
+// side (stock captains follow no stored field, so any sensible pick is as good). A team without players gets the slot
+// its stale value names in its own range, as the stock generic teams have (an id nobody holds). Returns cells changed.
+export function setTeamPlayerRefs(file: TdbFile, opts: { stride?: number } = {}): { teams: number; changed: number } {
+  const play = file.table('PLAY'), team = file.table('TEAM');
+  const stride = opts.stride ?? detectStride(play) ?? PGID_STRIDE;
+  interface P { pgid: number; pos: number; ovr: number; yr: number }
+  const byTeam = new Map<number, P[]>();
+  for (let i = 0; i < play.recordCount; i++) {
+    const t = Number(play.get(i, 'TGID')); if (!byTeam.has(t)) byTeam.set(t, []);
+    byTeam.get(t)!.push({ pgid: Number(play.get(i, 'PGID')), pos: Number(play.get(i, 'PPOS')), ovr: Number(play.get(i, 'POVR')), yr: Number(play.get(i, 'PYEA')) });
+  }
+  const byOvr = (a: P, b: P) => b.ovr - a.ovr || a.pgid - b.pgid, bySenior = (a: P, b: P) => b.yr - a.yr || byOvr(a, b);
+  let teams = 0, changed = 0;
+  const put = (i: number, col: string, v: number | undefined) => { if (v === undefined || !team.fieldMap.has(col)) return; if (Number(team.get(i, col)) !== v) { team.set(i, col, v); changed++; } };
+  for (let i = 0; i < team.recordCount; i++) {
+    const tgid = Number(team.get(i, 'TGID')), ps = byTeam.get(tgid) ?? [];
+    if (!ps.length) {
+      for (const col of PGID_ALIASES.TEAM!) {
+        if (!team.fieldMap.has(col)) continue; const v = Number(team.get(i, col)); if (v === PGID_NONE || v === 0) continue;
+        for (const from of STRIDES) if (from !== stride && teamOfPgid(v, from) === tgid) { put(i, col, pgidOf(tgid, slotOfPgid(v, from), stride)); break; }
+      }
+      continue;
+    }
+    const off = ps.filter((p) => p.pos <= 9), def = ps.filter((p) => p.pos >= 10 && p.pos <= 18);
+    const o = [...off].sort(byOvr), d = [...def].sort(byOvr);
+    put(i, 'TPIO', o[0]?.pgid); put(i, 'TSI1', o[1]?.pgid); put(i, 'TMPI', d[0]?.pgid); put(i, 'TSI2', d[1]?.pgid);
+    put(i, 'OCAP', [...off].sort(bySenior)[0]?.pgid); put(i, 'DCAP', [...def].sort(bySenior)[0]?.pgid);
+    teams++;
+  }
+  return { teams, changed };
 }
 
 // Remove PLAY rows by PGID (highest row index first, so the indices stay valid); returns the ids actually removed.
