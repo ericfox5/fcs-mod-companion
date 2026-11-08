@@ -6,6 +6,7 @@
 //   ncaa-bridge generic swap --stda <entry> --donor <USR-DATA> --donor-tgid N --tgid 160..164 --out <file> [--stride 70|100] [--force]
 //   ncaa-bridge generic team --file <USR-DATA> --donor <USR-DATA> --donor-tgid N --tgid 160..164 --out <file> [--force]
 //   ncaa-bridge generic install --donor <USR-DATA> --donor-tgid N --tgid 160..164 [--rpcs3 DIR | --archive FILE]
+//   ncaa-bridge generic fill --plan <plan.json> [--rpcs3 DIR | --archive FILE]   (real rosters from the roster tooling: FCS/Rosters/tools/src/generics.ts)
 // (or `npx tsx bridge/src/commands/generic.ts <same>`). --donor / --file take a plain EA DB (an offline roster or
 // dynasty USR-DATA) or a locker dynasty file (zlib).
 import { readFileSync, writeFileSync, openSync, readSync, closeSync, existsSync } from 'node:fs';
@@ -14,7 +15,7 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseTdb, serializeTdb, verifyTdb, FILE_HEADER_SIZE, DIR_ENTRY_SIZE, TABLE_HEADER_SIZE, EOF_CRC_SIZE, type TdbFile, type FieldValue } from '@ncaa/tdb';
-import { swapGenericTeam, copyTeamIdentity } from '@ncaa/ncaa14';
+import { swapGenericTeam, copyTeamIdentity, fillGenericRows, staleGenericRows, type GenericPlanRow } from '@ncaa/ncaa14';
 import { openDynastyFile } from '../od.js';
 import { buildDynastyFile } from '../dynasty-patch.js';
 import { findStdaCopies, gameArchives, newStdaBackupDir, rekeyStdaArchive, rpcs3RootFromConfig, rpcs3RunningOver } from '../stda.js';
@@ -152,14 +153,40 @@ export function genericInstall(opts: { donor: string; donorTgid: number; tgid: n
   if (existsSync(resolve(dir, 'manifest.json'))) console.log(`backup: ${dir} (ncaa-bridge stda restore --backup "${dir}")`);
 }
 
+// Real rosters on the generic teams (a plan from the roster tooling's generics.ts: per row PGID, team, the position and
+// rating it was built against, and the identity fields): every copy re-keyed if needed and filled in place. A plan row
+// whose PLST row no longer has that position and rating (a swap since) is refused rather than half-applied.
+export function genericFill(opts: { plan: string; rpcs3?: string; archive?: string }): void {
+  const plan = JSON.parse(readFileSync(opts.plan, 'utf8')) as { teams: Record<string, { team: string; rows: GenericPlanRow[] }> };
+  const rows = Object.values(plan.teams).flatMap((t) => t.rows);
+  if (!rows.length) throw new Error(`${opts.plan}: no rows`);
+  const root = opts.rpcs3 ?? process.env.NCAA_RPCS3 ?? rpcs3RootFromConfig();
+  const archives = opts.archive ? [opts.archive] : root ? gameArchives(root) : [];
+  if (rpcs3RunningOver(archives)) throw new Error('RPCS3 is running from this install: close it before touching the game archives');
+  const copies = findStdaCopies(archives); if (!copies.length) throw new Error(`no standard-data entry in ${archives.length} archive(s) (pass --rpcs3 DIR or --archive FILE)`);
+  const dir = newStdaBackupDir();
+  for (const c of copies) {
+    let r: ReturnType<typeof fillGenericRows> | undefined;
+    const out = rekeyStdaArchive(c.archive, dir, { to: 100, tool: 'ncaa-bridge generic fill', edit: (f) => {
+      const off = staleGenericRows(f, rows);
+      if (off.length) throw new Error(`${off.length} plan row(s) do not match PLST (first: PGID ${off[0]!.pgid}); the generic rows changed since the plan was built (restore a swap first, or rebuild the plan)`);
+      r = fillGenericRows(f, rows);
+    } });
+    console.log(`${c.archive}: ${out.status}: ${out.note}${r ? `; ${r.rows} rows, ${r.cells} cells, teams ${r.teams.join(',')}` : ''}`);
+  }
+  for (const [tgid, t] of Object.entries(plan.teams)) console.log(`  ${tgid} ${t.team}: ${t.rows.length} rows`);
+  if (existsSync(resolve(dir, 'manifest.json'))) console.log(`backup: ${dir} (ncaa-bridge stda restore --backup "${dir}")`);
+}
+
 export function genericCli(cmd: string | undefined, flags: Map<string, string>): void {
   const num = (k: string) => (flags.has(k) ? Number(flags.get(k)) : undefined);
   const force = flags.get('force') === 'true';
   if (cmd === 'extract' && flags.has('archive')) genericExtract({ archive: flags.get('archive')!, out: flags.get('out'), hash: flags.get('hash'), force });
   else if (cmd === 'swap' && flags.has('stda') && flags.has('donor')) genericSwap({ stda: flags.get('stda')!, donor: flags.get('donor')!, donorTgid: num('donor-tgid')!, tgid: num('tgid')!, out: flags.get('out'), stride: num('stride'), force });
   else if (cmd === 'team' && flags.has('file') && flags.has('donor')) genericTeam({ file: flags.get('file')!, donor: flags.get('donor')!, donorTgid: num('donor-tgid')!, tgid: num('tgid')!, out: flags.get('out'), force });
+  else if (cmd === 'fill' && flags.has('plan')) genericFill({ plan: flags.get('plan')!, rpcs3: flags.get('rpcs3'), archive: flags.get('archive') });
   else if (cmd === 'install' && flags.has('donor')) genericInstall({ donor: flags.get('donor')!, donorTgid: num('donor-tgid')!, tgid: num('tgid')!, rpcs3: flags.get('rpcs3'), archive: flags.get('archive') });
-  else console.log('usage: generic extract --archive <qkl_*.ast> --out <file> [--hash H] | swap --stda <entry> --donor <USR-DATA> --donor-tgid N --tgid 160..164 --out <file> [--stride 70|100] | team --file <USR-DATA> --donor <USR-DATA> --donor-tgid N --tgid 160..164 --out <file> | install --donor <USR-DATA> --donor-tgid N --tgid 160..164 [--rpcs3 DIR | --archive FILE]   (add --force to replace an existing --out)');
+  else console.log('usage: generic extract --archive <qkl_*.ast> --out <file> [--hash H] | swap --stda <entry> --donor <USR-DATA> --donor-tgid N --tgid 160..164 --out <file> [--stride 70|100] | team --file <USR-DATA> --donor <USR-DATA> --donor-tgid N --tgid 160..164 --out <file> | install --donor <USR-DATA> --donor-tgid N --tgid 160..164 [--rpcs3 DIR | --archive FILE] | fill --plan <generics plan.json> [--rpcs3 DIR | --archive FILE]   (add --force to replace an existing --out)');
 }
 
 function main(argv: string[]): void {

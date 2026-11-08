@@ -70,6 +70,15 @@ export function readStda(archive: string): StdaCopy | null {
   } finally { closeSync(fd); }
 }
 export const findStdaCopies = (archives: string[]): StdaCopy[] => archives.map(readStda).filter((c): c is StdaCopy => c !== null);
+// The parsed standard-data DB of one archive (null when the archive carries no stored copy).
+export function stdaFile(archive: string): TdbFile | null {
+  const fd = openSync(archive, 'r');
+  try {
+    const entry = archiveToc(fd).find((e) => e.hash === STDA_ENTRY_HASH); if (!entry || entry.csize !== entry.usize) return null;
+    const b = Buffer.alloc(entry.csize); readSync(fd, b, 0, b.length, entry.off);
+    return parseTdb(new Uint8Array(b.buffer, b.byteOffset, b.length));
+  } finally { closeSync(fd); }
+}
 
 // Whether an RPCS3 that may be reading these archives is running: one whose rpcs3.exe sits above one of them. When
 // the running processes' paths cannot be read, any running rpcs3.exe counts.

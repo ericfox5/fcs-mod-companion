@@ -168,3 +168,43 @@ export function copyTeamIdentity(file: TdbFile, tgid: number, donorTeam: Row): s
   }
   return changed;
 }
+
+// Real rosters on the generic teams by default (the roster tooling's generics.ts plan): identity fields set on existing
+// PLST rows by PGID, nothing else (each row keeps its position, ratings, face and body; no row added or removed).
+export const GENERIC_FILL_FIELDS = ['PFNA', 'PLNA', 'PJEN', 'PYEA', 'PRSD', 'PHGT', 'PWGT'] as const;
+export interface GenericFillRow { pgid: number; tgid: number; fields: Record<string, FieldValue> }
+export function fillGenericRows(stda: TdbFile, rows: readonly GenericFillRow[]): { rows: number; cells: number; teams: number[] } {
+  const t = stda.table('PLST'); const at = new Map<number, number>();
+  for (let i = 0; i < t.recordCount; i++) at.set(Number(t.get(i, 'PGID')), i);
+  let cells = 0; const teams = new Set<number>();
+  for (const r of rows) {
+    if (r.tgid < 160 || r.tgid > 164) throw new RangeError(`PGID ${r.pgid}: team ${r.tgid} is not a generic team (160-164)`);
+    const i = at.get(r.pgid); if (i === undefined) throw new Error(`PLST has no row PGID ${r.pgid}`);
+    if (Number(t.get(i, 'TGID')) !== r.tgid) throw new Error(`PLST PGID ${r.pgid} belongs to team ${t.get(i, 'TGID')}, not ${r.tgid}`);
+    for (const [k, v] of Object.entries(r.fields)) {
+      if (!(GENERIC_FILL_FIELDS as readonly string[]).includes(k)) throw new Error(`PGID ${r.pgid}: field ${k} is not an identity field (${GENERIC_FILL_FIELDS.join(' ')})`);
+      if (typeof v === 'number' && (v < 0 || v >= 2 ** t.field(k).bits)) throw new RangeError(`PGID ${r.pgid}: ${k} ${v} does not fit ${t.field(k).bits} bits`);
+      if (t.get(i, k) !== v) { t.set(i, k, v); cells++; }
+    }
+    teams.add(r.tgid);
+  }
+  return { rows: rows.length, cells, teams: [...teams].sort((a, b) => a - b) };
+}
+// A plan row (the roster tools' generics.ts) also carries the position and rating of the stock row it was matched to.
+// A row whose PLST row is gone or now has another team, position or rating (a swap put other players there) is stale:
+// it must not take the plan's identity.
+export interface GenericPlanRow extends GenericFillRow { ppos: number; povr: number }
+function plstIndex(stda: TdbFile): { t: TdbTable; at: Map<number, number> } {
+  const t = stda.table('PLST'); const at = new Map<number, number>();
+  for (let i = 0; i < t.recordCount; i++) at.set(Number(t.get(i, 'PGID')), i);
+  return { t, at };
+}
+export function staleGenericRows<R extends GenericPlanRow>(stda: TdbFile, rows: readonly R[]): R[] {
+  const { t, at } = plstIndex(stda);
+  return rows.filter((r) => { const i = at.get(r.pgid); return i === undefined || Number(t.get(i, 'TGID')) !== r.tgid || Number(t.get(i, 'PPOS')) !== r.ppos || Number(t.get(i, 'POVR')) !== r.povr; });
+}
+// How many rows already carry every identity value the plan gives them.
+export function filledGenericRows(stda: TdbFile, rows: readonly GenericFillRow[]): number {
+  const { t, at } = plstIndex(stda);
+  return rows.filter((r) => { const i = at.get(r.pgid); return i !== undefined && Object.entries(r.fields).every(([k, v]) => t.get(i, k) === v); }).length;
+}

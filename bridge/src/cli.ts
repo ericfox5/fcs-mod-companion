@@ -14,6 +14,8 @@ import { odInvite } from './commands/invite.js';
 import { logosUpload } from './commands/logos.js';
 import { rosterGrow, rosterAdd, rosterStars } from './commands/roster.js';
 import { stdaCli } from './stda.js';
+import { scorebugCli } from './scorebug.js';
+import { swapCli } from './swap/cli.js';
 import { genericCli } from './commands/generic.js';
 
 const [, , cmd, ...rest] = process.argv;
@@ -147,6 +149,8 @@ switch (cmd) {
   }
   case 'stda': try { stdaCli(args[0], flags); } catch (e) { console.error((e as Error).message); process.exitCode = 1; } break; // generic rosters in the game archives: status | rekey | restore
   case 'generic': try { genericCli(args[0], flags); } catch (e) { console.error((e as Error).message); process.exitCode = 1; } break; // generic opponents -> real teams: extract | swap | team | install
+  case 'scorebug': try { scorebugCli(args[0], flags); } catch (e) { console.error((e as Error).message); process.exitCode = 1; } break; // the in-game score bug's team names / colours (qkl_patch.ast): status | export | restore
+  case 'swap': try { await swapCli(args[0], args.slice(1), flags); } catch (e) { console.error((e as Error).message); process.exitCode = 1; } break; // FBS team -> generic slot: list | preview | apply | restore | status | stadiums | ui
   case 'export': exportCmd(args[0]!); break;
   case 'info': info(args[0]!); break;
   case 'dump': dump(args[0]!, args.slice(1)); break;

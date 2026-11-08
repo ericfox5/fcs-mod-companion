@@ -2,7 +2,8 @@
 // at game load). Teambuilder team saves (a library of decrypted BLUS31159-TEAM-### folders) hold no uniform art: their TUNI
 // rows are a colour/stripe recipe the game renders at run time, next to two DXT3 logos (256 wordmark, 128 helmet logo). So
 // each set here is the mod's own placeholder parts (FCSXXX_*_2042_*, the same scenes as Hampton's) recoloured to the save's
-// TUNI colours, with the 128px logo on both helmet sides and the COMING SOON text / FCS patches erased. Teams without a
+// TUNI colours, with the 128px logo on both helmet sides, the COMING SOON text / FCS patches erased and the school's
+// conference logo on the jersey front where the FCS badge sat (opposite the Under Armour logo). Teams without a
 // readable save get the same set from school colours and their ESPN logo (archive/logos/teams, not in git). Richmond and
 // Long Island already have art in the DLC folders (RICHMO_*, LIUXXX_*) that no XML points at; they only get an XML.
 //   node spike/blaze/tools/uniforms/make-coming-soon-sets.mjs [--library <FCS_Team_Library>] [--only SLOT,SLOT] [--no-install]
@@ -29,29 +30,64 @@ if (!DLC || !fs.existsSync(DLC)) throw new Error(`RPCS3 DLC folder not found (${
 // (Merrimack's 128 is a Nike swoosh; its 256 is the MC mark). Davidson and Drake are still encrypted in the 2022 library
 // and St. Thomas and Stonehill are not in it: they take `colours` (primary/secondary, sampled from the logo) and an ESPN
 // logo id. Robert Morris sits on NOTDAM, whose mod XML declares no parts at all; Stonehill on CLEMSO, whose archive XML
-// still dresses it in Delaware's art (the team it replaced). `chest` is the word set below the collar on both jerseys.
+// still dresses it in Delaware's art (the team it replaced). `chest` is the word set below the collar on both jerseys
+// (`chestStyle`: size, height, outline); `conf` the conference patch opposite the Under Armour logo (CONFERENCES).
+// Per-team design options (Eric's requests): `helmet` { shell colour, `stripes` from the centreline out (each `width` px
+// of shell per side), `logo` (an ESPN logo id instead of the save's), `logoScale`, `metallic`, `facemask` (0..1 RGB) };
+// `brand` (the kit maker's mark replacing every UA logo, BRANDS) and `brandColour(background)`; `brandAt: 'collar'` (the
+// UA logo moved to the centre front of the collar); `collarLogo` (an ESPN logo there); `numbers` per jersey { fill (a
+// colour, or [top, bottom] for a vertical gradient), outline }; `pants` (colours instead of the save's); `jerseys(k)`
+// (the jersey list instead of dark = Home, light = Away: officials, shoulder stripes, `arcs: 'base'` to drop the donor's
+// shoulder arcs).
 const LOGOS = path.resolve(here, '..', '..', '..', '..', 'archive', 'logos', 'teams');
+const BRAND_LOGOS = path.resolve(here, '..', '..', '..', '..', 'archive', 'logos', 'brands');
 const SETS = [
-  { slot: 'NOTDAM', team: 'Robert Morris', save: 'Robert Morris', folder: 'FCS_DLC_NEC', chest: 'COLONIALS' },
-  { slot: 'WYOMIN', team: 'Davidson', colours: { P: 0xc8202a, S: 0x101010 }, espn: 2166, folder: 'FCS_DLC_PIONEER', chest: 'DAVIDSON' },
-  { slot: 'BOISES', team: 'Drake', colours: { P: 0x005a9c, S: 0xffffff }, espn: 2181, folder: 'FCS_DLC_PIONEER', chest: 'DRAKE' },
-  { slot: 'UNLVXX', team: 'St. Thomas', colours: { P: 0x582878, S: 0x97999b }, espn: 2900, folder: 'FCS_DLC_PIONEER', chest: 'TOMMIES' },
-  { slot: 'CLEMSO', team: 'Stonehill', colours: { P: 0x372d7d, S: 0x231f20 }, espn: 284, folder: 'FCS_DLC_NEC', chest: 'STONEHILL' },
-  { slot: 'NILLIN', team: 'Central Connecticut', save: 'CCSU', folder: 'FCS_DLC_NEC', chest: 'BLUE DEVILS' },
-  { slot: 'BALLST', team: 'Duquesne', save: 'Duquesne', folder: 'FCS_DLC_NEC', chest: 'DUQUESNE' },
-  { slot: 'EMICHI', team: 'Merrimack', save: 'Merrimack', folder: 'FCS_DLC_NEC', logo: 256, chest: 'MERRIMACK' },
-  { slot: 'CMICHI', team: 'Sacred Heart', save: 'Sacred Heart', folder: 'FCS_DLC_NEC', chest: 'PIONEERS' },
-  { slot: 'WMICHI', team: 'Saint Francis', save: 'Saint Francis', folder: 'FCS_DLC_NEC', chest: 'RED FLASH' },
-  { slot: 'HAWAII', team: 'Presbyterian', save: 'Presbyterian', folder: 'FCS_DLC_PIONEER', chest: 'BLUE HOSE' },
+  { slot: 'NOTDAM', team: 'Robert Morris', save: 'Robert Morris', folder: 'FCS_DLC_NEC', chest: 'ROBERT MORRIS', conf: 'NEC',
+    brandAt: 'collar', brandColour: () => [166, 25, 46], chestStyle: { maxWidth: 262, outline: [166, 25, 46], outlineWidth: 1 },
+    numbers: { dark: { outline: [166, 25, 46] }, light: { outline: [166, 25, 46] } },
+    helmet: { shell: [240, 240, 240], stripes: [{ colour: [31, 44, 68], width: 26 }, { colour: [166, 25, 46], width: 6 }] } },
+  { slot: 'WYOMIN', team: 'Davidson', colours: { P: 0xc8202a, S: 0x101010 }, espn: 2166, folder: 'FCS_DLC_PIONEER', chest: 'DAVIDSON', conf: 'Pioneer' },
+  { slot: 'BOISES', team: 'Drake', colours: { P: 0x005a9c, S: 0xffffff }, espn: 2181, folder: 'FCS_DLC_PIONEER', chest: 'DRAKE', conf: 'Pioneer' },
+  { slot: 'UNLVXX', team: 'St. Thomas', colours: { P: 0x582878, S: 0x97999b }, espn: 2900, folder: 'FCS_DLC_PIONEER', chest: 'ST. THOMAS', conf: 'Pioneer', brand: 'nike',
+    helmet: { shell: [165, 167, 170], metallic: true, stripes: [{ colour: [88, 40, 120], width: 12 }], logoScale: 0.75 },
+    pants: [{ base: [165, 167, 170], stripe: [88, 40, 120] }, { base: [88, 40, 120], stripe: [165, 167, 170] }] },
+  { slot: 'CLEMSO', team: 'Stonehill', colours: { P: 0x372d7d, S: 0x231f20 }, espn: 284, folder: 'FCS_DLC_NEC', chest: 'STONEHILL', conf: 'NEC', brand: 'adidas',
+    chestStyle: { height: 30, cy: 1610, maxWidth: 260, outline: [35, 31, 32], outlineWidth: 2 }, numbers: { dark: { outline: [35, 31, 32] } },
+    helmet: { facemask: [0, 0, 0] } },
+  { slot: 'NILLIN', team: 'Central Connecticut', save: 'CCSU', folder: 'FCS_DLC_NEC', chest: 'BLUE DEVILS', conf: 'NEC' },
+  { slot: 'BALLST', team: 'Duquesne', save: 'Duquesne', folder: 'FCS_DLC_NEC', chest: 'DUQUESNE', conf: 'NEC' },
+  { slot: 'EMICHI', team: 'Merrimack', save: 'Merrimack', folder: 'FCS_DLC_NEC', logo: 256, chest: 'MERRIMACK', conf: 'Independent', lettering: { dark: 'ua' } },
+  { slot: 'CMICHI', team: 'Sacred Heart', save: 'Sacred Heart', folder: 'FCS_DLC_NEC', chest: null, conf: 'CAA', brand: 'adidas', collarLogo: { espn: 2529 },
+    numbers: { dark: { fill: [252, 252, 252], outline: [40, 40, 44] } }, helmet: { shell: [240, 240, 240], stripes: [{ colour: [192, 12, 36], width: 24 }], logo: { espn: 2529 } } },
+  // Saint Francis is not in ESPN's 2026 FCS list (Division III from 2026): its last FCS conference, the NEC
+  { slot: 'WMICHI', team: 'Saint Francis', save: 'Saint Francis', folder: 'FCS_DLC_NEC', chest: 'RED FLASH', conf: 'NEC' },
+  // Presbyterian: a black main jersey after CFBR's 2019 Ball State black (its shoulder stripes, BALLST_SHOULDER, here white
+  // with a blue outline), the blue one kept as Alt #1; adidas marks in blue or white, whichever reads on the colour
+  { slot: 'HAWAII', team: 'Presbyterian', save: 'Presbyterian', folder: 'FCS_DLC_PIONEER', chest: 'BLUE HOSE', conf: 'Pioneer', brand: 'adidas',
+    brandColour: (bg) => readable(bg, [[53, 64, 184], [255, 255, 255]]),
+    helmet: { shell: [240, 240, 240], stripes: [{ colour: [162, 16, 16], width: 8 }, { colour: [53, 64, 184], width: 44 }], logo: { espn: 2506 }, logoScale: 0.75 },
+    jerseys: (k) => [
+      { id: 'black', shade: 'dark', base: [22, 22, 24], num: [255, 255, 255], trim: [255, 255, 255], name: [255, 255, 255], accent: [255, 255, 255], arcs: 'base', officials: ['Home'],
+        shoulders: { fill: [255, 255, 255], outline: [53, 64, 184], width: 3 }, numbers: { fill: [[121, 180, 240], [11, 42, 120]], outline: [255, 255, 255] } },
+      { ...k.dark, id: 'dark', shade: 'dark', officials: ['Alt #1'] }, { ...k.light, id: 'light', shade: 'light', officials: ['Away'] }] },
   // The five generic opponent slots (TGID 160-164, TEAM.TTYP 1). Wagner has a Teambuilder save; the other four are
   // Division II schools in neither the library nor the ESPN FCS logos: the mod's own TEAM colours (FCS2026 roster save)
-  // and a lettermark in the jersey's name font (`mark`) instead of a logo.
-  { slot: 'D1AAEX', team: 'Mercyhurst', colours: { P: 0xa71f23, S: 0xffd61b }, mark: 'M', folder: 'FCS_DLC_NEC', chest: 'MERCYHURST' },
-  { slot: 'D1AAWX', team: 'West Florida', colours: { P: 0x017dc3, S: 0x07b085 }, mark: 'UWF', folder: 'FCS_DLC_NEC', chest: 'ARGONAUTS' },
-  { slot: 'D1AANW', team: 'Wagner', save: 'Wagner', folder: 'FCS_DLC_NEC', chest: 'SEAHAWKS' },
+  // and a lettermark in the jersey's name font (`mark`) instead of a logo. Tuskegee (SIAC) and Delta State (Gulf South)
+  // have no conference patch: no logo art for those conferences here.
+  { slot: 'D1AAEX', team: 'Mercyhurst', colours: { P: 0xa71f23, S: 0xffd61b }, mark: 'M', folder: 'FCS_DLC_NEC', chest: 'MERCYHURST', conf: 'NEC' },
+  { slot: 'D1AAWX', team: 'West Florida', colours: { P: 0x017dc3, S: 0x07b085 }, mark: 'UWF', folder: 'FCS_DLC_NEC', chest: 'ARGONAUTS', conf: 'UAC' },
+  { slot: 'D1AANW', team: 'Wagner', save: 'Wagner', folder: 'FCS_DLC_NEC', chest: 'SEAHAWKS', conf: 'NEC' },
   { slot: 'D1AAMW', team: 'Tuskegee', colours: { P: 0xa32035, S: 0xeda900 }, mark: 'T', folder: 'FCS_DLC_NEC', chest: 'TUSKEGEE' },
   { slot: 'D1AASE', team: 'Delta State', colours: { P: 0x007529, S: 0x101010 }, mark: 'DSU', folder: 'FCS_DLC_NEC', chest: 'STATESMEN' },
 ];
+// Conference patches: ESPN conference logos (archive/logos/conf, not in git) for each school's 2026 football conference
+// as archive/logos/espn-fcs.json lists it. The game's CONF table has none of these (the schools play as Independents,
+// the generic slots as Generic), so the patch follows the real conference. `mono` logos are flat ink on transparent and
+// take the colour of the jersey's UA logo (Pioneer's orange, CAA's and UAC's navy vanish on some bodies); the badge
+// logos (letters knocked out of a filled shape) keep their own colours. Independents wear the US flag there instead, as
+// Merrimack does. `lettering: { dark: 'ua' }`: that jersey's chest word and number fill take its UA logo's colour.
+const CONF_LOGOS = path.resolve(here, '..', '..', '..', '..', 'archive', 'logos', 'conf');
+const CONFERENCES = { NEC: { file: '25.png' }, Pioneer: { file: '28.png', mono: true }, CAA: { file: '48.png', mono: true }, UAC: { file: 'uac.png', mono: true }, Independent: { art: () => usFlag() } };
 // Extra helmets for teams that have their own art: the donor (archive or DLC) recoloured outside its logos and added to
 // the team's XML (the archive one copied to the DLC folder if it has none) as a non-official option. Villanova's white
 // helmet is DUKEXX_helmet_2013_Black1 (a navy V with a white then a thin navy outline on a flat 255 shell); its navy one
@@ -84,6 +120,32 @@ const HELMET_LOGO_AREAS = [[270, 260, 670, 650], [1405, 260, 1810, 655]]; // x0,
 const HELMET_KEEP = [[1430, 916, 2048, 1024]]; // hardware strip (Riddell tag, screws): never recoloured
 const JERSEY_ERASE = [[380, 1534, 440, 1590], [388, 1586, 630, 1624]]; // FCS chest badge, COMING SOON
 const CHEST = { cx: 511, cy: 1603, height: 22, maxWidth: 230 }; // where COMING SOON sat: front, below the collar
+// The UA logo sits right of the front's centre line, the donor's FCS badge (JERSEY_ERASE[0]) left of it, both just above
+// the chest word; the centre line is midway between them. The conference patch goes on the UA logo's mirror image: about
+// its width, at most the badge's height, its bottom no lower than the badge's.
+const UA_LOGO = [587, 1553, 634, 1579], CENTRE_X = 510.5, PATCH = { maxW: 52, maxH: 46, bottom: 1582 };
+const PANTS_UA = [712, 109, 815, 174]; // the pants' UA logo (left hip, in the stripe colour)
+// Kit makers' marks (archive/logos/brands, not in git; sources in its SOURCES.txt), drawn flat in one colour in the UA
+// logo's box. adidas: the three bars only (the wordmark below them is cut off), as on its football jerseys.
+const BRANDS = { nike: { file: 'nike.png' }, adidas: { file: 'adidas.png', keepTop: 0.652 } };
+// CFBR's 2019 Ball State black jersey (BALLST_jersey_2013_Black, same jersey layout as the donor): a tapered stripe down
+// each shoulder, mirrored about x 511.5. Rows: y, distance of the stripe's centre from that axis, half width.
+const BALLST_SHOULDER = { axis: 511.5, rows: [[189, 31.5, 0], [191, 31.5, 0.5], [207, 31.75, 1.75], [223, 31.5, 3.5], [239, 31, 4], [255, 29.5, 4.5], [271, 28.75, 4.75],
+  [287, 27.5, 5.5], [303, 26, 5.5], [319, 24.75, 6.25], [335, 23.25, 6.75], [351, 22.25, 6.75], [367, 21, 7], [383, 20.75, 7.25], [399, 21, 7], [415, 21.25, 7.25],
+  [431, 22.25, 7.25], [447, 23.5, 7.5], [463, 26, 7], [479, 28.5, 7], [495, 31.25, 7.25], [511, 34.25, 6.75], [527, 37.5, 6.5], [543, 41.5, 5.5], [559, 45.5, 5],
+  [575, 49, 4], [591, 52, 3], [607, 54.5, 1], [613, 56, 0]] };
+// A metallic shell: the shell materials' parameters of the mod's silver Montana helmet (MONTAN_HELMET_2014_SILV1); the COL
+// alpha is the metal mask there (255 shell, 0 under stickers), so stripes and logos get 0.
+const METALLIC = { specColor: [0.502, 0.502, 0.502], metalSpecColor: [0.753, 0.753, 0.753], specGainPower: [1, 10], tileUV_sparkleStrength: [20, 20, 2],
+  reflect_ScaleOffsetFresnelNightmult: [3.3, 1, 3, 0.8], metalSpecGainPower_xyDay_zwNight: [0.65, 5, 1.5, 0.75] };
+// Helmet stripes. In the helmet layout each half of the texture is one side of the shell, and a stripe down the middle
+// is an arch over each half. The stripes follow the arched edge of Abilene's white helmet (DOME_DONOR, FCS_DLC_UAC), whose
+// purple ground outlines the shell, painted inward from it (`width` px each) and STRIPE_OVERHANG px outward in the first
+// stripe's colour; the arches end where they meet the bottom band (ARCH_ENDS: y limits for the middle gap and the outer
+// feet). The helmet's real centreline is the outer edge of the mod's standard stripe (Indiana State's, 38-48 px outside
+// that dome at the top), so the overhang shows and the stripes read wider than `width`: Eric checked both in game and
+// kept this look (2026-11-08).
+const DOME_DONOR = 'ABILEN_HELMET_2024_WHITEX', STRIPE_OVERHANG = 40, ARCH_ENDS = { gap: [930, 1120, 596], feet: [150, 1898, 800] };
 const PANTS_LOGO_AREA = [1240, 70, 1470, 290]; // FCS hip logo (its exact box is found in here)
 
 // ---------- Teambuilder save ----------
@@ -284,7 +346,8 @@ function cleanLogo(logo) {
 function fontGlyphs(font, text) {
   const order = new TextDecoder().decode(font.kerning).split(/\r?\n/)[2], top = 14, bottom = 107;
   return [...text.toUpperCase()].map((ch) => {
-    const i = order.indexOf(ch); if (ch === ' ' || i < 0) return null;
+    const i = order.indexOf(ch); if (ch === '.' && i < 0) return { dot: true }; // the font has no period: chestText draws one
+    if (ch === ' ' || i < 0) return null;
     const cx = (i % 2) * 64, cy = ((i / 2) | 0) * 128; let l = 64, r = 0;
     for (let y = cy + top; y < cy + bottom; y++) for (let x = cx; x < cx + 64; x++) if (font.img.rgba[(y * font.img.width + x) * 4 + 3] > 64) { l = Math.min(l, x - cx); r = Math.max(r, x - cx + 1); }
     return { x: cx + l, y: cy + top, w: Math.max(1, r - l) };
@@ -306,23 +369,176 @@ function letterLogo(font, text, fill, outline, pad = 8) {
   }
   return { rgba, width, height };
 }
-function chestText(img, font, text, colour) {
-  const top = 14, bottom = 107, glyphs = fontGlyphs(font, text);
-  let s = CHEST.height / (bottom - top); const gap = 0.16 * CHEST.height, space = 0.45 * CHEST.height;
-  const width = (k) => glyphs.reduce((a, g) => a + (g ? g.w * k : space) + gap, -gap);
-  if (width(s) > CHEST.maxWidth) s *= CHEST.maxWidth / width(s);
-  const h = Math.round((bottom - top) * s), oy = Math.round(CHEST.cy - h / 2); let ox = CHEST.cx - width(s) / 2;
-  for (const g of glyphs) {
-    if (!g) { ox += space + gap; continue; }
-    const w = Math.round(g.w * s), x0 = Math.round(ox);
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const sx0 = g.x + Math.floor(x / s), sx1 = Math.max(sx0 + 1, g.x + Math.floor((x + 1) / s)), sy0 = g.y + Math.floor(y / s), sy1 = Math.max(sy0 + 1, g.y + Math.floor((y + 1) / s));
-      let a = 0; for (let yy = sy0; yy < sy1; yy++) for (let xx = sx0; xx < sx1; xx++) a += font.img.rgba[(yy * font.img.width + xx) * 4 + 3];
-      a /= 255 * (sx1 - sx0) * (sy1 - sy0); const o = ((oy + y) * img.width + x0 + x) * 4;
-      for (let j = 0; j < 3; j++) img.rgba[o + j] = colour[j] * a + img.rgba[o + j] * (1 - a);
-    }
-    ox += g.w * s + gap;
+// The conference patch: the logo fitted to PATCH and centred on the UA logo's centre mirrored across CENTRE_X (raised when
+// tall, to stay clear of the chest word), in its own colours or flat `colour`.
+function confPatch(img, logo, colour) {
+  if (colour) { logo = { ...logo, rgba: new Uint8ClampedArray(logo.rgba) }; for (let o = 0; o < logo.rgba.length; o += 4) { logo.rgba[o] = colour[0]; logo.rgba[o + 1] = colour[1]; logo.rgba[o + 2] = colour[2]; } }
+  let lx0 = logo.width, ly0 = logo.height, lx1 = 0, ly1 = 0;
+  for (let y = 0; y < logo.height; y++) for (let x = 0; x < logo.width; x++) if (logo.rgba[(y * logo.width + x) * 4 + 3] > 8) { lx0 = Math.min(lx0, x); ly0 = Math.min(ly0, y); lx1 = Math.max(lx1, x + 1); ly1 = Math.max(ly1, y + 1); }
+  const s = Math.min(PATCH.maxW / (lx1 - lx0), PATCH.maxH / (ly1 - ly0)), w = (lx1 - lx0) * s, h = (ly1 - ly0) * s;
+  const cx = 2 * CENTRE_X - (UA_LOGO[0] + UA_LOGO[2]) / 2, cy = Math.min((UA_LOGO[1] + UA_LOGO[3]) / 2, PATCH.bottom - h / 2);
+  const bw = w / 0.92 / 2, bh = h / 0.92 / 2; // stamp() fills 92% of its box
+  stamp(img, logo, [cx - bw, cy - bh, cx + bw, cy + bh].map(Math.round));
+}
+// A mark fitted inside maxW x maxH (by its opaque box) and centred on cx,cy, in its own colours or flat `colour`.
+function placeMark(img, art, colour, cx, cy, maxW, maxH) {
+  if (colour) { art = { ...art, rgba: new Uint8ClampedArray(art.rgba) }; for (let o = 0; o < art.rgba.length; o += 4) { art.rgba[o] = colour[0]; art.rgba[o + 1] = colour[1]; art.rgba[o + 2] = colour[2]; } }
+  let lx0 = art.width, ly0 = art.height, lx1 = 0, ly1 = 0;
+  for (let y = 0; y < art.height; y++) for (let x = 0; x < art.width; x++) if (art.rgba[(y * art.width + x) * 4 + 3] > 8) { lx0 = Math.min(lx0, x); ly0 = Math.min(ly0, y); lx1 = Math.max(lx1, x + 1); ly1 = Math.max(ly1, y + 1); }
+  const s = Math.min(maxW / (lx1 - lx0), maxH / (ly1 - ly0)), bw = ((lx1 - lx0) * s) / 0.92 / 2, bh = ((ly1 - ly0) * s) / 0.92 / 2; // stamp() fills 92% of its box
+  stamp(img, art, [cx - bw, cy - bh, cx + bw, cy + bh].map(Math.round));
+}
+const brandCache = new Map();
+function brandArt(name) {
+  if (!brandCache.has(name)) { const b = BRANDS[name], img = readPng(fs.readFileSync(path.join(BRAND_LOGOS, b.file))), h = b.keepTop ? Math.floor(img.height * b.keepTop) : img.height; brandCache.set(name, { rgba: img.rgba.slice(0, img.width * h * 4), width: img.width, height: h }); }
+  return brandCache.get(name);
+}
+const readable = (bg, candidates) => candidates.reduce((best, c) => (dist(c, bg) > dist(best, bg) ? c : best));
+const scaleBox = ([x0, y0, x1, y1], s) => { const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, hw = ((x1 - x0) * s) / 2, hh = ((y1 - y0) * s) / 2; return [cx - hw, cy - hh, cx + hw, cy + hh].map(Math.round); };
+// A mark's coverage cut out of the donor texture (box): how far each pixel sits from `base` towards `ink`, as white + alpha.
+function maskArt(img, [x0, y0, x1, y1], base, ink) {
+  const w = x1 - x0, h = y1 - y0, rgba = new Uint8ClampedArray(w * h * 4), v = ink.map((c, j) => c - base[j]), vv = v.reduce((a, c) => a + c * c, 0);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const o = ((y0 + y) * img.width + x0 + x) * 4, p = (y * w + x) * 4, t = ((img.rgba[o] - base[0]) * v[0] + (img.rgba[o + 1] - base[1]) * v[1] + (img.rgba[o + 2] - base[2]) * v[2]) / vv;
+    rgba[p] = rgba[p + 1] = rgba[p + 2] = 255; rgba[p + 3] = Math.round(255 * Math.max(0, Math.min(1, t)));
   }
+  return { rgba, width: w, height: h };
+}
+// Restyle a NUMS_DECAL. Its digits are the fill key colour with a trim line just inside the edge and a thin rim of fill
+// colour outside that line. `fill`: a colour, or [top, bottom] for a vertical gradient over each row of digits; `outline`:
+// the trim line and the rim (the fill-key pixels reached from outside the digits without crossing the line), else the
+// line keeps `trim` and the rim the fill. Shading and anti-aliasing follow recolour()'s projection onto the two keys.
+function styleNumbers(img, { fill, outline }, trim) {
+  const { rgba, width: w, height: h } = img, n = w * h, A = keyColour(rgba, [164, 156, 132]), B = keyColour(rgba, [4, 44, 52]);
+  const kind = new Uint8Array(n); // 0 transparent, 1 fill-like, 2 trim-like
+  for (let i = 0; i < n; i++) { const o = i * 4; if (rgba[o + 3] < 128) continue; const c = [rgba[o], rgba[o + 1], rgba[o + 2]]; kind[i] = dist(c, B) < dist(c, A) ? 2 : 1; }
+  const rim = new Uint8Array(n), stack = []; for (let i = 0; i < n; i++) if (!kind[i]) stack.push(i);
+  while (stack.length) { const i = stack.pop(), x = i % w, y = (i / w) | 0; for (const q of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) if (q >= 0 && kind[q] === 1 && !rim[q]) { rim[q] = 1; stack.push(q); } }
+  const band = new Int32Array(h * 2); // per row: the first and last row of its run of digit rows
+  for (let y = 0; y < h; ) { let any = false; for (let x = 0; x < w && !any; x++) any = rgba[(y * w + x) * 4 + 3] > 0; if (!any) { y++; continue; } let e = y; for (;;) { let more = false; for (let x = 0; x < w && !more && e + 1 < h; x++) more = rgba[((e + 1) * w + x) * 4 + 3] > 0; if (!more) break; e++; } for (let r = y; r <= e; r++) { band[2 * r] = y; band[2 * r + 1] = e; } y = e + 1; }
+  const line = outline ?? trim, v = B.map((b, j) => b - A[j]), vv = v.reduce((a, c) => a + c * c, 0);
+  for (let i = 0; i < n; i++) {
+    const o = i * 4; if (!rgba[o + 3]) continue; const y = (i / w) | 0, c = [rgba[o], rgba[o + 1], rgba[o + 2]];
+    const t = Math.max(0, Math.min(1, ((c[0] - A[0]) * v[0] + (c[1] - A[1]) * v[1] + (c[2] - A[2]) * v[2]) / vv));
+    const f = Array.isArray(fill[0]) ? fill[0].map((a, j) => a + (fill[1][j] - a) * ((y - band[2 * y]) / Math.max(1, band[2 * y + 1] - band[2 * y]))) : fill;
+    const base = outline && (!kind[i] || rim[i]) ? outline : f;
+    for (let j = 0; j < 3; j++) rgba[o + j] = base[j] + t * (line[j] - base[j]) + (c[j] - (A[j] + t * v[j]));
+  }
+}
+// Euclidean distance (px) from every pixel to the nearest `seed` pixel (Felzenszwalb & Huttenlocher, two separable passes).
+function edt(seed, w, h) {
+  const INF = 1e20, m = Math.max(w, h), g = new Float64Array(w * h), f = new Float64Array(m), d = new Float64Array(m), v = new Int32Array(m), z = new Float64Array(m + 1);
+  const pass = (n) => {
+    let k = 0; v[0] = 0; z[0] = -INF; z[1] = INF;
+    for (let q = 1; q < n; q++) { let s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); while (s <= z[k]) { k--; s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); } k++; v[k] = q; z[k] = s; z[k + 1] = INF; }
+    k = 0; for (let q = 0; q < n; q++) { while (z[k + 1] < q) k++; d[q] = (q - v[k]) ** 2 + f[v[k]]; }
+  };
+  for (let x = 0; x < w; x++) { for (let y = 0; y < h; y++) f[y] = seed[y * w + x] ? 0 : INF; pass(h); for (let y = 0; y < h; y++) g[y * w + x] = d[y]; }
+  for (let y = 0; y < h; y++) { for (let x = 0; x < w; x++) f[x] = g[y * w + x]; pass(w); for (let x = 0; x < w; x++) g[y * w + x] = Math.sqrt(d[x]); }
+  return g;
+}
+// The helmet layout's shell (DOME_DONOR): what is off the shell, and each pixel's distance to the nearest arch.
+let DOME = null;
+async function domeMask() {
+  if (DOME) return DOME;
+  const { rgba, width: w, height: h } = (await texture(loadBig(DOME_DONOR), '_HELMETBAKED_COL')).img, g = (20 * w + w / 2) * 4, ground = [rgba[g], rgba[g + 1], rgba[g + 2]];
+  const off = new Uint8Array(w * h), stack = []; for (let x = 0; x < w; x++) stack.push(x);
+  while (stack.length) { const i = stack.pop(); if (off[i]) continue; const o = i * 4; if (dist([rgba[o], rgba[o + 1], rgba[o + 2]], ground) > 80) continue; off[i] = 1; const x = i % w, y = (i / w) | 0; if (x > 0) stack.push(i - 1); if (x < w - 1) stack.push(i + 1); if (y > 0) stack.push(i - w); if (y < h - 1) stack.push(i + w); }
+  const arch = new Uint8Array(w * h), { gap, feet } = ARCH_ENDS;
+  for (let i = 0; i < w * h; i++) {
+    if (off[i]) continue; const x = i % w, y = (i / w) | 0;
+    if ((x >= gap[0] && x < gap[1] && y >= gap[2]) || ((x < feet[0] || x >= feet[1]) && y >= feet[2])) continue;
+    if ((x > 0 && off[i - 1]) || (x < w - 1 && off[i + 1]) || (y > 0 && off[i - w]) || (y < h - 1 && off[i + w])) arch[i] = 1;
+  }
+  return (DOME = { off, d: edt(arch, w, h), w, h });
+}
+// Paint `stripes` (arch edge inward, the first also STRIPE_OVERHANG px outward) along both arches; returns each pixel's
+// stripe coverage (0..1).
+async function helmetStripes(img, stripes) {
+  const D = await domeMask(), cov = new Float32Array(D.w * D.h), total = stripes.reduce((a, s) => a + s.width, 0);
+  for (let i = 0; i < D.w * D.h; i++) {
+    const d = D.d[i]; if (d > (D.off[i] ? STRIPE_OVERHANG : total + 1)) continue;
+    const o = i * 4; let c = [img.rgba[o], img.rgba[o + 1], img.rgba[o + 2]], a = 1;
+    if (D.off[i]) c = stripes[0].colour;
+    else { let edge = total; for (let k = stripes.length - 1; k >= 0; k--) { const t = Math.max(0, Math.min(1, edge - d + 0.5)); if (k === stripes.length - 1) a = t; if (t > 0) c = c.map((x, j) => x + (stripes[k].colour[j] - x) * t); edge -= stripes[k].width; } }
+    img.rgba[o] = c[0]; img.rgba[o + 1] = c[1]; img.rgba[o + 2] = c[2]; cov[i] = a;
+  }
+  return cov;
+}
+// CFBR Ball State's shoulder stripes (BALLST_SHOULDER) in `fill` with an `outline` `width` px wide, 4x4 supersampled.
+function shoulderStripes(img, { fill, outline, width }) {
+  const S = 4, R = BALLST_SHOULDER.rows, ax = BALLST_SHOULDER.axis, x0 = Math.floor(ax - 80), y0 = R[0][0] - width - 4, W = 160 * S, H = (R.at(-1)[0] + width + 4 - y0) * S, inside = new Uint8Array(W * H);
+  for (let sy = 0; sy < H; sy++) {
+    const y = y0 + (sy + 0.5) / S; if (y < R[0][0] || y > R.at(-1)[0]) continue; let k = 0; while (R[k + 1][0] < y) k++;
+    const [ya, da, wa] = R[k], [yb, db, wb] = R[k + 1], t = (y - ya) / (yb - ya), dc = da + (db - da) * t, hw = wa + (wb - wa) * t;
+    for (let sx = 0; sx < W; sx++) if (Math.abs(Math.abs(x0 + (sx + 0.5) / S - ax) - dc) <= hw) inside[sy * W + sx] = 1;
+  }
+  const near = edt(inside, W, H);
+  for (let y = 0; y < H / S; y++) for (let x = 0; x < W / S; x++) {
+    let f = 0, o = 0; for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) { const q = (y * S + j) * W + x * S + i; if (inside[q]) f++; else if (near[q] <= width * S) o++; }
+    if (!f && !o) continue; f /= S * S; o /= S * S; const p = ((y0 + y) * img.width + x0 + x) * 4;
+    for (let c = 0; c < 3; c++) img.rgba[p + c] = img.rgba[p + c] * (1 - f - o) + fill[c] * f + outline[c] * o;
+  }
+}
+// Float parameters of a scene material, set in place: 4-byte type tag, u32 count, u32 name length, name, 0, big-endian floats.
+function setParams(buf, mat, params) {
+  const at = buf.indexOf(Buffer.from(`${mat}\0`)); if (at < 0) throw new Error(`scene has no ${mat}`);
+  const end = buf.indexOf('MATL', at) < 0 ? buf.length : buf.indexOf('MATL', at);
+  for (const [name, values] of Object.entries(params)) {
+    const p = buf.indexOf(Buffer.from(`${name}\0`), at); if (p < 0 || p > end || buf.readUInt32BE(p - 4) !== name.length) throw new Error(`${mat} has no ${name}`);
+    values.forEach((x, k) => buf.writeFloatBE(x, p + name.length + 1 + 4 * k));
+  }
+}
+// The US flag in Executive Order 10834 proportions (hoist 1, fly 1.9, canton 7/13 by 0.76, 50 stars of diameter 0.0616 in
+// nine rows 0.054 apart, columns 0.063 apart), canton top left, drawn at `hoist` px; stamp() box-averages it down.
+function usFlag(hoist = 400) {
+  const W = Math.round(1.9 * hoist), H = hoist, rgba = new Uint8ClampedArray(W * H * 4);
+  const RED = [178, 34, 52], WHITE_ = [255, 255, 255], BLUE = [60, 59, 110], cw = 0.76 * H, ch = (7 / 13) * H, R = (0.0616 / 2) * H, r = R * Math.sin(Math.PI / 10) / Math.sin((3 * Math.PI) / 10);
+  const stars = []; for (let row = 0; row < 9; row++) for (let k = 0; k < (row % 2 ? 5 : 6); k++) stars.push([(0.063 + (row % 2) * 0.063 + 2 * k * 0.063) * H, 0.054 * (row + 1) * H]);
+  const star = stars.map(([cx, cy]) => Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + (i * Math.PI) / 5, q = i % 2 ? r : R; return [cx + q * Math.cos(a), cy + q * Math.sin(a)]; }));
+  const inside = (poly, x, y) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c; } return c; };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const px = x + 0.5, py = y + 0.5; let c = Math.floor((py / H) * 13) % 2 ? WHITE_ : RED;
+    if (px < cw && py < ch) c = stars.some(([sx, sy], i) => Math.abs(px - sx) <= R && Math.abs(py - sy) <= R && inside(star[i], px, py)) ? WHITE_ : BLUE;
+    const o = (y * W + x) * 4; rgba[o] = c[0]; rgba[o + 1] = c[1]; rgba[o + 2] = c[2]; rgba[o + 3] = 255;
+  }
+  return { rgba, width: W, height: H };
+}
+// The colour of a jersey's UA logo as built: the mean of its solid pixels (the UA_LOGO box, farthest from the body colour).
+function uaColour(img, body) {
+  const px = []; const [x0, y0, x1, y1] = UA_LOGO;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const o = (y * img.width + x) * 4, c = [img.rgba[o], img.rgba[o + 1], img.rgba[o + 2]]; px.push([c, dist(c, body)]); }
+  const far = Math.max(...px.map(([, d]) => d)), core = px.filter(([, d]) => d > 0.85 * far);
+  return [0, 1, 2].map((j) => Math.round(core.reduce((a, [c]) => a + c[j], 0) / core.length));
+}
+// The chest word at CHEST (`style` overrides its cx/cy/height/maxWidth); with `style.outline`, a ring `outlineWidth` px
+// wide in that colour under the letters.
+function chestText(img, font, text, colour, style = {}) {
+  const G = { ...CHEST, ...style }, top = 14, bottom = 107, glyphs = fontGlyphs(font, text);
+  let s = G.height / (bottom - top); const gap = 0.16 * G.height, space = 0.45 * G.height, dot = 0.2 * G.height;
+  const width = (k) => glyphs.reduce((a, g) => a + (!g ? space : g.dot ? dot : g.w * k) + gap, -gap);
+  if (width(s) > G.maxWidth) s *= G.maxWidth / width(s);
+  const h = Math.round((bottom - top) * s), oy = Math.round(G.cy - h / 2);
+  const paint = (put) => {
+    let ox = G.cx - width(s) / 2;
+    for (const g of glyphs) {
+      if (!g) { ox += space + gap; continue; }
+      if (g.dot) { const d = Math.round(dot), x0 = Math.round(ox); for (let y = oy + h - d; y < oy + h; y++) for (let x = x0; x < x0 + d; x++) put((y * img.width + x) * 4, 1); ox += dot + gap; continue; }
+      const w = Math.round(g.w * s), x0 = Math.round(ox);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const sx0 = g.x + Math.floor(x / s), sx1 = Math.max(sx0 + 1, g.x + Math.floor((x + 1) / s)), sy0 = g.y + Math.floor(y / s), sy1 = Math.max(sy0 + 1, g.y + Math.floor((y + 1) / s));
+        let a = 0; for (let yy = sy0; yy < sy1; yy++) for (let xx = sx0; xx < sx1; xx++) a += font.img.rgba[(yy * font.img.width + xx) * 4 + 3];
+        a /= 255 * (sx1 - sx0) * (sy1 - sy0); put(((oy + y) * img.width + x0 + x) * 4, a);
+      }
+      ox += g.w * s + gap;
+    }
+  };
+  if (G.outline) {
+    const r = G.outlineWidth ?? 2, cov = new Map(), ring = new Map(); paint((o, a) => cov.set(o, Math.max(cov.get(o) ?? 0, a)));
+    for (const [o, a] of cov) { if (a <= 0) continue; for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { if (dx * dx + dy * dy > r * r + r) continue; const q = o + (dy * img.width + dx) * 4; ring.set(q, Math.max(ring.get(q) ?? 0, a)); } }
+    for (const [q, a] of ring) for (let j = 0; j < 3; j++) img.rgba[q + j] = G.outline[j] * a + img.rgba[q + j] * (1 - a);
+  }
+  paint((o, a) => { for (let j = 0; j < 3; j++) img.rgba[o + j] = colour[j] * a + img.rgba[o + j] * (1 - a); });
 }
 
 function png(rgba, w, h) {
@@ -333,10 +549,11 @@ function png(rgba, w, h) {
   const ih = Buffer.alloc(13); ih.writeUInt32BE(w, 0); ih.writeUInt32BE(h, 4); ih[8] = 8; ih[9] = 6;
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ih), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
-// 8-bit RGB/RGBA, non-interlaced (the ESPN logos)
+// 8-bit grey / RGB, with or without alpha, non-interlaced (the ESPN logos; the kit makers' marks are grey + alpha)
 function readPng(buf) {
   let p = 8, w, h, ct; const idat = [];
-  while (p < buf.length) { const len = buf.readUInt32BE(p), t = buf.toString('latin1', p + 4, p + 8), d = buf.subarray(p + 8, p + 8 + len); if (t === 'IHDR') { w = d.readUInt32BE(0); h = d.readUInt32BE(4); ct = d[9]; if (d[8] !== 8 || d[12] || (ct !== 2 && ct !== 6)) throw new Error('PNG must be 8-bit RGB/RGBA, non-interlaced'); } else if (t === 'IDAT') idat.push(d); p += 12 + len; }
+  while (p < buf.length) { const len = buf.readUInt32BE(p), t = buf.toString('latin1', p + 4, p + 8), d = buf.subarray(p + 8, p + 8 + len); if (t === 'IHDR') { w = d.readUInt32BE(0); h = d.readUInt32BE(4); ct = d[9]; if (d[8] !== 8 || d[12] || ![0, 2, 4, 6].includes(ct)) throw new Error('PNG must be 8-bit grey/RGB with or without alpha, non-interlaced'); } else if (t === 'IDAT') idat.push(d); p += 12 + len; }
+  if (ct === 0 || ct === 4) return greyPng(zlib.inflateSync(Buffer.concat(idat)), w, h, ct === 4 ? 2 : 1);
   const raw = zlib.inflateSync(Buffer.concat(idat)), bpp = ct === 6 ? 4 : 3, stride = w * bpp, out = new Uint8ClampedArray(w * h * 4); let prev = Buffer.alloc(stride);
   for (let y = 0; y < h; y++) {
     const f = raw[y * (stride + 1)], line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
@@ -345,6 +562,19 @@ function readPng(buf) {
       line[x] = (line[x] + (f === 1 ? a : f === 2 ? b : f === 3 ? (a + b) >> 1 : f === 4 ? (pa <= pb && pa <= pc ? a : pb <= pc ? b : c) : 0)) & 255;
     }
     for (let x = 0; x < w; x++) { const o = (y * w + x) * 4; out[o] = line[x * bpp]; out[o + 1] = line[x * bpp + 1]; out[o + 2] = line[x * bpp + 2]; out[o + 3] = bpp === 4 ? line[x * bpp + 3] : 255; }
+    prev = line;
+  }
+  return { rgba: out, width: w, height: h };
+}
+function greyPng(raw, w, h, bpp) {
+  const stride = w * bpp, out = new Uint8ClampedArray(w * h * 4); let prev = Buffer.alloc(stride);
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+    for (let x = 0; x < stride; x++) {
+      const a = x >= bpp ? line[x - bpp] : 0, b = prev[x], c = x >= bpp ? prev[x - bpp] : 0, pp = a + b - c, pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c);
+      line[x] = (line[x] + (f === 1 ? a : f === 2 ? b : f === 3 ? (a + b) >> 1 : f === 4 ? (pa <= pb && pa <= pc ? a : pb <= pc ? b : c) : 0)) & 255;
+    }
+    for (let x = 0; x < w; x++) { const o = (y * w + x) * 4; out[o] = out[o + 1] = out[o + 2] = line[x * bpp]; out[o + 3] = bpp === 2 ? line[x * bpp + 1] : 255; }
     prev = line;
   }
   return { rgba: out, width: w, height: h };
@@ -369,7 +599,8 @@ function write(folder, name, bytes, merged = false) {
 
 // ---------- XML ----------
 function xml(parts, jersey) {
-  const L = ['<?xml version="1.0" ?><root>', ...['jersey', 'helmet', 'pants', 'socks', 'shoes', 'gloves'].map((t) => `  <partType name="${t}"/>`), '', '  <officialType name="Home"/>', '  <officialType name="Away"/>', ''];
+  const extra = [...new Set(parts.flatMap(([, , , o]) => o))].filter((o) => o !== 'Home' && o !== 'Away'); // Alt #N rows
+  const L = ['<?xml version="1.0" ?><root>', ...['jersey', 'helmet', 'pants', 'socks', 'shoes', 'gloves'].map((t) => `  <partType name="${t}"/>`), '', '  <officialType name="Home"/>', '  <officialType name="Away"/>', ...extra.map((o) => `  <officialType name="${o}"/>`), ''];
   const offs = (o) => o.map((n) => `    <official name="${n}"/>`);
   for (const [type, name, scene, o, shade] of parts) {
     if (type === 'jersey') L.push(`  <part name="${name}" shade="${shade}" type="jersey">`, `    <bigfile name="${scene}_big"/>`, `    <scene name="${scene}"/>`, `    <kerningTable name="${scene}_NAME"/>`,
@@ -401,49 +632,95 @@ async function buildSet(s) {
     console.log(`${s.team} (${s.slot}) from school colours and ESPN logo ${s.espn}`);
   }
   const year = '2026', parts = [], pv = (n) => path.join(DIST, 'previews', s.slot, `${n}.png`);
+  const c = CONFERENCES[s.conf], conf = c ? { ...c, logo: c.art ? c.art() : cleanLogo(readPng(fs.readFileSync(path.join(CONF_LOGOS, c.file)))) } : null;
+  if (c) console.log(`  conference patch: ${s.conf} (${c.file ?? 'US flag'}${c.mono ? ', in the UA logo colour' : ''})`);
 
-  // helmet: shell recoloured, the two FCS logos replaced by the 128px Teambuilder logo
-  const [h5] = colourName(k.helmet); const hName = `${s.slot}_HELMET_${year}_${h5}`; const hb = await cloneAs(DONOR.helmet, hName);
+  // the jerseys (dark = Home, light = Away, unless the set lists its own) and any officials beyond Home / Away
+  const jerseys = s.jerseys ? s.jerseys(k) : [{ ...k.dark, id: 'dark', shade: 'dark', officials: ['Home'] }, { ...k.light, id: 'light', shade: 'light', officials: ['Away'] }];
+  const extra = [...new Set(jerseys.flatMap((j) => j.officials))].filter((o) => o !== 'Home' && o !== 'Away');
+  const markColour = (bg, fallback) => (s.brandColour ? s.brandColour(bg) : fallback);
+
+  // helmet: shell recoloured, the two FCS logos replaced by the 128px Teambuilder logo; `helmet` options on top
+  const H = s.helmet || {}, shellColour = H.shell || k.helmet;
+  const [h5] = colourName(shellColour); const hName = `${s.slot}_HELMET_${year}_${h5}`; const hb = await cloneAs(DONOR.helmet, hName);
   const col = await texture(hb, '_HELMETBAKED_COL'); const shell = keyColour(col.img.rgba, [4, 44, 52]);
   const boxes = HELMET_LOGO_AREAS.map((a) => markBox(col.img, a, shell));
   fill(col.img, boxes.map(([x0, y0, x1, y1]) => [x0 - 4, y0 - 4, x1 + 4, y1 + 4]), shell);
-  recolour(col.img, [{ src: shell, dst: k.helmet }, { src: keyColour(col.img.rgba, [236, 236, 236]), dst: null }, { src: keyColour(col.img.rgba, [196, 196, 196]), dst: null }], HELMET_KEEP);
-  for (const b of boxes) stamp(col.img, logo, b);
+  recolour(col.img, [{ src: shell, dst: shellColour }, { src: keyColour(col.img.rgba, [236, 236, 236]), dst: null }, { src: keyColour(col.img.rgba, [196, 196, 196]), dst: null }], HELMET_KEEP);
+  const stripes = H.stripes ? await helmetStripes(col.img, H.stripes) : null;
+  const hLogo = H.logo ? cleanLogo(readPng(fs.readFileSync(path.join(LOGOS, `${H.logo.espn}.png`)))) : logo, unstamped = H.metallic ? new Uint8ClampedArray(col.img.rgba) : null;
+  for (const b of boxes) stamp(col.img, hLogo, H.logoScale ? scaleBox(b, H.logoScale) : b);
+  if (H.metallic) for (let i = 0, o = 0; o < col.img.rgba.length; i++, o += 4) { // the metal mask: stickers (stripes, logos) 0
+    const logoHere = Math.abs(col.img.rgba[o] - unstamped[o]) + Math.abs(col.img.rgba[o + 1] - unstamped[o + 1]) + Math.abs(col.img.rgba[o + 2] - unstamped[o + 2]) > 12;
+    col.img.rgba[o + 3] = logoHere || (stripes && stripes[i] > 0.5) ? 0 : 255;
+  }
   const enc = put(col.e, col.t, col.img); const pride = entry(hb, '_PRIDE'); pride.data = enc.bytes; pride.dirty = true; // the mod's PRIDE layout is a copy of COL
-  write(s.folder, `${hName}_big.ast`, await C.buildBigfile(hb)); preview(col.img, pv('helmet'));
-  parts.push(['helmet', title(k.helmet), hName, ['Home', 'Away']]);
+  if (H.metallic || H.facemask) { // the helmet scene's materials: shell finish, facemask colour (facemask_mat baseColor)
+    const sc = hb.entries.find((e) => e.name.toUpperCase() === hName.toUpperCase()), d = Buffer.from(await C.loadEntry(sc));
+    if (H.metallic) for (const m of ['helmetRightShell_mat', 'helmetLeftShell_mat']) setParams(d, m, METALLIC);
+    if (H.facemask) setParams(d, 'facemask_mat', { baseColor: H.facemask });
+    sc.data = new Uint8Array(d.buffer, d.byteOffset, d.length); sc.dirty = true;
+  }
+  write(s.folder, `${hName}_big.ast`, await C.buildBigfile(hb));
+  preview(H.metallic ? { ...col.img, rgba: col.img.rgba.map((v, i) => (i % 4 === 3 ? 255 : v)) } : col.img, pv('helmet')); // the metal mask is not transparency
+  parts.push(['helmet', title(shellColour), hName, ['Home', 'Away', ...extra]]);
 
-  // jerseys: dark (home) and light (away) from the one placeholder jersey
-  for (const shade of ['dark', 'light']) {
-    const j = k[shade], [, j3] = colourName(j.base); const name = `${s.slot}_JERSEY_${year}_${j3}`; const jb = await cloneAs(DONOR.jersey, name);
+  // jerseys from the one placeholder jersey
+  for (const j of jerseys) {
+    const shade = j.shade, [, j3] = colourName(j.base); const name = `${s.slot}_JERSEY_${year}_${j3}`; const jb = await cloneAs(DONOR.jersey, name);
     const body = await texture(jb, '_JERSEYBAKED_COL'); const base = keyColour(body.img.rgba, [44, 68, 76]);
     const names = await texture(jb, '_NAME_DECAL'), kerning = await C.loadEntry(entry(jb, '_NAME'));
-    fill(body.img, JERSEY_ERASE, base);
-    recolour(body.img, [{ src: base, dst: j.base }, { src: keyColour(body.img.rgba, [236, 244, 236]), dst: j.accent }]);
-    if (s.chest) chestText(body.img, { img: names.img, kerning }, s.chest, j.num);
-    put(body.e, body.t, body.img); preview(body.img, pv(`jersey-${shade}`));
-    const nums = await texture(jb, '_NUMS_DECAL');
-    recolour(nums.img, [{ src: keyColour(nums.img.rgba, [164, 156, 132]), dst: j.num }, { src: keyColour(nums.img.rgba, [4, 44, 52]), dst: j.trim }]);
-    put(nums.e, nums.t, nums.img); preview(nums.img, pv(`numbers-${shade}`));
+    const ua = s.brandAt ? maskArt(body.img, UA_LOGO, base, keyColour(body.img.rgba, [236, 244, 236])) : null; // the UA logo itself, to move it
+    fill(body.img, s.brand || s.brandAt ? [...JERSEY_ERASE, scaleBox(UA_LOGO, 1.15)] : JERSEY_ERASE, base);
+    recolour(body.img, [{ src: base, dst: j.base }, { src: keyColour(body.img.rgba, [236, 244, 236]), dst: j.arcs === 'base' ? j.base : j.accent }]);
+    if (j.shoulders) shoulderStripes(body.img, j.shoulders);
+    const letters = s.lettering?.[shade] === 'ua' ? uaColour(body.img, j.base) : j.num; // chest word and number fill
+    if (s.lettering?.[shade]) console.log(`  ${shade} jersey lettering in the UA logo colour ${letters.join(',')}`);
+    if (s.chest) chestText(body.img, { img: names.img, kerning }, s.chest, letters, s.chestStyle);
+    if (conf) confPatch(body.img, conf.logo, conf.mono ? j.accent : null); // j.accent: the recoloured UA logo
+    const uaCx = (UA_LOGO[0] + UA_LOGO[2]) / 2, uaCy = (UA_LOGO[1] + UA_LOGO[3]) / 2, uaW = UA_LOGO[2] - UA_LOGO[0], uaH = UA_LOGO[3] - UA_LOGO[1];
+    if (s.brand || s.brandAt) placeMark(body.img, s.brand ? brandArt(s.brand) : ua, markColour(j.base, j.accent), s.brandAt === 'collar' ? CENTRE_X : uaCx, uaCy, uaW, uaH);
+    if (s.collarLogo) placeMark(body.img, cleanLogo(readPng(fs.readFileSync(path.join(LOGOS, `${s.collarLogo.espn}.png`)))), null, CENTRE_X, uaCy, PATCH.maxW, 30);
+    put(body.e, body.t, body.img); preview(body.img, pv(`jersey-${j.id}`));
+    // the numbers' colours are baked into this jersey's own NUMS_DECAL (the XML only names it): fill and trim
+    const nums = await texture(jb, '_NUMS_DECAL'), N = j.numbers || s.numbers?.[j.id];
+    if (N) styleNumbers(nums.img, { fill: N.fill ?? letters, outline: N.outline }, j.trim);
+    else recolour(nums.img, [{ src: keyColour(nums.img.rgba, [164, 156, 132]), dst: letters }, { src: keyColour(nums.img.rgba, [4, 44, 52]), dst: j.trim }]);
+    put(nums.e, nums.t, nums.img); preview(nums.img, pv(`numbers-${j.id}`));
     for (let o = 0; o < names.img.rgba.length; o += 4) { names.img.rgba[o] = j.name[0]; names.img.rgba[o + 1] = j.name[1]; names.img.rgba[o + 2] = j.name[2]; }
     put(names.e, names.t, names.img);
     write(s.folder, `${name}_big.ast`, await C.buildBigfile(jb));
-    parts.push(['jersey', title(j.base), name, [shade === 'dark' ? 'Home' : 'Away'], shade]);
+    parts.push(['jersey', title(j.base), name, j.officials, shade]);
   }
 
   // pants: the Teambuilder pants colour (Home and Away) and a second one (white, or the primary if those are white)
-  for (const [i, p] of k.pants.entries()) {
+  for (const [i, p] of (s.pants || k.pants).entries()) {
     const [p5] = colourName(p.base); const name = `${s.slot}_PANTSX_${year}_${p5}`; const pb = await cloneAs(DONOR.pants, name);
     const body = await texture(pb, '_PANTSBAKED_COL'); const base = keyColour(body.img.rgba, [44, 68, 76]);
-    const [x0, y0, x1, y1] = markBox(body.img, PANTS_LOGO_AREA, base); fill(body.img, [[x0 - 4, y0 - 4, x1 + 4, y1 + 4]], base);
+    const [x0, y0, x1, y1] = markBox(body.img, PANTS_LOGO_AREA, base); fill(body.img, [[x0 - 4, y0 - 4, x1 + 4, y1 + 4], ...(s.brand ? [scaleBox(PANTS_UA, 1.1)] : [])], base);
     recolour(body.img, [{ src: base, dst: p.base }, { src: keyColour(body.img.rgba, [236, 236, 236]), dst: p.stripe }]);
+    if (s.brand) placeMark(body.img, brandArt(s.brand), markColour(p.base, p.stripe), (PANTS_UA[0] + PANTS_UA[2]) / 2, (PANTS_UA[1] + PANTS_UA[3]) / 2, PANTS_UA[2] - PANTS_UA[0], PANTS_UA[3] - PANTS_UA[1]);
     put(body.e, body.t, body.img); preview(body.img, pv(`pants-${i}`));
     write(s.folder, `${name}_big.ast`, await C.buildBigfile(pb));
-    parts.push(['pants', title(p.base), name, i === 0 ? ['Home', 'Away'] : []]);
+    parts.push(['pants', title(p.base), name, i === 0 ? ['Home', 'Away', ...extra] : []]);
   }
   fs.mkdirSync(path.join(DIST, 'previews', s.slot), { recursive: true });
   fs.writeFileSync(path.join(DIST, 'previews', s.slot, 'logo.png'), png(logo.rgba, logo.width, logo.height));
-  write(s.folder, `${s.slot}_Pack0_MixAndMatch.XML`, xml([...parts, ...ACCESSORIES], JERSEY_PARAMS));
+  const accessories = extra.length ? ACCESSORIES.map(([t, n, sc, o]) => [t, n, sc, o.length ? [...o, ...extra] : o]) : ACCESSORIES;
+  write(s.folder, `${s.slot}_Pack0_MixAndMatch.XML`, xml([...parts, ...accessories], JERSEY_PARAMS));
+  prune(s, parts);
+}
+// Files of this slot that an earlier run installed (in the manifest) and this run no longer writes (a renamed helmet):
+// moved out of the DLC folder into the backups and dropped from dist and the manifest.
+function prune(s, parts) {
+  const keep = new Set([...parts.map(([, , scene]) => `${scene}_big.ast`.toLowerCase()), `${s.slot}_Pack0_MixAndMatch.XML`.toLowerCase()]);
+  for (const key of Object.keys(manifest).filter((k) => k.startsWith(`${s.folder}/${s.slot}_`) && !keep.has(k.slice(s.folder.length + 1).toLowerCase()))) {
+    const name = key.slice(s.folder.length + 1), file = path.join(DLC, s.folder, name), d = path.join(DIST, s.folder, name);
+    if (fs.existsSync(d)) fs.rmSync(d);
+    if (!install) continue;
+    if (fs.existsSync(file)) { fs.mkdirSync(BACKUP, { recursive: true }); fs.renameSync(file, path.join(BACKUP, `${s.folder}__${name}.${new Date().toISOString().replace(/[:.]/g, '-')}.unused`)); }
+    delete manifest[key]; fs.writeFileSync(MANIFEST, JSON.stringify(manifest, null, 1)); console.log(`  moved ${s.folder}\\${name} (no longer used) to the backups`);
+  }
 }
 async function buildExisting(s) {
   console.log(`${s.team} (${s.slot}): XML for its own art`);

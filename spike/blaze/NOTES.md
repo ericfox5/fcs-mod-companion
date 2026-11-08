@@ -2245,3 +2245,233 @@ First full Supersim game on the new engine (Brown 37, Furman 36, week 1 of 2014,
     install --donor FCS2026 --donor-tgid 106 --tgid 162`; qkl_boot.ast entry 583683d0 -> aa665e48, qkl_fe2ig.ast
     6d4da52c -> 807c541c (= the agent's independent artifact). Backup 2026-11-08T01-27-59-stda (restore returns to the
     stride-100 fix). Pending: in game, does Wagner show Montana State's real names or run-time generic names.
+- Swap CONFIRMED IN GAME (Eric): Wagner (generic 162) fields Montana State's players with their real names: Justin
+  Lamson #8 at QB, 96 OVR in game (POVR 95 stored; the game recomputes the overall). So run-time naming only replaces
+  placeholder names ("QB #12"); a generic slot carries real players, ratings and jerseys through PLST with no dynasty
+  side effects. Still installed (backup 2026-11-08T01-27-59-stda restores the stock generic Wagner).
+- Generic teams get their REAL 2026 rosters by default (identity only, stock generic positions / ratings / faces kept):
+  - Plan: Rosters/tools/src/generics.ts (outside git) scrapes the five schools' Sidearm roster pages (hurstathletics,
+    goargos, wagnerathletics, goldentigersports, gostatesmen) with the actor's extractor + normalizeRows, and fills
+    each team's stock PLST rows strongest first by position fit (compatRank, then extendedRank; K/P rows only take
+    K/P). 290 of 290 rows filled; only 12 rows off-position (TE -> FB). Fields: PFNA PLNA PJEN PYEA PRSD PHGT PWGT.
+    Plan -> Desktop\FCS\Rosters\2026\generics\plan.json. Each plan row also records the stock row's PPOS / POVR.
+  - `ncaa-bridge generic fill --plan <plan.json>` (fillGenericRows; staleGenericRows refuses rows whose PLST row no
+    longer has the plan's team / position / rating, i.e. after a swap). APPLIED to the real install after restoring
+    the Montana State test (2026-11-08T01-27-59-stda): both copies 290 rows named, positions and ratings unchanged,
+    no other cell or table changed, 0 verify problems. qkl_boot.ast entry sha 13789f38…, qkl_fe2ig.ast 05e0ef78…;
+    backup 2026-11-08T01-55-37-stda (= the stock stride-100 entries).
+  - FCS-online.exe: build.mjs embeds the plan (--generics FILE, default ..\FCS\Rosters\2026\generics\plan.json) as
+    payload.genericRosters; join step 3 re-keys and fills in one rewrite per copy, skips (and names) any team whose
+    rows a swap changed, and is a no-op on a re-run; status shows "real names on N of 290 rows". Tested on a scratch
+    tree from the stock stride-70 qkl_boot.ast: the result is byte-identical to the CLI's (13789f38…). Desktop\FCS\
+    FCS-online.exe sha cbcadfb0… (previous kept as .bak-2026-11-07-pre-genericnames).
+  - Samples for an in-game check: Wagner QB1 #17 Trip Maxwell, Tuskegee QB1 #3 Kahlib Johnson, Delta State QB1 #15
+    Reed Miller, West Florida MLB #3 Travell Wright, Mercyhurst FS #2 Anez Jordan.
+  - Eric: generic rosters look good in testing.
+- 2026-11-07 night: Robert Morris "KENNESAW" in yellow on the scoreboard (logo right). Leftovers from the slot's earlier
+  owners that the mod never touched:
+  - No caps "KENNESAW" exists anywhere (every entry of every archive inflated, nested bigfiles too, ASCII/UTF-16):
+    the only Kennesaw strings are STAD row 67 SCIT "Kennesaw" (Joe Walton Stadium, STAA NOTDAM; also the game's
+    default-roster DB = qkl_boot entry 355 and the qkl_misc DB = entry 145, hash 90790d429152c000, 175 tables incl.
+    STAD/CITY/TEAM(1)), CITY row 188 (real GA city, recruiting) and RCHT/RBKS text. Interface art (qkl_interface, 412
+    DDS >= 64 px rendered) has no per-team score-bug plates: the bug is generic art tinted at run time.
+  - TEAM.TFOR/TFOG/TFOB (16-bit fields): a third team colour. Robert Morris (255,216,30) = the yellow. Over the 131
+    real teams only 10 match their own primary/secondary, 36 are the default silver (200,210,210), 71 still carry
+    the FBS slot's accent (UC Davis/ARIZON red, Prairie View/AUBURN orange, Alabama State/FLORID orange, Montana/
+    OREGON yellow, Texas Southern/LSU gold, Elon/MIAMFL green, Montana State/VANDER black, ...). Best candidate for
+    both the score-bug colour and the "team colour" player accessories (Eric: accessory colours look pre-reskin).
+  - Other STAD leftovers (SCIT): Stonehill "Newark" (Delaware's; W.B. Mason Stadium is in Easton), VMI
+    "Jacksonville" (Lexington), UTRGV "Huntsville" (Edinburg), Valparaiso "Springfield" (Valparaiso), New Hampshire
+    has Dartmouth's "Memorial Field / Hanover" (Wildcat Stadium, Durham). Norfolk State SNAM is stored CSV-escaped
+    `"William ""Dick"" Price Stadium"`. SLAT/SLON/SCAP are the FBS stadium's everywhere (weather/capacity).
+    TEAM.TDNA typos: "Prarie View A&M", "Valporaiso", "Mcneese State", "Gardner Webb".
+  - Robert Morris plays in the stock Notre Dame Stadium art (qkl_fe2ig #636 NOTDAM_LOGOS_TRAN = ND monogram,
+    "Monogram Club Notre Dame", the Leprechaun; SCOREBOARDFONT_* LED textures). Art, not data.
+  - GEAR (STDA, 154 rows, TOID/TGSH/TGGL/TGSO/TMSP): per-team default shoe/glove/sock choices, also the slot's.
+  - Test slot ROSTER-RMUTEST (installed, RPCS3 closed) = Rosters/2026/out FCS2026 with exactly four cells changed:
+    TEAM 68 TFO -> (166,25,46) (RMU red, distinct from the navy primary), STAD 67 SCIT -> "Moon Township". Play Now
+    with it: red / "MOON TOWNSHIP" on the scoreboard and red "team colour" accessories confirm TFO and SCIT.
+  - The installed savedata BLUS31159-ROSTER-FCS2026 is the 10:38 build (11,306 PLAY rows, pre captain/team-ref
+    fix), not Rosters/2026/out (19:29, = the exe and the site zip).
+  - RMUTEST RESULT (Eric, dynasty RMUU from it; both edits confirmed in the dynasty file): scorebug still "KENNESAW"
+    on yellow, accessories navy (= TBC* primary). So neither STAD.SCIT nor TEAM.TFO* feeds the scorebug; accessories
+    use the primary. (The SCIT / typo / TFO leftovers above are still real data cleanup, just not this bug.)
+- FOUND: the scorebug is the CFBR Apt movie in the DLC folder's qkl_patch.ast: outer #5 (719,558 B, stored) ->
+  nested bigfile #13 (56,323 B, stored) -> #64 "Apt1" const (14,344 B) + #65 "Apt Data" (91,772 B, zlib 20,905 B)
+  (Eric's pointer: a CFBR scorebug tutorial). Why every search missed it: these nested bigfiles use a BGFA variant
+  the codec misreads: flags width = ((w8 >> 8) & 255) + 1 (outer #5 has w8 0x04080000 -> 1-byte flags, 21-byte
+  records, TOC at the END, @403,576); #13 is the usual 2-byte layout. scratchpad bug/bgfa.cjs reads both.
+  - Class ncaa.art.linelook.screen.GameClock.GenericGameClock, `teamInfo`: 126 blocks of 56 bytes, one per stock
+    FBS slot in the scorebug's own (alphabetical-by-stock-school) order, NOT TGID order:
+    `03 17 b9 08 b6 00 NN 49 12 9d 00x6 29 b7 <u32 c1> 87 00x5 04 17 b7 <u32 c2> 87 00x4 05 17 a1 00 00 <u32 BE
+    pointer to the short name> 87 00x6`. c1 = the scorebug team colour (c2 mostly equal). Names are 4-byte aligned,
+    zero padded, each referenced exactly once (by its block); nothing in the const file points at them.
+  - Leftovers (all others match their team): block 19 "Delaware" #006df9 (CLEMSO = Stonehill), block 68 "Kennesaw"
+    #fdbb30 (NOTDAM = Robert Morris), block 117 "Missouri St" #5e0009 (WISCON = Valparaiso). Howard is #6a808c gray.
+  - APPLIED (RPCS3 closed): "Stonehill" #2e2975, "RMU" #15234b, "VALPO" #f6b815 (names per Eric), each in its own
+    slot, c1 = c2. zlib -9 gave 21,684+ B (> the 20,905 B slot; the original encoder was stronger), zopfli 17,951 B
+    -> written into the slot (zero padded) + #13's TOC record csize/delta; nothing else moves. Read back through a
+    fresh extraction. qkl_patch.ast sha256 f489832a… -> 00f008d6…; backup (slot + record + manifest)
+    %LOCALAPPDATA%\ncaa-bridge\backups\2026-11-08T04-03-08-scorebug. Script: scratchpad bug/scorebug.cjs. Members
+    need the same patch (payload: the 17,951 B stream + a guard on the original slot).
+  - Also in the archives (not the scorebug): qkl_misc #1001-1133 = 123 1024x256 team banners (NDSU, etc.; several
+    still stock FBS: AIR FORCE, BALL STATE, NOTRE DAME, TOLEDO, WYOMING, ...).
+- CFBR V21 pkg (Desktop\CFBR_PC_DISC_XB_EASY_INSTALLER_V21.pkg, 7.8 GB, NOT installed): a debug-type PS3 pkg
+  (revision 0, content id CUSTOM-INSTALLER, 2,452 items; SHA-1 keystream from the header digest), read with
+  scratchpad cfbr-tools/pkg.py (list / get, confined to its output folder). Installing it would overwrite the disc
+  archives (qkl_fe2ig 3.6 GB, stream, interface, misc, boot), the game's DLC folder (CFBR_DLC_CUSTOM/V17-V19,
+  UNIF001-016, qkl_patch.ast.edat) and add ROSTER-CFBR22V21 / CFBR23V21 (extracted to scratchpad cfbr/x only).
+  Pitt in its DLC: only PITTSB_HELMET_big.ast.edat (CUSTOM and V19). C: has 13 GB free: extract selectively.
+- 2026-11-07 late:
+  - Test saves deleted (Eric): ROSTER-RMUTEST, DYNASTY-RMUU and the bisect slots T65-T72, T8841/T9039/T9207/T10256/
+    T11306, H3A-D/H3X, HQ1-4, TEST5X90/TEST69/TEST90MAN1-3, V640LS75/V67OVR/V67TE, FCS26QA/QB (34 folders).
+  - Score bug in the repo: bridge/src/scorebug.ts (BGFA reader for both layouts, SCOREBUG_PATH by hash, team table
+    decode, writeScorebug in place with backup + read-back, restoreScorebug), `ncaa-bridge scorebug status [--teams] |
+    export --out | restore`, bridge/test/scorebug.test.ts (synthetic nested archive). The slot is the room up to the
+    next entry (20,912 B), not the TOC csize, so later fixes may grow back to it. FCS_MOD_SCOREBUG_SHA = the mod's
+    original Apt (1085804280c9…); join only replaces that one.
+  - FCS-online.exe: build.mjs runs `scorebug export` against this PC's qkl_patch.ast and ships the stream when it is
+    not the original (payload.scorebug); join step 3 "Score bug" (later steps renumbered 4-7), status line. Tested on
+    a scratch copy reverted to the original: written, re-run "already current", result byte-identical to this
+    install (qkl_patch.ast 00f008d6…). Desktop\FCS\FCS-online.exe sha 986e2793… (previous .bak-2026-11-07-pre-scorebug).
+  - Pitt test (CFBR -> generic 162): donor = CFBR23V21 roster (Pitt TGID 77, 69 PLAY, 88 DCHT, QB Kedon Slovis 84;
+    CFBR22V21 has the same Pitt). `generic install --donor ... --donor-tgid 77 --tgid 162`: both STDA copies (boot
+    13789f38 -> ed9b9f0a, fe2ig 05e0ef78 -> 358c834e), 57 PLST / 63 DCST rows, verify clean, copies identical; backup
+    2026-11-08T04-19-02-stda (restores the real-roster Wagner). Identity: `generic team` on the 19:29 FCS2026 ->
+    ROSTER-PITTTEST (TEAM 162 = Pittsburgh / Panthers / Pitt, #003594 / #ffb81c; nothing else changed). Uniforms
+    are still Wagner's placeholder set (Pitt's are in CFBR's archives / the PITTSB helmet .edat).
+  - Eric: Pitt test looks right; wants uniform + logo swap ability. FBS player source from now on: the PHOENIX26
+    roster (Desktop\BLUS31159-ROSTER-PHOENIX26\BLUS31159-ROSTER-PHOENIX26, Pitt = TGID 77, QB Mason Heintschel 86).
+- Generic home/away (agent, verified in both ELFs): the Dynasty Custom Schedules editor works on temp table SCHT and
+  keys on the opponent's conference, not TTYP: add-game 0x4a0f18 swaps so the user hosts when the opponent's CONF.LGID
+  is 1 (Generic, CGID 17); replace-opponent 0x4a10dc swaps when the home team is CGID 17; the toggle 0x4a0c0c is
+  refused because 0x4a0a78 returns 3 when the away team is CGID 17. Entry "FCS mod: generic opponents host":
+  0x4a0bfc li r31,3 -> 3be00000, 0x4a102c ori -> 4800000c (b 0x4a1038), 0x4a1310 bne -> 48000010 (b 0x4a1320).
+  Appended to private/rpcs3-patches.yml and installed + enabled in RPCS3 (imported_patch.yml / patch_config.yml,
+  .bak-<stamp> beside both). Untested. Caveat: generic TEAM.SGID is 1023, so a generic-hosted game keeps its old
+  SCHD.SGID (0 = Jayne Stadium for a new game); fix in data (give 160-164 stadiums). Agent's notes:
+  scratchpad homeaway/.
+- CFBR assets are fully readable without installing: pkg (cfbr-tools/pkgfs.cjs, random access), its EDATs
+  (cfbr-tools/edat.cjs: NPD v3, licence 3, flags 0x0c; klicensee = what the game passes to sceNpDrmIsAvailable,
+  logged by RPCS3 as `KLIC=0x...` in RPCS3.log (kept out of the repo; cfbr.ts dlcKlic reads it from there); EDAT_KEY_0 unwrap; per-block AES-CBC with the NPD digest as IV;
+  EdatFile reads blocks on demand, incl. CFBR's 524 MB qkl_patch.ast.edat). CFBR recycles part names: Pitt's helmet
+  is DLC "calxxx_jersey_2014_white_big" (V18 and UNIF001), Alt gloves are "GEORGA_HELMET_big" (a Georgia decal
+  helmet's entry names inside), socks "BEA_SOCKS_1960_ORAINDSTR_big"; jerseys/pants are PITTSB_* in its fe2ig.
+- LOGOS: qkl_interface.ast outer 094ba24caa97c28d (#141) = 1,024-entry logo bigfile (1-byte flags variant), entry
+  hash 954ed745_0000XXXX = index; entry TLGL = menu/UI logo, entry 340 + TLGL = score bug logo; 512x512 DXT5 DDS,
+  zlib, packed tight (generics TLGL 120-124 have their own logos). CFBR has the same layout (Pitt 77 / 417).
+- Pitt -> Wagner slot (162 / D1AANW / TLGL 122), APPLIED for testing:
+  - players re-done from PHOENIX26 (`generic install`; backup 2026-11-08T04-40-38-stda; K2 and RT3 rows improvised
+    from LBs: Pitt has 1 K / 2 RT); ROSTER-PITTTEST rebuilt from PHOENIX26's TEAM 77 (TSNA "PITT").
+  - uniforms (cfbr-tools/uniswap.cjs): Home / Away / Alt #3 (Alt #1/#2 left out: their gloves carry GEORGA decal
+    names that would collide with Alcorn's slot). 6 parts renamed to D1AANW_*_2019_* (same length, entry names,
+    hashes and scene paths), 5 reused because this install has them byte-identical (generic shoes/socks, both
+    glove sets); new D1AANW_Pack0_MixAndMatch.XML in FCS_DLC_NEC; undo manifest
+    %LOCALAPPDATA%\ncaa-bridge\uniforms\swaps\2026-11-08T04-41-18-PITTSB-D1AANW. (Running the exe's join again
+    would put the Wagner placeholder XML back.)
+  - logos (cfbr-tools/logoswap.cjs): CFBR 77/417 streams appended to the logo bigfile, records 122/462 repointed;
+    the grown bigfile (18,886,200 B) appended to qkl_interface.ast (390,458,186 -> 409,344,386 B) and its TOC record
+    repointed. Backup 2026-11-08T04-41-20-logos (record + original size; restore = record back + truncate).
+- 2026-11-08 ~00:15 local: swap tool in the repo (bridge/src/swap/: pkg.ts debug pkg + EDAT readers, cfbr.ts CFBR
+  source, bigfile.ts rename/rebuild/DXT/PNG, boost.ts 97-99 via ovr-formulas.ts (Xan's config), uniforms.ts, logos.ts,
+  install.ts, swap.ts orchestrator + state in %LOCALAPPDATA%\ncaa-bridge\swaps, server.ts UI API, cli.ts
+  `ncaa-bridge swap list|preview|apply|restore|status|stadiums|ui`). Donors = PHOENIX26 (126 FBS teams; TGID, CSAT and
+  TLGL identical to CFBR's), assets = CFBR pkg. Identity + home stadium go into the FCS2026 roster save and the
+  default roster (qkl_boot entry 092f677e439a5110), players into both STDA copies, uniforms into the slot's DLC folder,
+  logos appended to qkl_interface's logo bigfile.
+  - Incident: the prototype undo (scratch scripts without an RPCS3 guard; my tasklist check printed a blank first line
+    that I misread) ran while Eric had RPCS3 open; the tool's own guard refused the STDA part. Eric asked me to close
+    RPCS3 (closed normally), then the slot was reset (STDA backup 04-19-02 --force; uniform + logo prototype undone;
+    ROSTER-PITTTEST deleted). All writes now go through code with rpcs3RunningOver.
+  - Round trip verified: apply Pitt -> 162 (57 rows 97-99, formula >= POVR 57/57, both copies; TEAM/STAD in roster
+    save + default roster; 5 officials, 7 files written + 6 reused; logos 122/462) then restore: STDA back to
+    13789f38/05e0ef78, roster save and default-roster entry byte-identical, uniforms and logo records original.
+  - Applied for Eric's test: `swap stadiums` (generic slots' real stadiums on HS rows 261/262/265/266/268, STAA GNRIC1,
+    plain HS fields HSSTAD/HSMODX/HSTRAD/HSSEMD/HSSWSM; TEAM.SGID set, was 1023), then `swap apply --slot 162
+    --donor 77` (Acrisure Stadium). Existing dynasties keep their own TEAM rows (name not swapped there yet).
+- 2026-11-08 ~00:30: swap tool finished for the commissioner and members.
+  - CFBR uniform XMLs LAYER: archive <SLOT>_MIXANDMATCH, then every DLC <SLOT>_Pack<N>_MixAndMatch by pack number (EA's
+    UNIF001-016 = the official uniform DLC; UNIF001's Pack0 files are empty stubs; CFBR_DLC_* last within a pack);
+    per official the last XML listing it wins (cfbr.xmls + uniforms.ts layer()). Some XMLs write `<officialType
+    name="Home" />` with a space (Ole Miss): every tag pattern takes \s*\/>. Result: dry run of all 126 FBS teams in
+    memory (uniform build + rename, both logos, player swap + boost on a copy of the STDA): 0 failures, 98 s; officials
+    5 for 94 teams, 4 for 12, 3 for 3, 2 (Home/Away only) for 17; uniform files 0-7.9 MB (median 0.9).
+  - UI: installer/src/swap-ui.html (agent-built, matches worker/public/css base + coach: black bar, #cc0000, Barlow
+    Condensed, score-bug slot cards, trade-machine preview with top 3 OVR -> boosted). Checked against the real server
+    in headless Chrome (scratchpad swapui-mock/shoot-real.mjs, MOCK=<url>): no overflow, no console errors.
+  - FCS-online.exe: `swap` mode / menu 5 (finds the CFBR pkg + PHOENIX26 on the Desktop / Downloads; PHOENIX26 also
+    embedded as payload.swapDonors) serves the page on 127.0.0.1; join step 7 "Generic teams: home stadiums and FBS
+    swaps" applies payload.swapPack + SEA asset swap-pack.bin (`ncaa-bridge swap export`: all five slots' TEAM identity +
+    SGID and stadium rows, and per swapped slot its PLST/DCST rows, uniform files + XML, logo streams), after the roster
+    step; idempotent; the uniform step skips XMLs a swap owns, and build.mjs ships the script's original for them.
+    Member test (scratch tree from the pre-swap backups: qkl_boot + qkl_interface + roster save + DLC): join applied it,
+    a second join was "already current" throughout, and STDA entry, default roster, roster save, the 13 D1AANW files and
+    the logos are byte-identical to this install. Desktop\FCS\FCS-online.exe sha badb00b3… (previous
+    .bak-2026-11-08-pre-swap); it also carries the untested "generic opponents host" patch.
+  - Not done: online-league dynasty identity (DynastyPatchSet has no TEAM/STAD edits; the league dynasty's generic rows
+    still say Wagner etc.); existing offline dynasties likewise.
+- 2026-11-08 ~08:20: score bug name / colour for swapped slots, conference logos on the placeholder jerseys.
+  - The score bug's team table is GetTeamNameAndColor(teamInfo, isHome) in the Apt (const file #64 = "Apt1" constant
+    pool: 0xe5 teamName, 0xd4 teamColor, 0xe1 teamLogoId, 0x1fd GetTeamNameAndColor). It starts from the game's values
+    (r3 = teamInfo.teamName, r4 = r5 = teamInfo.teamColor, r8 = teamLogoId) and runs an if-chain keyed by NN = TEAM.TLGL
+    (not alphabetical order as such: 0-118 and 133-139 are the stock slots' TLGLs). The generic slots (TLGL 120-124) have
+    no entry, so they always showed the game's name / colour. Opcodes: b9 push reg, b6 push u16, b7 push u32, 49 Equals2,
+    12 Not, 9d If, 99 Jump, 87 StoreRegister, 17 Pop, a1 push string; 9d/99/87/a1 operands 4-aligned to the Apt offset.
+    The function body is 7,172 B (DefineFunction2 size); a jump to its end returns.
+  - bridge/src/scorebug.ts: scorebugChain (both layouts), setScorebugTeams re-encodes the 7,056-byte table in place
+    (compact: test, push c1/c2/name, jump STORE; a shared STORE; Pop filler), back to CFBR's exact bytes when the teams
+    fit its layout; new names go in an 'FCSNAMES' area appended to the Apt. Checked with a VM over TLGL 0-1023 (real
+    Apt, +1 / +5 teams, re-swap, removal = original bytes). zlib -9 gives ~21.9 KB > the 20,912 B slot, so writeScorebug
+    now appends when a stream does not fit: stream -> end of bigfile #13, #13 -> end of outer #5, #5 -> end of
+    qkl_patch.ast (in place once it is last), records repointed; backup = outer record + replaced tail.
+  - Swap tool: step "Score bug name and colour" = CFBR's own entry for the donor's TLGL (Cfbr.scorebugTeams, from
+    CFBR's qkl_patch); restore removes it; state.scorebug snapshots the outer record before the first write and the
+    last restore returns to it. Real install round trip (Pitt -> 162, entry 122 "Pittsburgh" #003b9d/#ffb81c, archive
+    +798 KB; restore): qkl_patch.ast, roster save, qkl_boot, qkl_fe2ig byte-identical (qkl_patch 00f008d6…). The swap
+    page shows the bar (name on primary, secondary tab). `scorebug export` now lists every sha in the backup manifests
+    as replaceable, so members on an earlier build's score bug get the new one at join step 3.
+  - Eric had restored slot 162 himself at 07:41 (state.json empty); the install stays unswapped.
+  - Conference logos (fork agent): make-coming-soon-sets.mjs mirrors the UA logo across the jersey centre (x ~510.5,
+    same height); ESPN conference art from archive/logos/conf (NEC 25.png, Pioneer 28.png, CAA 48.png, FCS Ind 32.png,
+    UAC uac.png; flat logos tinted the UA colour), conference per archive/logos/espn-fcs.json (Saint Francis -> NEC);
+    Tuskegee (SIAC) and Delta State (Gulf South) have no art, left blank. 28 jersey files installed in FCS_DLC_NEC /
+    FCS_DLC_PIONEER (backups %LOCALAPPDATA%\ncaa-bridge\uniforms\backup 2026-11-08T13-13); not yet seen in game.
+  - Desktop\FCS\FCS-online.exe sha f26ae3e6… (previous .bak-2026-11-08-pre-swap-scorebug); no swaps in its pack.
+  - Merrimack (EMICHI, fork agent, ~08:35): conference `Independent` = a drawn US flag (1.9:1, 13 stripes, 50 stars,
+    ~52x27 px, canton top-left) in the conference-logo spot on both jerseys; home jersey chest word and number fill in
+    the UA logo's gold (251,235,41) via `lettering: { dark: 'ua' }`. Number colour lives in each jersey's own
+    _NUMS_DECAL texture (front, back and shoulder numbers; home and away have their own), not the XML or TEAM fields.
+    Only EMICHI_JERSEY_2026_NAV / _WHI changed (99 files byte-identical). NOTE: the agent's install ran while RPCS3 was
+    open (its check printed true but exited 0); the two jerseys were written mid-session, backups
+    %LOCALAPPDATA%\ncaa-bridge\uniforms\backup\FCS_DLC_NEC__EMICHI_JERSEY_2026_{NAV,WHI}_big.ast.2026-11-08T13-37-*.bak.
+    Desktop\FCS\FCS-online.exe sha 6f6cfbbf… (previous .bak-2026-11-08-pre-merrimack).
+- 2026-11-08 ~09:25: team-selection names. "Stonehill Stonehill" = TEAM.TMNC (the nickname the menus show) "Stonehill";
+  fixed with the others a TMNC != TMNA scan found: Stonehill TMNC Skyhawks + TSNA SHU -> STO (ESPN; SHU is Sacred
+  Heart's), Austin Peay TMNC "Govenors" -> Governors, Duquesne TMNA "Duke" -> Dukes. Written (rewriteDb, same length)
+  to Rosters/2026/control/USR-DATA (rebuild source) + control/TEAM.csv, Rosters/2026/out save (shipped by the exe),
+  the installed ROSTER-FCS2026 and the qkl_boot default roster; backups
+  %LOCALAPPDATA%\ncaa-bridge\backups\2026-11-08T14-25-58-teamnames. Left: Delta State (generic 164) shares TSNA DSU
+  with Delaware State. Existing dynasties keep their own TEAM rows; the site's roster zip was not updated.
+- 2026-11-08 ~10:40: placeholder redesigns (fork agent, make-coming-soon-sets.mjs; previews under
+  spike/blaze/tools/uniforms/dist/coming-soon/previews):
+  - St. Thomas (UNLVXX): silver metallic helmet (shell finish values from the mod's Montana helmet), thin purple
+    stripe, logo 75%; "ST. THOMAS" (period drawn by the script); Nike; silver (Home/Away) + purple (alt) pants.
+  - Presbyterian (HAWAII): white helmet, blue 32 | red 16 | blue 32 stripe, ESPN 2506 logo at 75%; new black Home
+    jersey (Ball State shoulder stripe measured from CFBR BALLST_jersey_2013_Black, blue gradient numbers with white
+    outline), blue jersey as Alt #1; adidas bars everywhere.
+  - Robert Morris (NOTDAM): red UA logo moved to the collar row, "ROBERT MORRIS" with a 1 px red outline, red-outlined
+    numbers, white helmet with a navy stripe edged red.
+  - Sacred Heart (CMICHI): white helmet, red stripe, red SHU (ESPN 2529); no chest word, SHU at the collar; adidas;
+    home numbers white with a dark grey outline.
+  - Stonehill (CLEMSO): bigger, lower chest word with a black outline, black home number outlines, adidas, black
+    facemask (helmet scene facemask_mat baseColor 0,0,0; the mod's black-mask helmets do the same).
+  - Helmet stripe centre line = the outer edge of each half's arc (y ~63 at the apex; EA's Nebraska / Penn State and
+    the mod's Indiana State template agree); the first build used Abilene's dome edge and was off by ~40 px.
+  - Brand art: Wikimedia Commons Logo_NIKE.svg / Adidas_Logo.svg renders in archive/logos/brands (gitignored).
+  - Installed with the RPCS3 guard (backups %LOCALAPPDATA%\ncaa-bridge\uniforms\backup); live DLC = dist for all 102
+    files. Desktop\FCS\FCS-online.exe sha d786152d… (previous .bak-2026-11-08-pre-redesigns), also ships the
+    team-name roster fixes.
+  - ~11:00: Eric preferred the first helmet stripes in game: the centre-line fix was reverted (script back to the
+    Abilene-dome painter; Presbyterian red 8 + blue 44 per side). The four helmets rebuild byte-identical to the
+    15-10 backups (993a955e / e90f9f83 / a0066902 / 689cc7ab), installed with the guard, live = dist for all 102.
+    The centre-line script is kept in the scratchpad (conflogo/script-centreline.mjs).

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { TdbFile, TdbTable } from '@ncaa/tdb';
-import { swapGenericTeam, copyTeamIdentity } from '../src/generic-swap.js';
+import { swapGenericTeam, copyTeamIdentity, fillGenericRows, staleGenericRows, filledGenericRows } from '../src/generic-swap.js';
 
 // Just enough of a TdbTable: named columns (type 0 = string of bits/8 bytes, 3 = unsigned) over plain row objects.
 type Rec = Record<string, number | string>;
@@ -82,5 +82,36 @@ describe('copyTeamIdentity', () => {
     expect(team.get(0, 'TDNA')).toBe('Pittsburgh'); expect(team.get(0, 'TSNA')).toBe('PITT'); expect(team.get(0, 'TBCB')).toBe(148);
     expect(team.get(0, 'TTYP')).toBe(1); expect(team.get(0, 'TGID')).toBe(162); expect(team.get(1, 'TDNA')).toBe('Duquesne');
     expect(changed).toHaveLength(5); // TDNA TMNA TSNA TBCG TBCB (TBCR equal; TLNA not a column here)
+  });
+});
+
+describe('fillGenericRows', () => {
+  const mk = () => {
+    const rows = [{ PGID: 16300, TGID: 163, PPOS: 0, POVR: 73, PJEN: 12, PFNA: '', PLNA: 'QB #12', PYEA: 1, PRSD: 0, PHGT: 74, PWGT: 40 }, { PGID: 1000, TGID: 10, PPOS: 0, POVR: 80, PJEN: 7, PFNA: 'Real', PLNA: 'Player', PYEA: 3, PRSD: 0, PHGT: 75, PWGT: 50 }];
+    const fieldMap = new Map(Object.keys(rows[0]!).map((k) => [k, { name: k, bits: ['PFNA', 'PLNA'].includes(k) ? 104 : 16, type: ['PFNA', 'PLNA'].includes(k) ? 0 : 3 }]));
+    const t = { name: 'PLST', fieldMap, get recordCount() { return rows.length; }, field: (c: string) => fieldMap.get(c)!, get: (i: number, c: string) => (rows[i] as Record<string, unknown>)[c], set: (i: number, c: string, v: unknown) => { (rows[i] as Record<string, unknown>)[c] = v; } };
+    return { rows, stda: { tables: [t], table: () => t } as never };
+  };
+  it('sets only identity fields on existing generic rows', () => {
+    const { rows, stda } = mk();
+    const r = fillGenericRows(stda, [{ pgid: 16300, tgid: 163, fields: { PFNA: 'James', PLNA: 'White', PJEN: 12, PYEA: 3, PHGT: 75 } }]);
+    expect(rows[0]).toMatchObject({ PFNA: 'James', PLNA: 'White', PJEN: 12, PYEA: 3, PHGT: 75, PPOS: 0, POVR: 73, PWGT: 40 });
+    expect(r).toEqual({ rows: 1, cells: 4, teams: [163] });
+    expect(rows[1]!.PLNA).toBe('Player');
+  });
+  it('refuses rows outside the generic teams, unknown rows and non-identity fields', () => {
+    const { stda } = mk();
+    expect(() => fillGenericRows(stda, [{ pgid: 1000, tgid: 10, fields: { PLNA: 'X' } }])).toThrow(/not a generic team/);
+    expect(() => fillGenericRows(stda, [{ pgid: 16399, tgid: 163, fields: { PLNA: 'X' } }])).toThrow(/no row/);
+    expect(() => fillGenericRows(stda, [{ pgid: 16300, tgid: 163, fields: { POVR: 99 } }])).toThrow(/not an identity field/);
+  });
+  it('finds plan rows whose stock row changed, and counts the rows already filled', () => {
+    const { stda } = mk();
+    const plan = [{ pgid: 16300, tgid: 163, ppos: 0, povr: 73, fields: { PFNA: 'James', PLNA: 'White' } }];
+    expect(staleGenericRows(stda, plan)).toEqual([]);
+    expect(staleGenericRows(stda, [{ ...plan[0]!, povr: 90 }, { ...plan[0]!, pgid: 16399 }, { ...plan[0]!, tgid: 164 }])).toHaveLength(3);
+    expect(filledGenericRows(stda, plan)).toBe(0);
+    fillGenericRows(stda, plan);
+    expect(filledGenericRows(stda, plan)).toBe(1);
   });
 });
