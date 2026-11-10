@@ -2489,3 +2489,303 @@ First full Supersim game on the new engine (Brown 37, Furman 36, week 1 of 2014,
   `gh release create`s it with installer/RELEASE.md (player guide) as notes. Eric chose to publish the exe as it is
   (patches, uniform pack, score bug, roster, PHOENIX26 included) on the public repo; the site's download is unchanged.
   README: Download badge (latest release), Install section, Join points at the release.
+
+## 2026-11-08 — PS3 brought up to the RPCS3 0.0.29 build: archives, DLC, every patch in the EBOOT, FCS2026 roster
+
+Console 192.168.137.2 (CEX 4.90, PS3HEN 3.2.2, webMAN MOD 1.47.45), at the XMB for every write (cpursx "(XMB)"
+checked before each upload batch and each rename). Nothing deleted: every replaced file was renamed or moved aside.
+PC backup of the four user-6 BLUS31159 saves, the update EBOOT.BIN and the game-data PARAM.SFO (22 files, sizes +
+sha256 in backup.json): spike/blaze/private/console-backup-2026-11-08-sync. Its `sync/` folder keeps the scripts, the
+write journal (journal-2026-11-08.jsonl, every upload and rename), the before/after hashes and rollback.py.
+
+- Archives, compared by full sha256 (the PS3 side read over FTP). Each one that differed went up as `<name>.new`,
+  checked by size + full read-back sha256, then live -> `<name>.pre-2026-11-08` and `.new` -> live (~20 MB/s):
+  | archive | before (now `.pre-2026-11-08`) | live now (= RPCS3) |
+  |---|---|---|
+  | qkl_boot.ast | 86,207,654 B 591b83ce… | 86,207,654 B 1b867d75… |
+  | qkl_interface.ast | 390,458,186 B 56959cae… | 409,530,018 B 33270d35… |
+  | qkl_fe2ig.ast | 3,572,993,720 B 5499ae6d… | 3,572,993,720 B bfcf2936… |
+  | DLC/qkl_patch.ast | 523,766,332 B f489832a… | 523,766,332 B 00f008d6… (score bug fixes) |
+  qkl_stream.ast was already identical (3cc70026…). The *.stock / .pre-pioneer files are untouched.
+- NOT synced: qkl_misc.ast differs as well (PS3 b1aeb971… is the console's original stock file; RPCS3 and the FCS drop
+  have 62376cb4…, same size 238,393,510; the mod's team banners and some uniform parts live there). The 2026-11-03
+  mirror skipped it (the README's "4 disc archives" is wrong: the mod changes five). It was not in the agreed list of
+  four, so it waits for Eric's go; the same method applies (`sync-archives.py qkl_misc.ast` after adding it to WHERE).
+- FCS_DLC folders: 983 files were already identical; 100 missing (Coming Soon, generic-team and Villanova sets: 72 in
+  NEC, 25 in PIONEER, 2 in CAA, 1 in PATRIOT) and 2 different (FCS_DLC_NEC D1AAMW / D1AANW stop-gap XMLs) went up the same way (.new,
+  size + sha256 read back, rename). The two old XMLs are in /dev_hdd0/game/BLUS31159/USRDIR/DLC_backup_2026-11-08/
+  FCS_DLC_NEC. No PS3-only files in the FCS folders. Final check: all 1,085 FCS_DLC files byte-identical to RPCS3.
+- CFBR-DLC-CUSTOM (on the PS3 only): 193 of its 203 files share a name with an FCS_DLC file (191 byte-identical; the
+  two WILLIN_JERSEY_2024_PUR/WHI_big.AST differ from FCS_DLC_BSOVC's .ast; one is GEORST_Pack0_MixAndMatch.XML, the same
+  slot as FCS_DLC_SOCON's, identical bytes). All 193 moved to DLC_backup_2026-11-08/CFBR-DLC-CUSTOM; its ten
+  MONTAN_*.ast.edat files stay.
+- EBOOT: the no-PSN Player A build (adapter ELF c146e332…, already carrying the All-Conference fix and the five-dynasty
+  limit) plus every other entry of private/rpcs3-patches.yml, plus one personal patch (see the private shelf).
+  tools/ps3-eboot.mjs gained `--generic-host` and `--extra-words FILE.json`; tools/ps3-eboot-onto.mjs bakes the words
+  into the adapter ELF. Checks: the adapter ELF holds all 39 baseline words; every added word expects the stock word (or
+  the earlier entry's, only 0x453968: All-Conference then stride); no added word touches a byte the adapter changed
+  (51 call-site hooks, the code cave at 0x1bc26f0, the two program headers); the result equals the stock-based build
+  everywhere else; an independent script (Python) re-applied all words from the generators' original-word lists and
+  matched RPCS3's patches/imported_patch.yml entry by entry. 982 words added. 14 tests pass. ELF 13c70b6e…, signed with
+  package-np-self.py (WSL scetool, the 0.0.32 update EBOOT as template, same as Player A): SELF 12,973,312 B 008d0a08…,
+  decrypts back to the ELF exactly, signature verified. Installed as ps3-test-transfer.py does: current EBOOT checked
+  = Player A, staged + read back, EBOOT.BIN -> EBOOT.BIN.before-2026-11-08 (105e30d7…), new one read back. PARAM.SFO
+  kept (6920b30b…). Still experimental: same identity (700001 / FCSProbeA) and same no-PSN adapter as Player A.
+- Roster: built the member way (`node installer/dist/fcs-online.cjs install --yes --rpcs3 <scratch tree>`, LOCALAPPDATA
+  in a scratch folder): ROSTER-FCS2026 USR-DATA 1,835,008 B c8fb341a…, HED-DATA 28 B 78edf777… (generic-team names,
+  colours and stadiums applied). The RPCS3 install's own ROSTER-FCS2026 (saved by the game at 12:03) differs; not used.
+  pfdtool 0.2.3: decrypting a copy of the console's ROSTER-I gave the DB header (key proven); ours swapped in, `-e`,
+  `-l` (USR-DATA 1835008: the bigger file is fine), `-c` all OK.
+  - FOUND: pfdtool always rewrites PARAM.SFO's Console ID and Disc Hash Key hashes from global.conf (console id 0, the
+    fallback disc key), even with `-p`. Saves the console wrote FAIL those two checks in pfdtool, so the 2026-11-03
+    upload carried values this console never wrote (and was never loaded in game). This time those 40 bytes were put
+    back from the console-made PFD of 2026-11-03 (same PARAM.SFO bytes) and the PFD re-signed (sync/roster-pfd/pfd.py:
+    entry signature = HMAC-SHA1 over name + key + hashes + padding + size, the 7 bytes after the name skipped; top and
+    bottom hash; AES header). It reproduces six real PFDs byte for byte; pfdtool -c on the result reports exactly what it
+    reports for the console's own PFD. Round trip (pfdtool -d of the result) = our plaintext.
+  - Uploaded (staged in /dev_hdd0/game/BLUS31159/USRDIR/save_backup_2026-11-08, read back, renamed in): USR-DATA
+    e57323e7…, HED-DATA 914708d1… (the same ciphertext as before: FCS2026 kept STABLEV1's HED-DATA), PARAM.PFD
+    dd58930c…. The old three files are in save_backup_2026-11-08/BLUS31159-ROSTER-I; PARAM.SFO and ICON0 unchanged;
+    the PROFILE and both OD saves untouched.
+- Free space: 39.8 GB before, 35.5 GB after (the `.pre-2026-11-08` copies stay).
+- Rollback (console at the XMB): `python -I rollback.py archives|dlc|cfbr|eboot|roster|all [--apply]` in the backup's
+  `sync/` folder (dry run without --apply; renames only: live -> `.from-2026-11-08`, the kept copy back; added DLC files
+  to DLC_backup_2026-11-08/added). By hand: rename the live file aside and `<name>.pre-2026-11-08` back (archives);
+  EBOOT.BIN.before-2026-11-08 -> EBOOT.BIN (Player A; EBOOT.BIN.before-np-test is the stock 1.02); the three roster
+  files back from save_backup_2026-11-08/BLUS31159-ROSTER-I (or the PC backup).
+- Not yet seen on the console: the new EBOOT booting, ROSTER-FCS2026 loading (it is listed under ROSTER-I's slot), a
+  Coming Soon team's uniforms, the RMU score bug, a 90-man roster screen.
+- Follow-up (main thread, 13:29): qkl_misc.ast synced too (the mod changes five disc archives, not four: the Nov 3
+  mirror and the README had missed misc, which holds the mod's team banners and some uniform parts). Console stock
+  b1aeb971... -> RPCS3/FCS 62376cb4... (238,393,510 B), uploaded as .new from stdin (curl -T globs [] in a local path),
+  full read-back sha256 matched, then live -> qkl_misc.ast.pre-2026-11-08 and .new -> live at the XMB. Not in
+  rollback.py: rename qkl_misc.ast aside and qkl_misc.ast.pre-2026-11-08 back by hand.
+- 2026-11-08 ~15:00: PS3 "Coming Soon uniforms missing" solved. Symptoms on the console only: Stonehill showed the
+  archive's Delaware set, Coming Soon teams and Stony Brook / Long Island / Butler crashed on the uniform preview, while
+  UC Davis and Montana State were fine. Cause: at boot the game scans each DLC folder and calls sceNpDrmIsAvailable on
+  its files (RPCS3 log, FGGameSim: one call per folder on the first entry, "Assuming npdrm file is unencrypted"); a real
+  PS3 accepts a folder only when one of its files is a licensed EDAT. FCS_DLC_BIGSKY (32 EDATs) passed; CAA / NEC /
+  PIONEER and six other folders hold only plain files and were skipped, so their parts never existed for the game.
+  Proven by moving our Stonehill set into BIGSKY (worked) and by copying BIGSKY's EWUXXX_GLOVES_2022_BLACK_BIG.ast.edat
+  into NEC / PIONEER / CAA (Long Island, Butler, Stony Brook then worked). Fix applied: that EDAT copied into all 12
+  other FCS_DLC folders (same name: EDATs are bound to their file name); the Stonehill set is back in NEC with its
+  original files; every folder = RPCS3's files + the licence file. spike/blaze/README.md documents it.
+  - Ruled out on the way (all wrong): stale dev_hdd1 cache (the game rebuilds it; it is empty on both), file order in
+    the folders (the PS3 lists in creation order; the DLC tree was rebuilt in RPCS3 order by renames anyway; harmless),
+    webMAN mount (points at the GAMES folder), the double-slash shader path in 33 mod teams' RSFs (Stony Brook crashed
+    with UC Davis's whole jerseys too), DDS depth 0 in name decals (33 of ours, 270 of the mod's; harmless), line
+    endings. The DLC folder no longer holds CFBR-DLC-CUSTOM's 10 Montana EDATs or qkl_patch.ast.pre-2026-11-08: both in
+    USRDIR/DLC_unsorted_2026-11-08. Test copies in USRDIR/DLC_backup_2026-11-08/ps3-test-*.
+  - Found by the way: SELAXX_HELMET_2024_WHITE (SE Louisiana, FCS_DLC_SOUTHLAND) has a truncated zlib entry
+    (HELMETRIDDELLBAKED_COL, 333 B): a mod data bug, on RPCS3 too.
+  - Members on RPCS3 need nothing. A PS3 install copied from RPCS3 needs the licence file in each folder.
+- 2026-11-08 ~16:15: depth charts of any save, Road to Glory included: `ncaa-bridge depth show <save> --team T [--pos ..]`
+  and `depth set <save> --team T --player "First Last" --pos K,P,TE [--depth 1] [--out F] [--dry-run]`
+  (bridge/src/commands/depth.ts). <save> = a USR-DATA, a save folder or a save name (RTGTEST1). `set` inserts the player
+  at the depth and moves the rest down (the last drops off; a player already lower on that chart moves up instead of
+  being listed twice). In place: refuses while RPCS3 runs from that folder, backs up to
+  %LOCALAPPDATA%\ncaa-bridge\backups\<time>-depth\<save>, reads the team's slots back. An RTG USR-DATA is a plain
+  EA DB in the 0x7e5000 dynasty buffer; the edit changes only the DCHT cells and the end-of-DB CRC (checked byte by byte on
+  RTGTEST1), and HED-DATA carries no checksum of it. First use: Eric Fox (PGID 1812, Holy Cross, TGID 18) to K1 / P1 /
+  TE1 on RTGTEST1 (already LLB1 there). Unknown yet: whether the game re-sorts a CPU-run (RTG) team's chart when a week
+  is played; if it does, run `set` again.
+- 2026-11-09 ~21:30: Depth Chart page redesigned as Madden-style lineup cards (worker/src/pages/depth.ts render part,
+  worker/public/js/depth.js, .lc-* rules in base.css; teamColors() in pages/common.ts reads TEAM TBCR/TBCG/TBCB +
+  TB2R/TB2G/TB2B). Team-coloured header with the team OVR ring, Offense / Defense / Special Teams tabs (site.js
+  [data-tabs]; .lc-grid[hidden] must set display:none because the class rule beats the UA hidden style), one card per
+  position (starter with headshot, jersey, OVR tier pill; backups listed under it), a roster drawer with a search box.
+  Tap a slot then another to swap (any positions), or a roster card then a slot to place him; a player already at
+  another slot of that position trades places (the save zeroes duplicates). Slots are buttons with the hidden
+  s<pos>_<depth> inputs, so depthAction / chartFromForm / subs are unchanged; blue = changed here, amber = pending.
+  Formation subs keep their selects (and the dc-players template + site.js filler). Checked on wrangler dev with a
+  local-only od_members row (blaze_id -7, Holy Cross); Chrome's headless --window-size clamps below ~500 px, so phone
+  layouts are checked in an iframe instead.
+- 2026-11-09 ~21:45: playbook step-language conventions, fitted on the stock misc #7 DB (scratchpad calib2.ts, 1,542
+  distinct PSAL/ARTL pairs of offensive slots with code-8 legs). PSLO `code 8 (val1, val2, val3)` = route leg: val1 =
+  distance in EIGHTHS of a yard (the legs' vector sum lands on the art's end point with val1/8, length ratio median
+  1.00; the PATY dictionary's "up to 31 yards" = 255/8), val2 = direction in 1/128 turn, 0 = the offense's right,
+  counter-clockwise, so 32 = downfield, 64 = left, 96 = back (histogram peaks 32, 64, 0, 16, 48; first-leg angle error
+  median 8°, the art being schematic), val3 = speed 0..255 (254 full, 191 ~75 %, 127 half). Same units for code 3
+  (move: QB drops are val2 96), 13 (receive handoff), 18 (lead block); code 5 (face) carries the direction in val1;
+  code 14 (pass block) val1 0 = until the play ends, val2 flags; code 15 run block all zeros; 25 (622 rows, val1 a
+  distance) and 26 (616, pre-snap) are not yet understood. Art (ARTO) is a drawing, not the route: the first art
+  segment often spans several legs (first-leg length ratio median 0.6), so the compiler draws its own art from the
+  legs and never derives legs from art. Stock program shapes: `8 9 8 10` (469), `8 9 25 10` (136), `8 9 8 9 8 10`
+  (89), `8 8 9 8 10` (72) ... with `255` closing every program; `9 (1|2, type, 0)` = a cut between legs.
+  `ncaa-bridge playbook poke --yards N` adds 8N to val1 accordingly.
+- 2026-11-09 ~21:55: Playbook page, part 2 of the playbook suite (plan: ~/.claude/plans/shimmying-sparking-wave.md).
+  - Shared model `packages/ncaa14/src/playbook/` (exported from @ncaa/ncaa14): `types.ts` (the Book JSON shapes, now the
+    one definition; worker/src/supersim/coach/types.ts re-exports them), `model.ts` (BookEdits = base book + formations in
+    order with `from` for one taken from another stock book, sets in order, plays in order, `custom` drawn plays as
+    "c<n>"; `composeBook(edits, books)` re-interns assignments and carries the source books' AI weights; `validateEdits`
+    with the stock envelope LIMITS 15 formations / 41 sets / 419 plays / 31-char name; `stockEdits`, `booksNeeded`,
+    `playsForSet`), `db.ts` + `extract.ts` (the extractor's DB -> Book core lifted out of tools/playbooks-extract.mts,
+    which is now a thin CLI; regenerated output byte-identical for all 144 files; fixtures in fixtures/real/playbook/).
+  - Worker: migration 0027 `web_playbook_edits` (one row per dynasty/team/side; applied locally, NOT yet remote);
+    queries; `loadTeamBook()` in supersim/coach/books.ts composes the saved edits (cache keyed by the edits text);
+    Supersim freezes the two teams' edits into the game's stored input at kickoff (`SimInput.bookEdits`) and the payload
+    carries `bookUrls` so coach.js fetches the composed book by URL (`bookKey()`); the depth page's formation subs use it
+    too. Routes: GET /d/<slug>/playbook[?t=&side=], GET /playbook/<tgid>/<off|def>.json (x-playbook: custom|stock),
+    POST/DELETE /playbook/<tgid>/<side> (same-origin JSON, 512 KB cap, coach or commissioner, validateEdits -> 400 with
+    problems); bridge web-edits carries `playbooks` + `kind=playbook` acks (consumed in part 4).
+  - Browser: public/js/playbook/art.js (artPath/setFrame/diagram/fam/findPlay moved out of coach.js, which imports
+    them), playbook/playbook.js (four panes: formations, sets, play tiles, the selected play large; pickers to add a
+    formation from any stock book of the side, a set of the formation, a play from any loaded book's copy of the set;
+    reorder/remove; Save / Discard / Back to the stock book; beforeunload guard), css/playbook.css (layout() gained
+    `css: [...]`). Checked on wrangler dev as the local test member: edit -> save -> reload shows CUSTOM and the edits ->
+    the .json endpoint composes them -> DELETE back to stock. coach.js's bookUrls path still wants a real Supersim game.
+  - Drawn plays are stored and validated but dropped at compose until the compiler (part 3) lands.
+- 2026-11-10 ~08:30: Play creator, part 3 of the playbook suite (plan: ~/.claude/plans/shimmying-sparking-wave.md). Offense
+  only; defensive play creation is a later phase.
+  - Calibration (`tools/playbooks-calibrate.mts` -> `packages/ncaa14/src/playbook/conventions.json`, committed; the tool
+    reads the gitignored fixtures/real/playbook/{misc-7,boot-360}.db). Units come straight from EA's play designer table
+    (playdesigner.DB PATY.PDOV is the store scale): distance = yards x 8, direction = turns x 128 (0 = the offense's right,
+    counter-clockwise: 32 downfield, 64 left, 96 back), speed = percent x 2.54 (254 = full), time = seconds x 32, option
+    offsets = yards x 16 -- all confirmed on the stock data (5,827 offensive plays, 64,094 assignments). Cut code 9:
+    val1 1 = turning right (clockwise), 2 = left (4,799 / 4,809 agree, 52 exceptions); val2 by the turn size (22° -> 3,
+    45° -> 1, 67° -> 4, 90° -> 2, comeback -> 7). Delay 25 val1 is 1/32 s (a curl sits 64 = 2 s). Stock shapes copied as
+    templates: route `8 (9 8)* [25] 10`; stalk `8 33(12) 18(2,32) 15`; screen release `14(8) 3 18 14(0,2)`; carry
+    `[25] 26(22,side) 13 3* 1`; PA back `26(1,dir) 13 14`; QB drop gun `3(8,96,254) 7(35)` PLYT 103, under centre
+    `3(30,96,254) 7(3)` PLYT 102, quick `7(16)` PLYT 101, screen `7(36)` PLYT 5, RPO `7(31)` PLYT 6, rollouts
+    `3(33,113) 7(26)` / `3(33,85) 7(27,80,64)` PLYT 7; PA QB `38(2,32,0) 40(back,1,2) 7(0)` PLYT 4; handoff
+    `38(turn by gun/side) 39(carrier,1,2) 5(32)` PLYT 151; read option `12(carrier,12,2) 1` PLYT 169. PLRR roles per
+    kind/position (route roles carry the route type: nearest stock signature by depth/turn/legs/sit is used). Art field
+    widths per segment (ay narrows to 7 bits from segment 9 and 5 bits at 12), 16 steps per program, PLPD rcv in 3 bits
+    (skill slots are 0-5 in every set, the line 6-10). Run hole from where the track crosses the line (even right, odd
+    left, 0 over centre), textbook bands.
+  - Compiler `packages/ncaa14/src/playbook/compile.ts`: DrawnPlay (creator vocabulary route/stalk/block/pblock/release/
+    carry/fake/move + qb/qbpa/handoff/qbopt with options drop/fake/sit/speed/delay) -> per slot PSLO steps (with 255),
+    ARTO segments (feet, screen-down, cap on the last), PLRR; play PLYT/PLF_/vpos/SITT (modal per PLYT), PLPD, PLRD.
+    `compiledToBook()` runs the extractor's own `offenseKind`/`artPath` on the produced rows, so the site's assignments
+    equal what the written rows will extract to. `compileCustom` is composeBook's hook (books.ts composeEdits); the save
+    endpoint runs `compileProblems` and refuses with the messages (400 "Some drawn plays have problems."). Paths are
+    Douglas-Peucker'd to 8 points; legs over 31 yd split; width overflows are reported, never silently clamped into a
+    different route. Tests: packages/ncaa14/test/playbook-compile.test.ts, worker/test/playbook-custom-play.test.ts (the
+    four drawn plays composed and run in the engine against the stock 4-2-5).
+  - Creator UI `worker/public/js/playbook/creator.js` (+ css/playbook.css .cr-*): field canvas (SVG in yards, 10 px/yd,
+    the set's eleven at their SETG spots), click a man -> assignment panel by position (QB: Pass with drop select incl.
+    rollouts/screen/RPO, Play action with the faking back, Handoff, Read option; others: Route with 13 presets mirrored
+    by side + settle/speed/fake-first, Carry with 5 presets + delay/speed, Block (lead when a path is drawn), Pass block,
+    Release, Fake handoff, Stalk, Move; linemen: Block/Pass block/Release), waypoints by clicking the field (8 max,
+    snap 0.5 yd) and dragging handles, Undo/Clear, progression list (first eight slots only, as PLPD), live tile from
+    `previewBook()` (same diagram() as the picker), Save disabled with the first problem shown. playbook.js: "Draw a
+    pass" / "Draw a run" per set, custom tiles with diagrams, Edit from the detail pane, "Start a new play from this one"
+    on a stock play (`drawFromPlay`: kinds and paths from the stock assignments). `h()` moved to art.js.
+  - Checked: harness pages (scratchpad/harness) in headless Chrome: draw -> save -> tile -> edit -> start-from-stock; the
+    local Worker: POST with a drawn play -> 200, the composed .json carries play 40000 with kinds
+    qb/pblock/route x4/pblock x5, the dig path and the progression; a 50-yard point -> 400 with the compiler's message;
+    DELETE -> stock. 123 + new tests pass; typechecks clean (package, worker, bridge).
+  - Not yet: Supersim in a real browser game with a drawn play (engine test covers it), the in-game check E1 (a custom
+    route play written into a donor slot: part 4's writer), pulls/motion/pitch options, defensive drawing.
+
+## 2026-11-10 — Phase 0: the game plays per-book DBs in qkl_fe2ig.ast, not the master DB (poke PASSED on the right entry)
+
+- The first poke (`ncaa-bridge playbook poke`, master DB qkl_misc.ast entry 4e226c292cd63322: PLYL 8714 renamed "ZZ TEST",
+  poso 3 +5 yd) changed nothing in Practice mode: Eric saw "Spacing". RPCS3.log showed the game opening the disc
+  qkl_misc.ast (so the edit reached the file it reads), no hdcache (dev_hdd0/game/BLUS31159/USRDIR/hdcache has only an
+  empty __dataversion), qkl_cache.ast absent, and qkl_patch.ast has no playbook entry. A scan of every entry of the six
+  archives (scratchpad/rtg/scan-archives.mts: partial-inflate + TDB header + play-name strings) found the live data:
+  **152 per-book DBs in qkl_fe2ig.ast** (TOC #757-#913 region, stored, 12-190 KB), one per playbook, 19 tables
+  `ARTL PLCM FORM PBAU PBFM PBST PLRD PSAL SETL SETG SPKF PLYL PBAI PBPL PLPD PLYS SGF SPKG SETP`; 141 equal the site's
+  extracted books play for play (two differ by a few plays: books 191 and 193), 9 are special books no PLAB row names
+  (kicking/practice: 10-221 plays).
+- **Entry names** (FNV-1a 64 of the upper-cased name, no extension; calibrated: "PLAYDESIGNER" -> misc #149): a book's
+  entry is `PLAYBOOK_<PLAB.PBAN>` (143 of 143 match; Holy Cross: TOPB 121 -> PLAB "Spread", PBAN "NCAA_Spread", BOKL 106
+  -> fe2ig #871 hash d2e18fc66f2c9098, 161,884 bytes). The master DB is `CUSTOMPLAYBOOKS` (misc #7), `CUSTOMPLAYBOOKSTEMPLATE`
+  is boot #358 (PBLS), `CUSTOMPLAYBOOK` misc #229, `PLAYDESIGNER` misc #149 (ASDF/PATY). The ELF (private decrypted copy)
+  carries `playbook_%s`, `customplaybooks.db`, `\data\common\database\playbooks\customplaybooks`,
+  `TibMemcardFileCustomPlaybookStrategy`: the master feeds the in-game custom playbook feature (a memcard save), nothing else.
+- **Per-book DB facts** (Holy Cross's): every table full (recordCount == maxRecords); ids are the master's own ids (play
+  682: poso->PSAL identical in both; PSAL 4..5053 sparse, ARTL 0..4932, PLYL 74..20526); PLYS sorted by PSAL, ARTL by
+  ARTL, PLYL/PLPD/PLRD/PLCM by PLYL, PBAI by PBPL, SETL/SETP by SETL, PBPL grouped by set; PSAL rows
+  `val1:9 val2:8 val3:8 PSAL:13 code:8 step:5` (32 steps/program), ARTL 12 segments x `sp ls at ct lt au av ax ay`,
+  PLYS `PSAL ARTL PLYL PLRR poso`, PLYL `SETL PLYL SRMM SITT PLYT PLF_ name:192 risk motn phlp vpos`, PBPL
+  `PKGE COMF PBPL:20 PLYL PBST:16 ord_ name:192 Flag`, PBST `SETL PBFM:14 PBST ord_ name`, PBFM `FAU1-4 PBFM FTYP ord_
+  grid name:400`, PBAI `PBPL SETL AIGR PLYT PLF_ Flag vpos prct`, PBAU `PBPL FTYP PBAU`, PLPD/PLRD as the master, SETG
+  `SETG SETP SGF_ SF__ x___ y___ fx__ fy__ (float32 bits) anm_ dir_ fanm fdir`, SETP `SETL SETP SGT_ arti tabo poso flas
+  DPos EPos fmtx artx fmty arty`, SPKF/SPKG packages, SGF formation-sub groups. **Play names are 24 characters** (192 bits),
+  not the master's 31.
+- **Eric's install plays stock EA books**: the per-book DBs are EA's; the master (sha 3d2cbe..., what the FCS mod ships)
+  is CFBR's edited DB (76 of the Spread book's 359 plays differ by name, e.g. "Slants" vs "*Slot Screen", 9 only by the
+  '*'). CFBR's plays never reach the field here. The site's extracted books come from the master, so the site shows
+  CFBR's names/routes for those 76 plays while the console runs the stock ones (to fix: extract from the per-book DBs).
+- **qkl_fe2ig.ast geometry**: BGFA 1.05, 4,672 entries in offset order (not hash-sorted), record 22 bytes (flags 2, hash
+  8, off 4, csize 4, usize-csize 4), offsets gcd 1 (no alignment), entries packed to EOF, file 3,572,993,720 bytes, offset
+  field 4 bytes -> 721 MB headroom for appended entries.
+- `ncaa-bridge playbook poke-book` (new: team -> TOPB -> PLAB row -> PLAYBOOK_<PBAN> entry) renamed PBPL/PLYL 8714 and
+  pushed poso 3's first code-8 step by 7 yd (val1 20 -> 76) with the art moved 21 ft: 33 bytes, in place, backup
+  2026-11-10T16-44-02-playbook. **Eric: the play shows ZZ TEST and the route is about 10-12 yards** -> the step distance
+  unit is eighths of a yard (76/8 = 9.5 + the cut/sit; feet would have been 25 yd). Both pokes still to restore: RPCS3
+  (pid 17352) was still running when the restore ran (the guard refused).
+- Consequences: LIMITS.nameChars 24 (model.ts, compiler, creator maxlength, conventions.json); CUSTOM_ID_BASE 30000
+  (40000 overflowed the game's u15 PLYL). Part 4 redesign (plan file): a team's private book = its per-book DB cloned,
+  custom plays appended (new PLYL/PBPL/PLYS/PSAL/ARTL/PLPD/PLRD rows with ids above the book's max so the sort orders
+  hold), order/removals applied to PBPL, written into an unused book's `PLAYBOOK_<PBAN>` entry by append + TOC
+  repoint (the entry grows), that PLAB row's BNAM renamed in boot #356 (and misc #151's PLAB copy), TEAM.TOPB pointed at
+  its BGID. No shared-pool allocator, no master DB edits. Defensive books have the same per-book schema (7 of them, all
+  PLAB rows used; a private defensive book needs a repurposed PLAB row with BOFF 0, or PLAB grown the same append way).
+- **E1 PASSED (2026-11-10 ~18:10)**: `ncaa-bridge playbook add-play --team "Holy Cross" --set "5WR Trio" --draw e1-play.json`
+  compiled a site-format drawn play (QB drop-back, post / drag / corner / comeback / 5-yd hitch, five pass blockers,
+  progression) into the Spread per-book DB (packages/ncaa14/src/playbook/bookwrite.ts `addPlays`: PLYL + PBPL + 11 PLYS +
+  5 new PSAL programs + 5 new ARTL rows + PLPD; the stock QB program 607, pass-block program 2424 and block art 3124
+  were reused by content), 161,884 -> 162,556 bytes, written with `appendEntry` (bridge/src/archive-entry.ts: bytes at
+  the end of qkl_fe2ig.ast, 16-aligned, TOC record at 19274 repointed, manifest kind 'append', restore = old record +
+  truncate). Eric: the play shows as the 16th of 5WR Trio and the routes run as drawn. Restored afterwards (file back to
+  3,572,993,720 bytes, entry sha 2c6017ad...). The site now extracts its books from the per-book entries
+  (tools/playbooks-extract.mts default; `--master` for the old path; `PlaybookDb(book, bokl, {boot, master})` with the
+  boot base DB behind the book's tables and the master's BSMO/DPSF for the shared special-teams sets; the SGF table's
+  4CC is 'SGF' + NUL). Formations are in the game's menu order (FTYP group, then ord_), sets by PBST.ord_; 142 of 143
+  books keep their formation/set ids (Virginia's per-book formations differ from the CFBR master), 140 the same play ids
+  (191/193 differ), one Spread set (Trio HB Wk) has a different alignment in the master. Tests: playbook-extract (per-book
+  suite), playbook-bookwrite (round trip, refusals, placement), archive-entry (append / restore / later tail).
+- **E2 PASSED (2026-11-10 ~19:00)**: `ncaa-bridge playbook private --team "Holy Cross" --edits e2-edits.json` (the stock
+  Spread edits with 5WR Trio moved first in Shotgun, "ZZ Private Test" drawn in first and QB Blast dropped, book name
+  "Holy Cross Spread") composed a whole per-book DB (packages/ncaa14/src/playbook/bookcompose.ts `composeBookDb`: the base
+  entry cloned, PBST/PBPL/PBAI rewritten to the edits' order, borrowed formations/plays copied by id, the drawn play
+  appended by `addPlays`, and the result re-extracted and `bookDiff`ed against `composeBook`'s book before anything is
+  written), 162,520 bytes, into the unused book slot PLAB BGID 9 / BOKL 123 ("Ball State", entry PLAYBOOK_NCAA_Ball
+  State) by `appendEntry`; renamed that PLAB row's BNAM in boot #356 and in misc #151's second PLAB copy (19 bytes each,
+  in place); pointed TEAM.TOPB 121 -> 9 in the FCS2026 roster save and the default roster (boot #355). Eric: the book
+  shows under its name, the set order and the drawn play are as composed. Restored afterwards from backup
+  2026-11-10T18-26-31-playbook (fe2ig back to 3,572,993,720 bytes, TOPB 121, both PLAB entries and both rosters put back).
+  Findings on the way: BSMO shared special-teams sets must not get PBST/PBPL rows in a per-book DB (they vanish on
+  re-extract: the game brings them in from the master at run time); a play listed in two sets needs two PBPL rows;
+  `addPlays` must not shift `ord_` when the slot asked for is free (the composer pre-reserves the numbering). The console
+  path is proven end to end: compose from site edits -> private slot -> list rename -> TOPB. What remains is plumbing
+  (bridge pull of the site's pending edits per dynasty, dynasty-file TOPB patch, FCS-online.exe step, PS3 sync).
+
+## 2026-11-10 — Part 4 plumbing: site edits -> host archives -> release -> members (built; first real release still to run)
+
+- `bridge/src/playbook-pack.ts` (new, shared with the installer so its bundle stays light): the slot map
+  `~/.ncaa-bridge/playbooks.json` keyed `<scope>/<tgid>/<side>` (scope `od<DID>` for an online dynasty's edits, `local`
+  for `playbook private` by hand) with per slot `bgid bokl pban donor donorSha name at base{bokl,bgid} sha history[]
+  released taken{file,bgid}`; `renameBookRows` (both PLAB copies, in place), `pointTeamBooks` (TEAM.TOPB/TDPB in the
+  roster save + default roster, only off `from`: the stock book, or the private one on a reset -- a book the coach picked
+  in game stays), `pendingBookPointers(did)` / `markBooksTaken(did, file, fileId)` for the dynasty-file side,
+  `exportPlaybookPack` / `applyPlaybookPack` / `playbookPackStatus` for releases.
+- `ncaa-bridge playbook sync [--did N] [--dry-run]`: GET `/api/bridge/web-edits?od=<did>` -> `playbooks[]` (pending
+  BookEdits rows) + `playbookTeams[]` (every team with edits at all, new in the Worker response); each offensive edit goes
+  through `writePrivateBook` (teamBook by TGID, composeBookDb, slot = the team's / lowest unused offensive BGID,
+  appendEntry, PLAB rename, TOPB) and is acked `POST .../delivered?kind=playbook {sha}`; a team missing from
+  `playbookTeams` whose slot is live is *released* (TOPB back to the base; the slot stays reserved and named). Defensive
+  edits are left pending with a note (no private defensive slot proven yet). Dry run against the local Worker for DID 6
+  (Holy Cross's E2 edits seeded in the local D1): same 162,520-byte book, slot BGID 9, nothing written.
+- Dynasty file: `DynastyPatchSet.playbooks: BookPointer[]` (dynasty-patch.ts `applyPlaybooks`, guarded by `from`, read
+  back after the write); `syncWebEdits` adds `pendingBookPointers(d.id)` to the set and notes the site's waiting book
+  edits ("run ncaa-bridge playbook sync with RPCS3 closed": the watcher never writes archives); `odImportOne` calls
+  `markBooksTaken` so a pointer the console's own upload shows is not re-sent (and a later in-game change is theirs).
+- Release: `installer/build.mjs` runs `playbook export --out generated/playbook-pack.json --blob generated/playbook-pack.bin`
+  (SEA asset `playbook-pack.bin`, manifest `payload.playbooks`; a slot whose archive bytes are not the recorded sha is
+  skipped with a note); `FCS-online.exe` install/join gets a "Playbooks the teams shaped on the site" step after the
+  swaps (appendEntry into the same slot entry, `replaces` = the stock donor's sha + every earlier version written; PLAB
+  renames; TOPB pointers) and `status` lists each book (current / stock donor / earlier / not this build's; who runs it).
+  RELEASE.md and the README gained a bullet. Bundle builds (--no-exe) with 0 books since E2 was restored.
+- PS3 (`private/console-backup-2026-11-08-sync/sync/`): `writeops.STAMP` = today (or SYNC_STAMP), `qkl_misc.ast` added
+  to `sync-archives.py`'s map, new `patch-archive.py <archive> [--write]`: for an archive that only grew (appended entries
+  + repointed TOC records) it verifies the PS3 copy is a prefix (head / middle shas), diffs the TOC region, probes REST+STOR
+  on a scratch file, then writes the tail and the changed TOC bytes with REST and reads every part back; updates
+  archive-hashes.json. Not run yet (needs the PS3 on, in XMB, and Eric's go-ahead; falls back to the full upload).
+- Tests: bridge/test/playbook-pack.test.ts (slot keys, pointers live/released/taken, the dynasty-file patch moving TOPB only
+  off the named books, on the stride-70 dynasty fixture), worker/test/playbook-edits.test.ts (web-edits GET carries
+  `playbooks` + `playbookTeams`). 143 tests pass. The E2 test slot `local/18/off` was dropped from the map after the restore.
+- Still open: defensive private books (BOFF 0 repurpose experiment), the first real release with a private book, PS3 push.

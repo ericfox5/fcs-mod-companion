@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { JERSEY_ZERO_WORDS, ROSTER_STRIDE_WORDS, ROSTER_CAPACITY_WORDS, ROSTER_TABLE_WORDS, LS_GROUP_WORDS, ROSTER_OFFSEASON_WORDS, branch, elfSegments, fileOffset, patchBaseline, rosterStrideWords, rosterCapacityWords, rosterTableWords, lsGroupWords, rosterOffseasonWords, sha256 } from './ps3-eboot.mjs';
+import { JERSEY_ZERO_WORDS, ROSTER_STRIDE_WORDS, ROSTER_CAPACITY_WORDS, ROSTER_TABLE_WORDS, LS_GROUP_WORDS, ROSTER_OFFSEASON_WORDS, GENERIC_HOST_WORDS, branch, elfSegments, fileOffset, parseOptions, patchBaseline, rosterStrideWords, rosterCapacityWords, rosterTableWords, lsGroupWords, rosterOffseasonWords, sha256 } from './ps3-eboot.mjs';
+import { patchOntoAdapter } from './ps3-eboot-onto.mjs';
 
 const originalPath = new URL('../private/EBOOT.elf', import.meta.url);
 const available = fs.existsSync(originalPath);
@@ -174,6 +175,59 @@ test('roster offseason words match their yml entry, apply after the player-table
   assert.equal(output.readUInt32BE(fileOffset(segments, 0x49354c)), branch(0x49354c, 0x3046e4, true), 'training calls the grow-then-copy helper');
   assert.throws(() => patchBaseline(input, { rosterStride: true, rosterCapacity: true, rosterOffseason: true }), /requires/);
   assert.match(manifest.purpose, /offseason/);
+});
+test('generic opponents host words match their yml entry, expect the stock words and touch only their three sites', { skip: !available }, () => {
+  const input = fs.readFileSync(originalPath), segments = elfSegments(input);
+  const entry = ymlEntries()['FCS mod: generic opponents host'];
+  assert.deepEqual(entry, GENERIC_HOST_WORDS.map(([va, , v]) => [va, v]));
+  for (const [va, old] of GENERIC_HOST_WORDS) assert.equal(input.readUInt32BE(fileOffset(segments, va)), old, va.toString(16));
+  const all = { commissioner: true, jerseyZero: true, rosterStride: true, rosterCapacity: true, rosterTable: true, lsGroup: true, rosterOffseason: true };
+  const base = patchBaseline(input, all).output, { output, manifest } = patchBaseline(input, { ...all, genericHost: true });
+  const touched = new Set();
+  for (const [va, , value] of GENERIC_HOST_WORDS) { const o = fileOffset(segments, va); assert.equal(output.readUInt32BE(o), value); for (let i = o; i < o + 4; i++) touched.add(i); }
+  for (let i = 0; i < input.length; i++) if (!touched.has(i)) assert.equal(output[i], base[i], `Unintended change at ${i}`);
+  // no other entry writes these addresses
+  const others = Object.entries(ymlEntries()).filter(([n]) => n !== 'FCS mod: generic opponents host').flatMap(([, w]) => w.map(([va]) => va));
+  for (const [va] of GENERIC_HOST_WORDS) assert.ok(!others.includes(va));
+  assert.match(manifest.purpose, /generic opponents host/);
+});
+test('extra words apply last against the output as patched so far and refuse a wrong original', { skip: !available }, () => {
+  const input = fs.readFileSync(originalPath), segments = elfSegments(input);
+  const [va, old, value] = GENERIC_HOST_WORDS[0];
+  const { output, manifest } = patchBaseline(input, { extraWords: [{ name: 'test entry', words: [[va, old, value]] }] });
+  assert.equal(output.readUInt32BE(fileOffset(segments, va)), value);
+  assert.match(manifest.purpose, /test entry/);
+  assert.throws(() => patchBaseline(input, { extraWords: [{ name: 'bad', words: [[va, old ^ 1, value]] }] }), /current bytes differ/);
+  assert.throws(() => patchBaseline(input, { extraWords: [{ name: 'dup', words: [[va, old, value], [va, old, value]] }] }), /listed twice/);
+  assert.deepEqual(parseOptions(['--commissioner', '--generic-host']), { extraWords: [], commissioner: true, genericHost: true });
+  assert.equal(parseOptions(['--bogus']), null);
+});
+const adapterPath = new URL('../private/BLUS31159-1.02-no-psn-UNSIGNED-probe-a.elf', import.meta.url);
+test('onto the adapter ELF: every entry, adapter bytes untouched, the rest equal to the stock-based build', { skip: !(strideAvailable && fs.existsSync(adapterPath)) }, () => {
+  const stock = fs.readFileSync(originalPath), adapter = fs.readFileSync(adapterPath);
+  const adapterManifest = JSON.parse(fs.readFileSync(new URL(adapterPath.href + '.manifest.json'), 'utf8'));
+  const opts = { commissioner: true, jerseyZero: true, rosterStride: true, rosterCapacity: true, rosterTable: true, lsGroup: true, rosterOffseason: true, genericHost: true };
+  const { output, manifest } = patchOntoAdapter(stock, adapter, adapterManifest, opts);
+  const ref = patchBaseline(stock, opts).output, base = patchBaseline(stock, { commissioner: true }).output;
+  let adapterBytes = 0;
+  for (let i = 0; i < stock.length; i++) {
+    if (adapter[i] !== base[i]) { adapterBytes++; assert.equal(output[i], adapter[i]); } else assert.equal(output[i], ref[i]);
+  }
+  assert.ok(adapterBytes > 1000, 'the adapter hooks and code are present');
+  const cave = adapterManifest.codeOffset, caveEnd = cave + adapterManifest.codeSize;
+  assert.ok(manifest.adapterRanges.some(r => r.offset >= cave && r.offset < caveEnd), 'the code cave is one of the adapter ranges');
+  for (const w of manifest.writes) assert.ok(w.offset + 4 <= cave || w.offset >= caveEnd, 'no added word in the code cave');
+  // every yml word is in the output (the All-Conference and commissioner words came with the adapter build)
+  const segments = elfSegments(adapter);
+  const last = new Map(), writers = new Map(); // yml order = application order; a later entry's word wins
+  for (const [name, words] of Object.entries(ymlEntries())) for (const [va, v] of words) { last.set(va, [name, v]); writers.set(va, [...(writers.get(va) || []), name]); }
+  for (const [va, [name, v]] of last) assert.equal(output.readUInt32BE(fileOffset(segments, va)), v, `${name} ${va.toString(16)}`);
+  // the only address two entries share: the stride entry's word inside the All-Conference window
+  assert.deepEqual([...writers].filter(([, n]) => n.length > 1).map(([va, n]) => [va, n]), [[0x453968, ['FCS mod: preseason All-Conference crash fix', 'FCS mod: 100-player rosters']]]);
+  assert.equal(manifest.baselineWordsAlreadyPresent, 39);
+  assert.ok(manifest.hooks && manifest.titleId === 'BLUS31159' && manifest.outputSha256 === sha256(output));
+  assert.throws(() => patchOntoAdapter(stock, adapter, adapterManifest, { ...opts, commissioner: false }), /commissioner/);
+  assert.throws(() => patchOntoAdapter(stock, output, adapterManifest, opts), /manifest/);
 });
 test('no external immediate branches enter the moved query block', { skip: !available }, () => {
   const input = fs.readFileSync(originalPath);

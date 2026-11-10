@@ -16,3 +16,5 @@ export * from './playoff.js';
 export * from './roster.js';
 export * from './generic-swap.js';
 export * from './stda.js';
+export * from './playbook/index.js';
+export * from './fnv.js';

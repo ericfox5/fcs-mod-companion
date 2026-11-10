@@ -9,7 +9,9 @@
 //   GET  /d/<slug>/supersim/<week>/<game_no>       page shell for that game (coach it when it is yours, else watch)
 //   GET  /d/<slug>/supersim/watch/<week>/<game_no> page shell, watching
 //   GET  /d/<slug>/supersim/data[?game=<week>:<game_no>[&watch=1]]
-//        { input, you, watch, controls, coaches, opponentHuman, books, state, recent, version, final, liveGames? }
+//        { input, you, watch, controls, coaches, opponentHuman, books, bookUrls, state, recent, version, final, liveGames? }
+//        books: stock book ids per side [away, home]; bookUrls: the same shape, the URL of a team's composed book
+//        (/d/<slug>/playbook/<tgid>/<off|def>.json) where its coach saved playbook edits, else null (load the stock book)
 //        or, for a member with no game to show, { noGame: message, liveGames }
 //   POST /d/<slug>/supersim/data[?game=...]  { action: 'start' | 'play' | 'auto' | 'delay' | 'timeout' | 'tempo' | 'abandon', version, play?, tempo?, plays?, elapsed? }
 //
@@ -27,7 +29,9 @@ import { syntheticRoster, autoDepthChart } from './generic.js';
 import { html, page } from '../html.js';
 import { allowedGame, sameOrigin } from './access.js';
 import { bracketGameFor, bracketControls, finishBracketGame, type BracketGame } from './playoff-games.js';
-import { loadBook, loadIndex, teamBooks } from './coach/books.js';
+import { loadBook, loadIndex, teamBooks, loadTeamBook, composeEdits } from './coach/books.js';
+import { playbookJsonUrl } from '../pages/playbook-edit.js';
+import type { BookEdits } from '@ncaa/ncaa14';
 import { newGame, runPlay, mulberry32, type Rng, coinToss, tossChoice, cpuTossChoice, expirePlayClock, rollPlayClock, PLAY_CLOCK, PLAY_CLOCK_SHORT } from './coach/engine.js';
 import { cpuOffense, cpuDefense } from './coach/cpu.js';
 import { buildResult, buildEnvelope, sideOf } from './coach/result.js';
@@ -39,6 +43,11 @@ const fail = (msg: string, status: number) => Object.assign(new Error(msg), { st
 const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
 // seconds the play clock has really been running on the server: since the huddle began, less the playback allowance
 const huddleElapsed = (st: GameState) => (st.huddle ? (Date.now() - st.huddle.at) / 1000 - st.huddle.allow : 0);
+// The stored input also freezes each team's playbook edits (web_playbook_edits, the site's Playbook page) as they stood at
+// kickoff, per side ([away, home]), so a game is played from one book throughout; the browser gets bookUrls instead
+// (slimInput). null: the team runs its stock book (offBook / defBook).
+type BookEditsPair = { off: BookEdits | null; def: BookEdits | null };
+export type SimInput = GameInput & { bookEdits?: [BookEditsPair, BookEditsPair] };
 type Run = { id: string; status: string; input_json: string; result_json: string; envelope_json: string };
 type LiveRow = { dynasty_id: number; season_year: number; week: number; game_no: number; snapshot_id: number; home_tgid: number; away_tgid: number; started_by: number; status: string; version: number; input_json: string; state_json: string };
 interface Pending { side: Side; play: number; tempo: GameState['tempo']; by: number }
@@ -121,10 +130,10 @@ export async function listLiveGames(env: SimEnv, dyn: Dynasty, members: MemberRo
   return rows.map((r) => ({ week: r.week, gameNo: r.game_no, home: team(r.home_tgid), away: team(r.away_tgid), score: [r.a ?? 0, r.h ?? 0], q: r.q ?? 1, clock: r.clock ?? 0, coaches: coachNames(members, r.away_tgid, r.home_tgid) }));
 }
 
-export async function buildInput(env: SimEnv, dyn: Dynasty, game: GameRow, ownedTeamId: number, origin: string): Promise<GameInput> {
+export async function buildInput(env: SimEnv, dyn: Dynasty, game: GameRow, ownedTeamId: number, origin: string): Promise<SimInput> {
   const index = await loadIndex(env.ASSETS, origin);
   const edits = await listPendingPlayerEdits(env.DB, dyn.id); // site edits the console has not loaded yet count here
-  const teams = await Promise.all([game.away_tgid, game.home_tgid].map(async (tgid): Promise<TeamInput> => {
+  const built = await Promise.all([game.away_tgid, game.home_tgid].map(async (tgid): Promise<{ team: TeamInput; bookEdits: BookEditsPair }> => {
     const [team, players, consoleChart, consoleSubs, pendingChart] = await Promise.all([getTeam(env.DB, dyn.id, tgid), getPlayers(env.DB, dyn.id, tgid), getDepthChart(env.DB, dyn.id, tgid, dyn.current_snapshot_id), getFormationSubs(env.DB, dyn.id, tgid, dyn.current_snapshot_id), getPendingDepthEdit(env.DB, dyn.id, tgid, dyn.season_year, dyn.week ?? 0)]);
     if (!team) throw fail('Team missing from the current snapshot.', 409);
     // a pending redshirt / position / jersey change applies at once (a transfer the game sat down plays once un-redshirted)
@@ -139,8 +148,10 @@ export async function buildInput(env: SimEnv, dyn: Dynasty, game: GameRow, owned
         if (subs.length) fsubs = Object.fromEntries(subs.map((s) => [subKey(s.side === 'off' ? 'o' : 'd', s.set, s.slot), s.pgid]));
       } catch { /* malformed edit: the console's chart */ }
     } else if (consoleSubs.length) fsubs = Object.fromEntries(consoleSubs.map((s) => [subKey(s.side === 1 ? 'o' : 'd', s.set_id, s.slot), s.pgid]));
-    let raw: Record<string, unknown> | null = null; try { raw = JSON.parse((team as unknown as { raw_json?: string }).raw_json || 'null'); } catch { /* ignore */ }
-    const books = teamBooks(index, raw);
+    let raw: Record<string, unknown> | null = null; try { raw = JSON.parse(team.raw_json || 'null'); } catch { /* ignore */ }
+    const books = teamBooks(index, raw); // the stock book ids stay the browser's `books`; edits saved on the Playbook page ride along frozen (bookEdits)
+    const [offTb, defTb] = await Promise.all([loadTeamBook(env, origin, dyn.id, team, 'off'), loadTeamBook(env, origin, dyn.id, team, 'def')]);
+    const bookEdits: BookEditsPair = { off: offTb.custom ? offTb.edits : null, def: defTb.custom ? defTb.edits : null };
     const eligible = players.filter((p) => p.redshirt !== 1);
     let roster: PlayerInput[] = eligible.map((p) => ({ id: p.pgid, name: `${p.first_name} ${p.last_name}`, number: p.jersey, photoUrl: headshotUrl(p), pos: p.pos, overall: p.overall, ratings: JSON.parse(p.ratings_json || '{}') }));
     // the game keeps no roster (and no depth chart) for the generic FCS slots; Supersim plays them with placeholders
@@ -148,16 +159,38 @@ export async function buildInput(env: SimEnv, dyn: Dynasty, game: GameRow, owned
     if (synthetic) { roster = syntheticRoster(tgid, `${dyn.id}:${dyn.season_year}`); depthChart = autoDepthChart(roster); }
     else if (!depthChart.length) depthChart = autoDepthChart(roster);
     if (!depthChart.length) throw fail(`Depth chart missing for ${team.name}; sync the dynasty before simulating.`, 409);
-    return { id: tgid, name: team.name, abbr: team.abbr, logo: teamLogoUrl(team, 'lg'), offBook: books.offBook, defBook: books.defBook, depthChart, ...(fsubs ? { fsubs } : {}), players: roster, ...(synthetic ? { synthetic: true } : {}) };
+    return { team: { id: tgid, name: team.name, abbr: team.abbr, logo: teamLogoUrl(team, 'lg'), offBook: books.offBook, defBook: books.defBook, depthChart, ...(fsubs ? { fsubs } : {}), players: roster, ...(synthetic ? { synthetic: true } : {}) }, bookEdits };
   }));
-  return { dynasty: dyn.name, dynastyId: dyn.id, season: dyn.season_year, week: game.week, gameNo: game.game_no, gameId: `${dyn.id}:${dyn.season_year}:${game.week}:${game.game_no}`, snapshot: dyn.current_snapshot_id, ownedTeamId, quarterSeconds: quarterSecondsFor(env, dyn), teams: [teams[0]!, teams[1]!], backUrl: `/d/${dyn.slug}/game/${game.week}/${game.game_no}`, home: game.home_tgid, away: game.away_tgid };
+  const [away, home] = built as [typeof built[number], typeof built[number]];
+  const anyEdits = built.some((b) => b.bookEdits.off || b.bookEdits.def);
+  return { dynasty: dyn.name, dynastyId: dyn.id, season: dyn.season_year, week: game.week, gameNo: game.game_no, gameId: `${dyn.id}:${dyn.season_year}:${game.week}:${game.game_no}`, snapshot: dyn.current_snapshot_id, ownedTeamId, quarterSeconds: quarterSecondsFor(env, dyn), teams: [away.team, home.team], backUrl: `/d/${dyn.slug}/game/${game.week}/${game.game_no}`, home: game.home_tgid, away: game.away_tgid, ...(anyEdits ? { bookEdits: [away.bookEdits, home.bookEdits] as [BookEditsPair, BookEditsPair] } : {}) };
 }
-// the browser does not need every rating: strip them (they stay in the stored input for the engine)
-const slimInput = (input: GameInput) => ({ ...input, teams: input.teams.map((t) => ({ ...t, players: t.players.map(({ ratings: _r, ...p }) => p) })) });
+// the browser does not need every rating (they stay in the stored input for the engine) nor the frozen playbook edits (it
+// loads the composed book from bookUrls): strip them
+const slimInput = ({ bookEdits: _e, ...input }: SimInput) => ({ ...input, teams: input.teams.map((t) => ({ ...t, players: t.players.map(({ ratings: _r, ...p }) => p) })) });
+// where the browser loads a team's book of one side: the composed book when the team's edits were frozen into this game, else null (the stock book by id)
+const bookUrls = (slug: string, input: SimInput): { off: [string | null, string | null]; def: [string | null, string | null] } => {
+  const one = (side: Side, kind: 'off' | 'def') => (input.bookEdits?.[side]?.[kind] ? playbookJsonUrl(slug, input.teams[side].id, kind) : null);
+  return { off: [one(0, 'off'), one(1, 'off')], def: [one(0, 'def'), one(1, 'def')] };
+};
 
-async function booksFor(env: SimEnv, origin: string, input: GameInput, st: GameState): Promise<{ off: Book; def: Book }> {
+// The book one sideline plays from, as frozen at kickoff: composed from the edits in the live input (cached per isolate by
+// live game and side), else the stock book by id. Edits that stop composing mid-game fall back to the stock book.
+const frozen = new Map<string, Promise<Book>>();
+function sideBook(env: SimEnv, origin: string, input: SimInput, st: GameState, side: Side, kind: 'off' | 'def'): Promise<Book> {
+  const t = input.teams[side]; const stockId = kind === 'off' ? t.offBook : t.defBook; const edits = input.bookEdits?.[side]?.[kind];
+  if (!edits) return loadBook(env.ASSETS, origin, stockId);
+  const key = `${st.id}:${side}:${kind}`; let p = frozen.get(key);
+  if (!p) {
+    p = composeEdits(env.ASSETS, origin, edits).catch((e: Error) => { console.error(`frozen playbook edits of game ${st.id} (${kind}, side ${side}) do not compose; using the stock book: ${e.message}`); return loadBook(env.ASSETS, origin, stockId); });
+    if (frozen.size > 64) frozen.clear();
+    frozen.set(key, p); p.catch(() => frozen.delete(key));
+  }
+  return p;
+}
+async function booksFor(env: SimEnv, origin: string, input: SimInput, st: GameState): Promise<{ off: Book; def: Book }> {
   const off: Side = st.phase === 'kickoff' ? st.kicking! : st.off; const def = (1 - off) as Side;
-  const [o, d] = await Promise.all([loadBook(env.ASSETS, origin, input.teams[off].offBook), loadBook(env.ASSETS, origin, input.teams[def].defBook)]);
+  const [o, d] = await Promise.all([sideBook(env, origin, input, st, off, 'off'), sideBook(env, origin, input, st, def, 'def')]);
   return { off: o, def: d };
 }
 // the side that must choose next on each sideline: on kickoffs the kicking team "has the ball"
@@ -191,14 +224,14 @@ export async function handleSupersim(req: Request, env: SimEnv, dyn: Dynasty, re
     }
     const { member, members, game, run, live, other, watch, bracket, drive } = cur;
     const payload = async (liveRow: LiveRow | null, extra: Record<string, unknown> = {}) => {
-      const input: GameInput = liveRow ? JSON.parse(liveRow.input_json) : await buildInput(env, dyn, game, member.tgid, origin);
+      const input: SimInput = liveRow ? JSON.parse(liveRow.input_json) : await buildInput(env, dyn, game, member.tgid, origin);
       const st: LiveState | null = liveRow ? JSON.parse(liveRow.state_json) : null;
       const you = watch || drive ? null : sideOf(input, member.tgid);
       const pending = st?.pending ?? null;
       // a bracket game's final lives in the playoff state, not the console outbox
       const bracketFinal = bracket && st && liveRow?.status === 'final' ? { id: st.id, status: 'playoff', result: buildResult(st, input) } : null;
       const coaches = coachNames(members, input.teams[0].id, input.teams[1].id);
-      return { input: slimInput(input), you, watch: watch || drive, drive, bracket: bracket ? { round: bracket.game.round, idx: bracket.game.idx, open: bracket.open } : null, controls: you === null ? [] : [you], coaches, opponentHuman: watch ? coaches.every((c) => c !== 'CPU') : !!other, books: { off: [input.teams[0].offBook, input.teams[1].offBook], def: [input.teams[0].defBook, input.teams[1].defBook] }, state: st ? { ...st, pending: undefined, recent: undefined } : null, recent: st?.recent ?? [], pendingSide: pending ? pending.side : null, pendingMine: pending ? pending.by === member.blaze_id : false, version: liveRow?.version ?? 0, status: liveRow?.status ?? null, final: run ? { id: run.id, status: run.status, result: JSON.parse(run.result_json) } : bracketFinal, now: Date.now(), ...extra };
+      return { input: slimInput(input), you, watch: watch || drive, drive, bracket: bracket ? { round: bracket.game.round, idx: bracket.game.idx, open: bracket.open } : null, controls: you === null ? [] : [you], coaches, opponentHuman: watch ? coaches.every((c) => c !== 'CPU') : !!other, books: { off: [input.teams[0].offBook, input.teams[1].offBook], def: [input.teams[0].defBook, input.teams[1].defBook] }, bookUrls: bookUrls(dyn.slug, input), state: st ? { ...st, pending: undefined, recent: undefined } : null, recent: st?.recent ?? [], pendingSide: pending ? pending.side : null, pendingMine: pending ? pending.by === member.blaze_id : false, version: liveRow?.version ?? 0, status: liveRow?.status ?? null, final: run ? { id: run.id, status: run.status, result: JSON.parse(run.result_json) } : bracketFinal, now: Date.now(), ...extra };
     };
     if (req.method === 'GET') return reply(await payload(live, live ? {} : { liveGames: await listLiveGames(env, dyn, members) }));
     if (req.method !== 'POST') return reply({ error: 'Method not allowed' }, 405);
@@ -230,7 +263,7 @@ export async function handleSupersim(req: Request, env: SimEnv, dyn: Dynasty, re
     }
     if (live.status === 'final') return reply(await payload(live));
     if (!Number.isInteger(body.version) || body.version !== live.version) return reply({ error: 'The game moved on since you loaded it. Reloading…', stale: true, ...(await payload(live)) }, 409);
-    const input: GameInput = JSON.parse(live.input_json); const st: LiveState = JSON.parse(live.state_json);
+    const input: SimInput = JSON.parse(live.input_json); const st: LiveState = JSON.parse(live.state_json);
     const you: Side | null = sideOf(input, member.tgid) ?? (drive ? 0 : null); if (you === null) return reply({ error: 'You are not part of this game.' }, 403); // a driver stands in on the away sideline; the CPU calls both
     const rng: Rng = mulberry32(crypto.getRandomValues(new Uint32Array(1))[0]!); // fresh randomness every call: nothing is predetermined
     const details: PlayDetail[] = [];

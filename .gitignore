@@ -26,6 +26,8 @@ archive/logos/
 spike/blaze/server/certs/
 # the NCAA Division I FCS mark in the header is a fair-use file from Wikipedia; add your own copy locally
 worker/public/img/fcs-logo.svg
+worker/public/img/fcs-header.png
+worker/public/img/fcs-header-mark.png
 # stray local images at the repo root
 /*.jpg
 /*.jpeg

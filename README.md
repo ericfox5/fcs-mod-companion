@@ -24,6 +24,9 @@ news update every time the league advances a week.
   the servers down.
 - **A league website.** Every member gets an account on [fcs-mod.online](https://fcs-mod.online) with the league's
   schedule, scores, rankings, rosters, depth charts, player stats, awards, recruiting boards and news stories.
+- **Your own playbook.** Shape your team's book on the site (formations from any stock book, the sets and plays you
+  want, in your order, and plays you draw yourself). The site's game sim uses it at once; your console gets it with the
+  next FCS-online release.
 - **90-man rosters.** Teams carry 90 players during the season (up to 99 in the offseason, then cut back to 90),
   instead of the game's usual 70. 70 still dress for each game.
 - **The 2026 FCS roster**, with up to 90 real players per team.

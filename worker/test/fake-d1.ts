@@ -1,7 +1,8 @@
 // A tiny in-memory stand-in for D1 covering the SQL the Supersim handler runs (routes.ts and the db/queries.ts
 // helpers it calls): SELECT / INSERT / UPDATE / DELETE over one table with `col = ?` AND-chains (one level of OR in
-// parentheses), literal comparisons, IS NULL, json_extract columns, ORDER BY, the supersim_schedule view and the
-// final's INSERT ... SELECT. Anything else throws, so a new statement in the handler is noticed by the tests.
+// parentheses), literal comparisons, IS NULL, json_extract columns, ORDER BY, the supersim_schedule view, the
+// final's INSERT ... SELECT and the web_* edit tables' upsert (INSERT ... ON CONFLICT DO UPDATE SET, autoincrement ids).
+// Anything else throws, so a new statement in the handler is noticed by the tests.
 export type Row = Record<string, unknown>;
 export interface FakeTables { [table: string]: Row[] }
 const KEYS: Record<string, string[]> = { supersim_live: ['dynasty_id', 'season_year', 'week', 'game_no'], supersim_games: ['dynasty_id', 'season_year', 'week', 'game_no'] };
@@ -17,6 +18,7 @@ export class FakeD1 {
   prepare(sql: string) { return new FakeStmt(this, sql.replace(/\s+/g, ' ').trim()); }
   batch(stmts: FakeStmt[]) { return Promise.all(stmts.map((s) => s.run())); }
   table(name: string): Row[] { return (this.tables[name] ??= []); }
+  nextId(name: string): number { return Math.max(0, ...this.table(name).map((r) => Number(r.id) || 0)) + 1; } // AUTOINCREMENT (ids of deleted rows may be reused here)
   // the supersim_schedule view: games with an official Supersim result laid over them (migration 0017)
   view(name: string): Row[] {
     if (name !== 'supersim_schedule') return this.table(name);
@@ -96,12 +98,21 @@ export class FakeStmt {
   private write(): number {
     this.db.log.push(this.sql); const sql = this.sql; let m: RegExpExecArray | null;
     if ((m = /^INSERT INTO supersim_games\((.+?)\) SELECT /i.exec(sql))) return this.insertFinal();
-    if ((m = /^INSERT( OR IGNORE)? INTO (\w+)\s*\(([^)]*)\)\s*VALUES\s*\(([^)]*)\)$/i.exec(sql))) {
-      const table = m[2]!, cols = m[3]!.split(',').map((c) => c.trim()); const vals = m[4]!.split(',').map((v) => v.trim()); let pi = 0;
+    // INSERT [OR IGNORE] INTO t (cols) VALUES (?, 'lit', NULL, datetime('now'), ...) [ON CONFLICT(keys) DO UPDATE SET col = excluded.col | datetime('now') | NULL | ?]
+    if ((m = /^INSERT( OR IGNORE)? INTO (\w+)\s*\(([^)]*)\)\s*VALUES\s*\((.+?)\)(?: ON CONFLICT\s*\(([^)]*)\)\s*DO UPDATE SET (.+))?$/i.exec(sql))) {
+      const table = m[2]!, cols = m[3]!.split(',').map((c) => c.trim()); const vals = splitTop(m[4]!, ',').map((v) => v.trim()); let pi = 0;
+      const lit = (v: string): unknown => (v === '?' ? this.params[pi++] : v.startsWith("'") ? v.slice(1, -1) : v === 'NULL' ? null : /^datetime\('now'\)$/i.test(v) ? now() : Number(v));
       const row: Row = { ...(DEFAULTS[table]?.() ?? {}) };
-      cols.forEach((c, i) => { const v = vals[i]!; row[c] = v === '?' ? this.params[pi++] : v.startsWith("'") ? v.slice(1, -1) : v === 'NULL' ? null : Number(v); });
-      const keys = KEYS[table]; const rows = this.db.table(table);
-      if (keys && rows.some((r) => keys.every((k) => r[k] === row[k]))) { if (m[1]) return 0; throw new Error(`fake D1: UNIQUE constraint failed: ${table}`); }
+      cols.forEach((c, i) => { row[c] = lit(vals[i]!); });
+      const keys = m[5] ? m[5].split(',').map((k) => k.trim()) : KEYS[table]; const rows = this.db.table(table);
+      const dup = keys ? rows.find((r) => keys.every((k) => r[k] === row[k])) : undefined;
+      if (dup) {
+        if (m[1]) return 0;
+        if (!m[6]) throw new Error(`fake D1: UNIQUE constraint failed: ${table}`);
+        for (const a of splitTop(m[6], ',')) { const [col, expr] = a.split('=').map((s) => s.trim()) as [string, string]; const ex = /^excluded\.(\w+)$/i.exec(expr); if (ex) dup[col] = row[ex[1]!]; else if (/^datetime\('now'\)$/i.test(expr)) dup[col] = now(); else if (expr === 'NULL') dup[col] = null; else if (expr === '?') dup[col] = this.params[pi++]; else throw new Error(`fake D1: unsupported upsert SET "${a}"`); }
+        return 1;
+      }
+      if (table.startsWith('web_') && row.id === undefined) row.id = this.db.nextId(table);
       rows.push(row); return 1;
     }
     if ((m = /^UPDATE (\w+) SET (.+?) WHERE (.+)$/i.exec(sql))) {

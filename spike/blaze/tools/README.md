@@ -38,3 +38,11 @@ All scripts take the decrypted `private/EBOOT.elf` as first argument and never m
   126 x 70 = 8,820 players. Training Players' snapshot now goes through the game's grow-then-copy helper (`0x3046e4`;
   before, a full table made training silently skip), graduation's temporary table 8,820 -> 13,000 rows, the recruiting
   player lists 126 x 70 -> 126 x 100. `ps3-eboot.mjs ... --roster-offseason` (after `--roster-table`).
+- `ps3-eboot.mjs ... --generic-host` bakes "FCS mod: generic opponents host" (three words); `--extra-words FILE.json`
+  (any number of times) bakes a words file kept outside the repo (`{ name, words: [{ va, old, new }] }`), last, each word
+  checked against the output as patched so far.
+- `ps3-eboot-onto.mjs STOCK.elf ADAPTER.elf NEW.elf --commissioner [other ps3-eboot.mjs options]` (Node) – the same
+  words baked into a no-PSN adapter ELF (`ps3-np-adapter.py` output, which already carries the All-Conference fix and
+  the five-dynasty limit). Checks that the adapter ELF holds those baseline words, that no new word touches a byte the
+  adapter changed (hooks, code cave, program headers), and that the result equals the stock-based build everywhere else.
+  Then sign it with `package-np-self.py` (docs/ps3-no-psn-research.md).

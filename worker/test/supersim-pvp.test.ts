@@ -85,6 +85,7 @@ describe.skipIf(!have)('Supersim over HTTP: two members, a spectator, one final'
     const a = await call(alice, 'GET', undefined, ''); // no ?game: her current-week game
     expect(a.status).toBe(200); expect(a.data.state).toBeNull(); expect(a.data.you).toBe(0); expect(a.data.controls).toEqual([0]); expect(a.data.watch).toBe(false);
     expect(a.data.opponentHuman).toBe(true); expect(a.data.coaches).toEqual(['Alice', 'Bob']); expect(a.data.liveGames).toEqual([]); expect(a.data.input.gameNo).toBe(1);
+    expect(a.data.bookUrls).toEqual({ off: [null, null], def: [null, null] }); expect(a.data.input.bookEdits).toBeUndefined(); // no playbook edits saved: stock books by id
     const c = await call(cara, 'GET', undefined, ''); expect(c.status).toBe(200); expect(c.data.noGame).toMatch(/No eligible/); expect(c.data.liveGames).toEqual([]);
     const c2 = await call(cara, 'GET'); expect(c2.status).toBe(200); expect(c2.data.noGame).toMatch(/not being played/); // nothing live yet
     const anon = await call(null, 'GET'); expect(anon.status).toBe(401);

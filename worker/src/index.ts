@@ -24,6 +24,8 @@ import { handleSupersim, type SimEnv } from './supersim/routes.js';
 import { playerEditAction } from './pages/player-edit.js';
 import { transfersPage, transferAction } from './pages/transfers.js';
 import { depthPage, depthAction } from './pages/depth.js';
+import { playbookPage } from './pages/playbook.js';
+import { playbookBookJson, playbookEditAction } from './pages/playbook-edit.js';
 import { recruitPage, recruitEditAction, overhaulAction } from './pages/recruit-edit.js';
 import { currentMember, memberCookie, redirect } from './session.js';
 import { loginPage, loginAction, logoutAction } from './pages/login.js';
@@ -54,8 +56,12 @@ export default {
         const auth = await currentMember(req, env.DB, dyn.id);
         const { member, members, account, locked } = auth;
         if (parts[2] === 'supersim') return handleSupersim(req, env as SimEnv, dyn, parts[3], auth.account ? auth.member : null, parts.slice(4)); // official game sim: signed-in account required; parts[3] is 'data', 'watch' or a week
+        const actx = { env, dyn, url, req, member, members, account, locked }; // accounts: login / logout / join / invites (pages/login.ts, join.ts, members.ts)
+        if (parts[2] === 'playbook' && parts[3] && parts[4] && !parts[5]) { // the Playbook page's JSON side (pages/playbook-edit.ts): the team's composed book; save / discard its edits
+          if (parts[4] === 'off.json' || parts[4] === 'def.json') return playbookBookJson(actx, Number(parts[3]), parts[4].slice(0, 3));
+          if ((parts[4] === 'off' || parts[4] === 'def') && (req.method === 'POST' || req.method === 'DELETE')) return playbookEditAction(actx, Number(parts[3]), parts[4]);
+        }
         if (req.method === 'POST') {
-          const actx = { env, dyn, url, req, member, members, account, locked }; // accounts: login / logout / join / invites (pages/login.ts, join.ts, members.ts)
           if (parts[2] === 'login' && !parts[3]) return loginAction(actx, await req.formData());
           if (parts[2] === 'logout' && !parts[3]) return logoutAction(actx, await req.formData());
           if (parts[2] === 'join' && !parts[3]) return joinAction(actx, await req.formData());
@@ -86,6 +92,7 @@ export default {
           case 'bracket': return bracketPage(ctx);
           case 'rosters': return rostersPage(ctx, parts[3] ? Number(parts[3]) : undefined);
           case 'depth': return depthPage(ctx, parts[3] ? Number(parts[3]) : undefined);
+          case 'playbook': return playbookPage(ctx, parts[3] ? Number(parts[3]) : undefined, url.searchParams.get('side') ?? undefined);
           case 'player': return playerPage(ctx, Number(parts[3]));
           case 'stats': return statsPage(ctx);
           case 'stories': return parts[3] === 'new' ? storyFormPage(ctx) : parts[3] && parts[4] === 'edit' ? storyFormPage(ctx, Number(parts[3])) : storiesPage(ctx);

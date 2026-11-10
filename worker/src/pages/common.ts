@@ -21,6 +21,16 @@ export const headshot = (p: { photo_key?: string | null; head_id?: number | null
 export const teamLogoUrl = (t: { logo_key?: string | null; abbr?: string }, size: 'xs' | 'sm' | 'md' | 'lg' = 'sm') => t.logo_key ? `/img/logos/${t.logo_key.replace(/^teams[/]/, size === 'lg' ? 'teams160/' : 'teams64/')}` : `/img/logos/teams/none.png?t=${encodeURIComponent(t.abbr ?? '?')}`;
 export const teamLogo = (t: { logo_key?: string | null; abbr?: string; name?: string } | undefined, size: 'xs' | 'sm' | 'md' | 'lg' = 'sm') =>
   t ? html`<img class="tlogo ${size}" src="${teamLogoUrl(t, size)}" alt="" loading="lazy" decoding="async" width="${size === 'lg' ? 72 : size === 'md' ? 32 : size === 'xs' ? 16 : 20}" height="${size === 'lg' ? 72 : size === 'md' ? 32 : size === 'xs' ? 16 : 20}">` : html``;
+// Team colours from the TEAM row (TBCR/TBCG/TBCB primary, TB2R/TB2G/TB2B secondary), as CSS hex, with a text colour
+// that reads on the primary. Falls back to the site's ink and white when the row has none.
+export function teamColors(rawJson: string | null | undefined): { primary: string; secondary: string; onPrimary: string } {
+  let r: Record<string, unknown> = {}; try { r = JSON.parse(rawJson || '{}') ?? {}; } catch { /* none */ }
+  const chan = (k: string) => { const v = Number(r[k]); return Number.isInteger(v) && v >= 0 && v <= 255 ? v : null; };
+  const hex = (keys: [string, string, string]) => { const c = keys.map(chan); return c.every((v) => v !== null) ? `#${c.map((v) => v!.toString(16).padStart(2, '0')).join('')}` : null; };
+  const primary = hex(['TBCR', 'TBCG', 'TBCB']) ?? '#1d1d1d', secondary = hex(['TB2R', 'TB2G', 'TB2B']) ?? '#ffffff';
+  const lum = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)).reduce((a, v, i) => a + v * [0.2126, 0.7152, 0.0722][i]!, 0);
+  return { primary, secondary, onPrimary: lum(primary) > 0.4 ? '#111111' : '#ffffff' };
+}
 export const confLogo = (c: { logo_key?: string | null; name: string } | undefined, size: 'sm' | 'md' = 'sm') =>
   c?.logo_key ? html`<img class="tlogo ${size} conf" src="/img/logos/${c.logo_key.replace(/^conf[/]/, 'conf64/')}" alt="" loading="lazy" decoding="async" width="22" height="22">` : html``;
 export const confTitle = (c: { logo_key?: string | null; name: string }) => html`${confLogo(c)}${c.name}`;

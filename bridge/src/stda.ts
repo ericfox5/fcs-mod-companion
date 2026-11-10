@@ -23,12 +23,19 @@ export const STDA_BACKUP_ROOT = join(process.env.LOCALAPPDATA ?? join(homedir(),
 // bytes), u32 widths2 @0x24 (compressed / size-delta widths), u32 prefixWords @0x28, u32 nameWidth @0x2c; TOC records
 // {u16 flags, hash, offset, csize, usize - csize, name}, little endian.
 export interface ArchiveEntry { index: number; hash: bigint; off: number; csize: number; usize: number; recordOffset: number; recordLength: number }
-export function archiveToc(fd: number): ArchiveEntry[] {
-  const read = (off: number, len: number) => { const b = Buffer.alloc(len); readSync(fd, b, 0, len, off); return b; };
-  const head = read(0, 0x40);
+export interface ArchiveLayout { tocOff: number; tocSize: number; pw: number; nw: number; offW: number; hashW: number; csW: number; usW: number; rec: number }
+// the header's TOC geometry: where the records are, the byte widths of their fields (a record is flags u16, hash, offset,
+// csize, usize - csize, name)
+export function archiveLayout(fd: number): ArchiveLayout {
+  const head = Buffer.alloc(0x40); readSync(fd, head, 0, 0x40, 0);
   if (head.toString('latin1', 0, 8) !== 'BGFA1.05') throw new Error('not a BGFA 1.05 archive');
   const tocOff = head.readUInt32LE(0x10), tocSize = head.readUInt32LE(0x18), w8 = head.readUInt32LE(0x20), w9 = head.readUInt32LE(0x24), pw = head.readUInt32LE(0x28), nw = head.readUInt32LE(0x2c);
-  const offW = (w8 >>> 24) & 255, hashW = (w8 >>> 16) & 255, csW = (w9 >>> 8) & 255, usW = w9 & 255, rec = 2 + hashW + offW + csW + usW + nw;
+  const offW = (w8 >>> 24) & 255, hashW = (w8 >>> 16) & 255, csW = (w9 >>> 8) & 255, usW = w9 & 255;
+  return { tocOff, tocSize, pw, nw, offW, hashW, csW, usW, rec: 2 + hashW + offW + csW + usW + nw };
+}
+export function archiveToc(fd: number): ArchiveEntry[] {
+  const read = (off: number, len: number) => { const b = Buffer.alloc(len); readSync(fd, b, 0, len, off); return b; };
+  const { tocOff, tocSize, pw, offW, hashW, csW, usW, rec } = archiveLayout(fd);
   const toc = read(tocOff, tocSize), out: ArchiveEntry[] = [];
   const n = (p: number, w: number) => { let v = 0n; for (let i = w - 1; i >= 0; i--) v = (v << 8n) | BigInt(toc[p + i]!); return v; };
   for (let p = pw * 4; p + rec <= tocSize; p += rec) {

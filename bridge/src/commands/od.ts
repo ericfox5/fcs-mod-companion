@@ -21,6 +21,7 @@ import { saveConfigKey, refreshConfig } from '../config.js';
 import { postseasonRows, fieldFilled, weeksApplied, selectField, nextRoundGames, winnerOf, mergeSiteResults, consoleOutcome, playoffDiff, siteState, autoBids, overlayPlayoff, ROUND_WEEKS, PLAYOFF_ROWS, BOWL_SEASON_WEEK, SEASON_OVER_WEEK, type PlayoffMemo, type PlayoffPatch, type SiteGame } from '../playoff.js';
 import { roundName } from '@ncaa/ncaa14';
 import type { TdbFile } from '@ncaa/tdb';
+import { markBooksTaken, pendingBookPointers, type BookSide } from '../playbook-pack.js';
 
 const STATE_DIR = join(homedir(), '.ncaa-bridge');
 const STATE_FILE = join(STATE_DIR, 'od-state.json');
@@ -110,7 +111,7 @@ interface PendingOverhaulRequest { id: number; seasonYear: number; requestedBy: 
 // of the console's dynasty file with the edits no change table can carry: new transfers, depth charts, formation
 // subs, cleared redshirts); acks edits the console has taken in.
 export async function syncWebEdits(cfg: BridgeConfig, d: OdDynasty, api = new WorkerApi(cfg), opts: { quiet?: boolean } = {}): Promise<void> {
-  const res = await api.json<{ dynastyWeek: number | null; boards: PendingBoard[]; players?: PendingPlayerEdit[]; visits?: PendingVisits[]; transfers?: PendingTransferEdit[]; depth?: PendingDepthEdit[]; recruits?: PendingRecruitEdit[]; overhaul?: PendingOverhaulRequest[]; memberTeams?: number[] }>('GET', `/api/bridge/web-edits?od=${d.id}`);
+  const res = await api.json<{ dynastyWeek: number | null; boards: PendingBoard[]; players?: PendingPlayerEdit[]; visits?: PendingVisits[]; transfers?: PendingTransferEdit[]; depth?: PendingDepthEdit[]; recruits?: PendingRecruitEdit[]; overhaul?: PendingOverhaulRequest[]; playbooks?: { tgid: number; side: BookSide }[]; memberTeams?: number[] }>('GET', `/api/bridge/web-edits?od=${d.id}`);
   const dir = join(cfg.odDir, 'web-edits', String(d.id));
   const week = d.week ?? 0;
   await syncBoards(d, api, dir, week, res.boards ?? [], opts, cfg.odDir);
@@ -127,11 +128,16 @@ export async function syncWebEdits(cfg: BridgeConfig, d: OdDynasty, api = new Wo
   const recruitEdits = await syncRecruitEdits(cfg, d, api, res.recruits ?? [], opts, notes);
   mergeLocks(cfg, d, recruitEdits, notes, opts);
   const playoff = await pendingPlayoff(cfg, d, api, notes, opts);
+  // playbooks: the archives are written by `ncaa-bridge playbook sync` (RPCS3 must be closed, so not from here); the
+  // dynasty-file copy points each team at the book its slot holds (or back at the stock one after a reset)
+  const playbooks = pendingBookPointers(d.id);
+  for (const p of playbooks) notes.push(`   playbook: team ${p.tgid} ${p.side === 'off' ? 'TOPB' : 'TDPB'} -> ${p.bgid} ("${p.name}")`);
+  if (res.playbooks?.length) notes.push(`   ${res.playbooks.length} book edit(s) wait on the site for team(s) ${res.playbooks.map((p) => `${p.tgid} ${p.side}`).join(', ')}: run \`ncaa-bridge playbook sync\` with RPCS3 closed`);
   const plyz = new Map<number, PlyzRow>(players.map((r) => [r.PGID, r]));
   for (const r of transfers.plyz) plyz.set(r.PGID, { ...(plyz.get(r.PGID) ?? r), PLFL: r.PLFL as number, PTYP: r.PTYP as number });
   for (const r of eligible.plyz) plyz.set(r.PGID, { ...(plyz.get(r.PGID) ?? r), PRSD: 0 });
   const recruits = pendingOverhaul(cfg, d); const startYear = pendingStartYear(cfg, d); const stride = pendingStride(cfg, d); const createPlayers = pendingCreatePlayers(cfg, d); const removePlayers = pendingRemovePlayers(cfg, d); const captains = pendingCaptains(cfg, d);
-  const patch: DynastyPatchSet = { transfers: transfers.newRows ? transfers.patches : [], depth, eligible: eligible.pgids, ...(recruits ? { recruits } : {}), ...(recruitEdits.length ? { recruitEdits } : {}), ...(startYear ? { startYear } : {}), ...(playoff ? { playoff } : {}), ...(stride ? { stride } : {}), ...(createPlayers.length ? { createPlayers } : {}), ...(removePlayers.length ? { removePlayers } : {}), ...(captains ? { captains } : {}) };
+  const patch: DynastyPatchSet = { transfers: transfers.newRows ? transfers.patches : [], depth, eligible: eligible.pgids, ...(recruits ? { recruits } : {}), ...(recruitEdits.length ? { recruitEdits } : {}), ...(startYear ? { startYear } : {}), ...(playoff ? { playoff } : {}), ...(stride ? { stride } : {}), ...(createPlayers.length ? { createPlayers } : {}), ...(removePlayers.length ? { removePlayers } : {}), ...(captains ? { captains } : {}), ...(playbooks.length ? { playbooks } : {}) };
   // while a stride change is on its way the change tables name players by ids the console is about to change: held back
   if (stride && (plyz.size || transfers.traz.length || transfers.plsz.length)) notes.push(` DID ${d.id}: player/transfer change tables held until the console takes stride ${stride}`);
   const changed = [
@@ -981,6 +987,8 @@ export async function odImportOne(cfg: BridgeConfig, d: OdDynasty, opts: OdImpor
   console.log(`${stamp()}   committed in ${((Date.now() - t0) / 1000).toFixed(1)}s -> ${cfg.workerUrl}/d/${dynasty.slug}`);
   maybeStrideTaken(cfg, d, opened, fileId, state);
   maybeCaptainsTaken(cfg, d, opened, fileId, state);
+  for (const n of markBooksTaken(d.id, opened.file, fileId)) console.log(`${stamp()} DID ${d.id} ${n}`); // the console's file points at a private book the bridge wrote
+
   maybePlayersTaken(cfg, d, ex, state);
   maybeRemovalsTaken(cfg, d, ex, state);
   // the start year first: a console file that took it moves the reshaped class to the new year before the overhaul looks

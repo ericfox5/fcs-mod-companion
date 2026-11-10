@@ -16,6 +16,7 @@ import { parseTdb, serializeTdb, verifyTdb, type TdbFile, type TdbTable } from '
 import { DEPTH_SLOTS, addPlayer, removePlayers, detectStride, rekeyStride, teamOfPgid, slotOfPgid, pgidOf, PGID_STRIDE, PGID_NONE } from '@ncaa/ncaa14';
 import { openDynastyFile } from './od.js';
 import { applyRecruitClass, classTaken, sha256 } from './recruit-overhaul.js';
+import type { BookPointer } from './playbook-pack.js';
 
 const HASHED = 0x7e5000;
 export function fnv1(bytes: Uint8Array, n = HASHED): number {
@@ -54,9 +55,32 @@ export interface CreatePlayerPatch { tgid: number; firstName: string; lastName: 
 // matching "FCS mod: 100-player rosters" patch). Applied last, after every edit that names players by their current ids.
 // removePlayers: PLAY rows deleted by PGID before anything is created (duplicate rows the console made; `od repair`)
 // eligible: PGIDs whose redshirt (PRSD) is cleared; captains: TEAM.OCAP / DCAP left at stride 70 re-keyed (od captains)
-export interface DynastyPatchSet { transfers: TransferPatch[]; depth: DepthPatch[]; eligible: number[]; recruits?: RecruitPatch; recruitEdits?: RecruitEdit[]; startYear?: number; playoff?: PlayoffPatch; createPlayers?: CreatePlayerPatch[]; removePlayers?: number[]; stride?: number; captains?: boolean }
+// playbooks: a team's book choice (TEAM.TOPB offense / TDPB defense, a PLAB BGID) pointed at its private book, written
+// into the game archives by `ncaa-bridge playbook sync` (commands/playbook.ts) -- or back at the stock book when the
+// coach reset the edits. Only when the file still holds one of `from` (the stock book, or the private one on a reset):
+// a book the coach picked in game since is reported, not clobbered.
+export type PlaybookPatch = BookPointer;
+export interface DynastyPatchSet { transfers: TransferPatch[]; depth: DepthPatch[]; eligible: number[]; recruits?: RecruitPatch; recruitEdits?: RecruitEdit[]; startYear?: number; playoff?: PlayoffPatch; createPlayers?: CreatePlayerPatch[]; removePlayers?: number[]; stride?: number; captains?: boolean; playbooks?: PlaybookPatch[] }
 export const emptyPatchSet = (): DynastyPatchSet => ({ transfers: [], depth: [], eligible: [] });
-export const patchSetEmpty = (s: DynastyPatchSet) => !s.transfers.length && !s.depth.length && !s.eligible.length && !s.recruits && !s.recruitEdits?.length && !s.startYear && !s.playoff && !s.createPlayers?.length && !s.removePlayers?.length && !s.stride && !s.captains;
+export const patchSetEmpty = (s: DynastyPatchSet) => !s.transfers.length && !s.depth.length && !s.eligible.length && !s.recruits && !s.recruitEdits?.length && !s.startYear && !s.playoff && !s.createPlayers?.length && !s.removePlayers?.length && !s.stride && !s.captains && !s.playbooks?.length;
+export const PLAYBOOK_COLUMN = { off: 'TOPB', def: 'TDPB' } as const;
+// Book choices: TEAM.TOPB / TDPB set to the private (or stock) book's BGID when the row still holds one of `from`.
+// Returns the patches that were applied or already held, for the re-read check.
+function applyPlaybooks(file: TdbFile, list: PlaybookPatch[], changes: string[]): PlaybookPatch[] {
+  const done: PlaybookPatch[] = [];
+  if (!list.length) return done;
+  const team = file.table('TEAM');
+  for (const p of list) {
+    const r = findRow(team, 'TGID', p.tgid), col = PLAYBOOK_COLUMN[p.side];
+    if (r < 0) { changes.push(`team ${p.tgid} playbook: not in TEAM, skipped`); continue; }
+    const cur = Number(team.get(r, col));
+    if (cur === p.bgid) { changes.push(`team ${p.tgid} ${col}: already ${p.bgid} ("${p.name}")`); done.push(p); continue; }
+    if (!p.from.includes(cur)) { changes.push(`team ${p.tgid} ${col}: holds ${cur}, not ${p.from.join('/')}; chosen in game, left alone`); continue; }
+    team.set(r, col, p.bgid); done.push(p);
+    changes.push(`team ${p.tgid} ${col}: ${cur} -> ${p.bgid} ("${p.name}")`);
+  }
+  return done;
+}
 export const RECRUIT_FIRST_MAX = 11, RECRUIT_LAST_MAX = 13, WEIGHT_BASE = 160;
 
 // Recruit edits from the site: RCPT rows by PRSI (name, position, height, weight, stars); applied after the overhaul so
@@ -255,6 +279,7 @@ export function patchDynasty(blob: Uint8Array, set: DynastyPatchSet): { blob: Ui
   const yearSet = set.startYear ? applyStartYear(o.file, set.startYear, changes) : false;
   applyTransfers(o.file, set.transfers, changes);
   applyDepth(o.file, set.depth, changes);
+  const books = applyPlaybooks(o.file, set.playbooks ?? [], changes);
   applyEligible(o.file, set.eligible, changes);
   const removed = applyRemovePlayers(o.file, set.removePlayers ?? [], changes);
   const created = applyCreatePlayers(o.file, set.createPlayers ?? [], changes);
@@ -281,6 +306,7 @@ export function patchDynasty(blob: Uint8Array, set: DynastyPatchSet): { blob: Ui
     if (back.file.hasTable('PLSU')) { const bp = back.file.table('PLSU'); const n = set.depth.reduce((a, p) => a + p.subs.length, 0); const have = set.depth.reduce((a, p) => { let c = 0; for (let i = 0; i < bp.recordCount; i++) if (Number(bp.get(i, 'TGID')) === p.tgid) c++; return a + c; }, 0); if (have > n) throw new Error(`patched dynasty file: PLSU has ${have} rows for the patched teams, wanted at most ${n}`); }
   }
   for (const pgid of set.eligible) { const bp = back.file.table('PLAY'); const i = findRow(bp, 'PGID', pgid); if (i >= 0 && Number(bp.get(i, 'PRSD')) === 1) throw new Error(`patched dynasty file: PGID ${pgid} still redshirted after re-read`); }
+  for (const p of books) { const bt = back.file.table('TEAM'); const i = findRow(bt, 'TGID', p.tgid); if (i < 0 || Number(bt.get(i, PLAYBOOK_COLUMN[p.side])) !== p.bgid) throw new Error(`patched dynasty file: team ${p.tgid} ${PLAYBOOK_COLUMN[p.side]} did not read back as ${p.bgid}`); }
   if (overhaul && !classTaken(back.file, overhaul)) throw new Error('patched dynasty file: the reshaped recruits did not read back');
   if (yearSet && Number(back.file.table('SEAI').get(0, 'SEYR')) !== set.startYear! - BASE_YEAR) throw new Error('patched dynasty file: the start year did not read back');
   if (set.playoff) { const problem = verifyPlayoff(back.file, set.playoff); if (problem) throw new Error(`patched dynasty file: ${problem}`); }

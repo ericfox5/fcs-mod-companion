@@ -6,7 +6,7 @@ import { weekLabel, seasonLabel } from './pages/common.js';
 // Section links, grouped for the dynasty menu (key, label, group). The menu adds Members and All dynasties to League.
 export const NAV: [string, string, string][] = [
   ['home', 'Home', 'Season'], ['schedule', 'Scores', 'Season'], ['standings', 'Standings', 'Season'], ['rankings', 'Rankings', 'Season'], ['bracket', 'Bracket', 'Season'], ['stats', 'Stats', 'Season'], ['awards', 'Awards', 'Season'],
-  ['teams', 'Teams', 'Team'], ['rosters', 'Rosters', 'Team'], ['depth', 'Depth Chart', 'Team'], ['recruiting', 'Recruiting', 'Team'], ['transfers', 'Transfer Portal', 'Team'],
+  ['teams', 'Teams', 'Team'], ['rosters', 'Rosters', 'Team'], ['depth', 'Depth Chart', 'Team'], ['playbook', 'Playbook', 'Team'], ['recruiting', 'Recruiting', 'Team'], ['transfers', 'Transfer Portal', 'Team'],
   ['stories', 'News Wire', 'League'],
 ];
 
@@ -16,9 +16,10 @@ export const DISCLAIMER = 'Fan passion project. Not affiliated with, endorsed by
 export const stageLabel = (d: Dynasty) => `${seasonLabel(d)} · ${d.week_type === 151 ? 'Preseason' : weekLabel(d.week ?? 0)}`;
 
 // Sports-network style chrome: black global bar (brand, the dynasty title that opens the section menu, the account
-// area), the week's scoreboard strip, white cards on a light grey page. No third-party marks: the brand is the FCS
-// shield plus our own wordmark.
-export function layout(opts: { title: string; siteName: string; dyn?: Dynasty; section?: string; body: Raw; wide?: boolean; strip?: Raw; member?: MemberRow | null; members?: MemberRow[]; path?: string; account?: AccountInfo | null; locked?: boolean }): Response {
+// area), the week's scoreboard strip, white cards on a light grey page. The brand is Eric's header image (the FCS
+// shield + "Online Dynasty FCS" wordmark on the bar's black; public/img/fcs-header.png, the shield alone on phones as
+// fcs-header-mark.png; both kept out of git like fcs-logo.svg, which stays the favicon).
+export function layout(opts: { title: string; siteName: string; dyn?: Dynasty; section?: string; body: Raw; wide?: boolean; strip?: Raw; member?: MemberRow | null; members?: MemberRow[]; path?: string; account?: AccountInfo | null; locked?: boolean; css?: string[] }): Response {
   const d = opts.dyn;
   const base = d ? `/d/${d.slug}` : '';
   const viewer = opts.members?.[0]?.auth; // stamped by currentMember; pages only pass member/members
@@ -37,7 +38,7 @@ export function layout(opts: { title: string; siteName: string; dyn?: Dynasty; s
   // outside-click / Esc closing and aria-expanded.
   const header = html`<header class="gh">
   <div class="wrap gh-inner">
-    <a class="brand" href="${base || '/'}"><img class="fcs-mark" src="/img/fcs-logo.svg" alt="NCAA Division I FCS" width="38" height="36"><span class="brand-text"><span class="brand-top">Online Dynasty</span><span class="brand-sub">FCS</span></span></a>
+    <a class="brand" href="${base || '/'}"><picture><source media="(max-width: 720px)" srcset="/img/fcs-header-mark.png" width="46" height="44"><img class="brand-img" src="/img/fcs-header.png" alt="Online Dynasty FCS" width="187" height="44"></picture></a>
     ${d ? html`<details class="dmenu">
       <summary class="dm-title" title="All sections"><span class="dm-text"><span class="dm-name">${d.name}</span><span class="dm-stage">${stageLabel(d)}</span></span><span class="dm-chev" aria-hidden="true"></span></summary>
       <nav class="dm-sheet" aria-label="Dynasty sections"><div class="wrap dm-grid">
@@ -55,6 +56,7 @@ export function layout(opts: { title: string; siteName: string; dyn?: Dynasty; s
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${opts.title} | ${opts.siteName}</title>
 <link rel="stylesheet" href="/css/base.css">
+${(opts.css ?? []).map((href) => html`<link rel="stylesheet" href="${href}">`)}
 <link rel="icon" href="/img/fcs-logo.svg" type="image/svg+xml">
 <script src="/js/site.js" defer></script>
 </head>

@@ -2,7 +2,7 @@
 // would load them (CFBR's DLC folders, then its qkl_patch, then the disc archives), logos come from its 1,024-entry logo
 // bigfile (entry TLGL = menu logo, 340 + TLGL = score bug logo), score bug names and colours from its qkl_patch's score
 // bug (by TLGL too).
-import { existsSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { Pkg, Edat, type ByteSource, type PkgItem } from './pkg.js';
@@ -11,13 +11,30 @@ import { fnv1a64, inflateEntry } from './bigfile.js';
 
 // NCAA 14's DLC klicensee, which CFBR's EDATs are bound to. It is not kept in this (public) repo: RPCS3 logs it
 // (`npDrmIsAvailable(): KLicense key or KLIC=0x...`) whenever the game opens its DLC, so it is read from the install's
-// RPCS3.log, or the previous run's RPCS3.log.gz; NCAA_DLC_KLIC (32 hex digits) overrides both.
+// RPCS3.log, or the previous run's RPCS3.log.gz; NCAA_DLC_KLIC (32 hex digits) overrides both. The log grows to
+// hundreds of MB (too big for one string), so it is scanned in 8 MB windows from the start, each overlapping the last
+// by 64 bytes so a line on a window edge is still seen, and the scan stops at the first match (a few MB in).
+const KLIC_LINE = /KLIC=0x([0-9a-f]{32})/i, WINDOW = 8 << 20, OVERLAP = 64;
+function scanForKlic(size: number, readAt: (pos: number, len: number) => Buffer): Buffer | null {
+  for (let pos = 0; pos < size; pos += WINDOW - OVERLAP) {
+    const b = readAt(pos, Math.min(WINDOW, size - pos)); if (!b.length) break;
+    const m = KLIC_LINE.exec(b.toString('latin1')); if (m) return Buffer.from(m[1]!, 'hex');
+    if (b.length < WINDOW) break;
+  }
+  return null;
+}
 export function dlcKlic(rpcs3Root?: string): Buffer | null {
   const env = process.env.NCAA_DLC_KLIC?.trim(); if (env && /^(0x)?[0-9a-f]{32}$/i.test(env)) return Buffer.from(env.replace(/^0x/i, ''), 'hex');
   if (!rpcs3Root) return null;
-  for (const [f, gz] of [['RPCS3.log', false], ['RPCS3.log.gz', true]] as const) {
-    const p = join(rpcs3Root, f); if (!existsSync(p)) continue;
-    try { const text = (gz ? gunzipSync(readFileSync(p)) : readFileSync(p)).toString('latin1'); const m = /KLIC=0x([0-9a-f]{32})/i.exec(text); if (m) return Buffer.from(m[1]!, 'hex'); } catch { /* unreadable log: try the next */ }
+  const log = join(rpcs3Root, 'RPCS3.log');
+  if (existsSync(log)) {
+    let fd: number | undefined;
+    try { fd = openSync(log, 'r'); const f = fd; const hit = scanForKlic(fstatSync(f).size, (pos, len) => { const b = Buffer.alloc(len); return b.subarray(0, readSync(f, b, 0, len, pos)); }); if (hit) return hit; }
+    catch { /* unreadable log: try the previous run's */ } finally { if (fd !== undefined) closeSync(fd); }
+  }
+  const gz = join(rpcs3Root, 'RPCS3.log.gz');
+  if (existsSync(gz)) {
+    try { const raw = readFileSync(gz); if (raw.length) { const text = gunzipSync(raw); const hit = scanForKlic(text.length, (pos, len) => text.subarray(pos, pos + len)); if (hit) return hit; } } catch { /* empty or unreadable .gz */ }
   }
   return null;
 }

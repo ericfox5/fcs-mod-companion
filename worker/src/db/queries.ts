@@ -1,3 +1,5 @@
+import type { BookEdits } from '@ncaa/ncaa14';
+
 export interface Dynasty {
   id: number; slug: string; name: string; season_year: number; start_year: number | null; week: number; stage: number; week_type: number | null; current_snapshot_id: number | null; updated_at: string | null;
   // online dynasty (Blaze stub) fields; NULL for dynasties imported from an offline save
@@ -149,6 +151,21 @@ export const upsertDepthEdit = (db: D1Database, d: number, tgid: number, year: n
 export const deleteDepthEdit = (db: D1Database, d: number, tgid: number, year: number, week: number) => db.prepare('DELETE FROM web_depth_edits WHERE dynasty_id = ? AND tgid = ? AND season_year = ? AND week = ?').bind(d, tgid, year, week).run();
 export const listPendingDepthEdits = (db: D1Database, d: number) => all<WebDepthEdit>(db.prepare('SELECT * FROM web_depth_edits WHERE dynasty_id = ? AND delivered_at IS NULL ORDER BY tgid').bind(d));
 export const markDepthEditDelivered = (db: D1Database, id: number) => db.prepare("UPDATE web_depth_edits SET delivered_at = datetime('now') WHERE id = ? AND delivered_at IS NULL").bind(id).run();
+
+// A team's playbook edits made on the site (migration 0027): one row per team and side, kept until the coach resets it.
+// edits_json is the BookEdits of @ncaa/ncaa14 (playbook/model.ts); the site composes the book from it (supersim/coach/
+// books.ts loadTeamBook) and the bridge writes it into the game's playbook database, acking the row with the sha of what
+// it wrote. A new save clears delivered_at (delivered_sha stays: what the console last got) so the bridge delivers again.
+export type PlaybookSide = 'off' | 'def';
+export interface WebPlaybookEdit { id: number; dynasty_id: number; tgid: number; side: PlaybookSide; edits_json: string; note: string | null; updated_by: number | null; updated_at: string; delivered_at: string | null; delivered_sha: string | null }
+export const getPlaybookEdit = (db: D1Database, d: number, tgid: number, side: PlaybookSide) => db.prepare('SELECT * FROM web_playbook_edits WHERE dynasty_id = ? AND tgid = ? AND side = ?').bind(d, tgid, side).first<WebPlaybookEdit>();
+export const listPlaybookEditTeams = (db: D1Database, d: number) => all<{ tgid: number; side: PlaybookSide; updated_at: string }>(db.prepare('SELECT tgid, side, updated_at FROM web_playbook_edits WHERE dynasty_id = ? ORDER BY tgid, side').bind(d));
+export const upsertPlaybookEdit = (db: D1Database, d: number, tgid: number, side: PlaybookSide, edits: BookEdits, by: number | null, note: string | null) =>
+  db.prepare("INSERT INTO web_playbook_edits (dynasty_id, tgid, side, edits_json, note, updated_by, updated_at, delivered_at) VALUES (?,?,?,?,?,?, datetime('now'), NULL) ON CONFLICT(dynasty_id, tgid, side) DO UPDATE SET edits_json = excluded.edits_json, note = excluded.note, updated_by = excluded.updated_by, updated_at = datetime('now'), delivered_at = NULL")
+    .bind(d, tgid, side, JSON.stringify(edits), note, by).run();
+export const deletePlaybookEdit = (db: D1Database, d: number, tgid: number, side: PlaybookSide) => db.prepare('DELETE FROM web_playbook_edits WHERE dynasty_id = ? AND tgid = ? AND side = ?').bind(d, tgid, side).run();
+export const listPendingPlaybookEdits = (db: D1Database, d: number) => all<WebPlaybookEdit>(db.prepare('SELECT * FROM web_playbook_edits WHERE dynasty_id = ? AND delivered_at IS NULL ORDER BY tgid, side').bind(d));
+export const markPlaybookEditDelivered = (db: D1Database, id: number, sha: string | null) => db.prepare("UPDATE web_playbook_edits SET delivered_at = datetime('now'), delivered_sha = ? WHERE id = ? AND delivered_at IS NULL").bind(sha, id).run();
 
 // Recruit edits made on the site (migration 0019): name, position, height, weight and stars of a prospect, one pending
 // row per prospect and season; the bridge writes them into the dynasty-file copy and acks them once a console file

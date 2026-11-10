@@ -56,13 +56,22 @@ export const LS_GROUP_WORDS = new URL('../private/ls-group-words.json', import.m
 // "FCS mod: 100-player rosters (offseason)": Training Players / graduation / recruiting lists sized past 8,820 players
 // (roster-offseason-patch.py).
 export const ROSTER_OFFSEASON_WORDS = new URL('../private/roster-offseason-words.json', import.meta.url);
+// "FCS mod: generic opponents host" (NOTES 2026-11-08): the Dynasty Custom Schedules editor (table SCHT) put a generic
+// (CGID 17) opponent away and refused the home/away toggle for it. Three one-word swaps, originals from the yml comments.
+export const GENERIC_HOST_WORDS = [
+  [0x4a0bfc, 0x3be00003, 0x3be00000, 'Home/away toggle: a CGID 17 away team no longer returns 3 (li r31,3 -> li r31,0)'],
+  [0x4a102c, 0x63230000, 0x4800000c, 'Add game: skip the swap, a generic opponent stays home (b 0x4a1038)'],
+  [0x4a1310, 0x40820010, 0x48000010, 'Replace opponent: skip the CGID 17 swap (b 0x4a1320)'],
+];
 export const wordsFrom = u => JSON.parse(fs.readFileSync(u, 'utf8')).map(w => [Number(w.va), Number(w.old), Number(w.new)]);
 export function rosterStrideWords() { return wordsFrom(ROSTER_STRIDE_WORDS); }
 export function rosterCapacityWords() { return wordsFrom(ROSTER_CAPACITY_WORDS); }
 export function rosterTableWords() { return wordsFrom(ROSTER_TABLE_WORDS); }
 export function lsGroupWords() { return wordsFrom(LS_GROUP_WORDS); }
 export function rosterOffseasonWords() { return wordsFrom(ROSTER_OFFSEASON_WORDS); }
-export function patchBaseline(input, { commissioner = false, jerseyZero = false, rosterStride = false, rosterCapacity = false, rosterTable = false, lsGroup = false, rosterOffseason = false } = {}) {
+// extraWords: [{ name, words: [[va, old, new], ...] }] applied last, each word checked against the output as patched so far
+// (for entries kept outside the repo, e.g. a private words file passed with --extra-words FILE.json)
+export function patchBaseline(input, { commissioner = false, jerseyZero = false, rosterStride = false, rosterCapacity = false, rosterTable = false, lsGroup = false, rosterOffseason = false, genericHost = false, extraWords = [] } = {}) {
   if (sha256(input) !== INPUT_SHA256) throw new Error('Unsupported or already modified ELF: SHA-256 mismatch');
   const segments = elfSegments(input), output = Buffer.from(input), writes = [];
   const word = va => input.readUInt32BE(fileOffset(segments, va));
@@ -111,21 +120,45 @@ export function patchBaseline(input, { commissioner = false, jerseyZero = false,
   if (rosterTable) { if (!rosterCapacity) throw new Error('--roster-table requires --roster-capacity'); putCurrent(rosterTableWords(), 'Roster player table 13000'); }
   if (lsGroup) putCurrent(lsGroupWords(), 'Long snapper recruiting fix');
   if (rosterOffseason) { if (!rosterTable) throw new Error('--roster-offseason requires --roster-table'); putCurrent(rosterOffseasonWords(), 'Roster offseason 8,820 limits'); }
+  if (genericHost) putCurrent(GENERIC_HOST_WORDS.map(([va, old, value]) => [va, old, value]), 'Generic opponents host');
+  for (const { name, words } of extraWords) {
+    if (!name || !Array.isArray(words) || !words.length) throw new Error('extraWords entries need a name and words');
+    const seen = new Set();
+    for (const [va] of words) { if (seen.has(va)) throw new Error(`${name}: address 0x${va.toString(16)} listed twice`); seen.add(va); }
+    putCurrent(words, name);
+  }
   return { output, manifest: { format: 1, titleId: 'BLUS31159', update: '01.02',
-    purpose: 'All-Conference fix' + (commissioner ? ' + five-dynasty limit' : '') + (jerseyZero ? ' + jersey #0' : '') + (rosterStride ? ' + 100-player rosters' : '') + (rosterCapacity ? ' (capacity)' : '') + (rosterTable ? ' (player table)' : '') + (rosterOffseason ? ' (offseason)' : '') + (lsGroup ? ' + long snapper fix' : ''),
+    purpose: 'All-Conference fix' + (commissioner ? ' + five-dynasty limit' : '') + (jerseyZero ? ' + jersey #0' : '') + (rosterStride ? ' + 100-player rosters' : '') + (rosterCapacity ? ' (capacity)' : '') + (rosterTable ? ' (player table)' : '') + (rosterOffseason ? ' (offseason)' : '') + (lsGroup ? ' + long snapper fix' : '') + (genericHost ? ' + generic opponents host' : '') + extraWords.map(e => ' + ' + e.name).join(''),
     psnDependencyRemoved: false, selfSigned: false, hardwareValidated: false,
     inputSha256: INPUT_SHA256, outputSha256: sha256(output), segments, writes } };
+}
+export const FLAGS = { '--commissioner': 'commissioner', '--jersey-zero': 'jerseyZero', '--roster-stride': 'rosterStride', '--roster-capacity': 'rosterCapacity',
+  '--roster-table': 'rosterTable', '--roster-offseason': 'rosterOffseason', '--ls-group': 'lsGroup', '--generic-host': 'genericHost' };
+// a private words file: { "name": "...", "words": [{ "va": "0x...", "old": "0x...", "new": "0x..." }, ...] } or a bare array (named after the file)
+export function extraWordsFrom(file) {
+  const j = JSON.parse(fs.readFileSync(file, 'utf8')), list = Array.isArray(j) ? j : j.words;
+  return { name: (!Array.isArray(j) && j.name) || path.basename(file), words: list.map(w => [Number(w.va), Number(w.old), Number(w.new)]) };
+}
+// argv options -> patchBaseline options (flags above, --extra-words FILE any number of times)
+export function parseOptions(opts) {
+  const out = { extraWords: [] };
+  for (let i = 0; i < opts.length; i++) {
+    if (opts[i] === '--extra-words' && opts[i + 1]) out.extraWords.push(extraWordsFrom(opts[++i]));
+    else if (FLAGS[opts[i]]) out[FLAGS[opts[i]]] = true;
+    else return null;
+  }
+  return out;
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const [inputPath, outputPath, ...opts] = process.argv.slice(2);
-    if (!inputPath || !outputPath || opts.some(x => !['--commissioner', '--jersey-zero', '--roster-stride', '--roster-capacity', '--roster-table', '--roster-offseason', '--ls-group'].includes(x)))
-      throw new Error('Usage: node ps3-eboot.mjs ORIGINAL.elf NEW.elf [--commissioner] [--jersey-zero] [--roster-stride [--roster-capacity [--roster-table [--roster-offseason]]]] [--ls-group]');
+    const options = parseOptions(opts);
+    if (!inputPath || !outputPath || !options)
+      throw new Error('Usage: node ps3-eboot.mjs ORIGINAL.elf NEW.elf [--commissioner] [--jersey-zero] [--roster-stride [--roster-capacity [--roster-table [--roster-offseason]]]] [--ls-group] [--generic-host] [--extra-words FILE.json ...]');
     if (path.resolve(inputPath) === path.resolve(outputPath)) throw new Error('Refusing in-place patch');
     const manifestPath = outputPath + '.manifest.json';
     if (fs.existsSync(outputPath) || fs.existsSync(manifestPath)) throw new Error('Output already exists');
-    const { output, manifest } = patchBaseline(fs.readFileSync(inputPath),
-      { commissioner: opts.includes('--commissioner'), jerseyZero: opts.includes('--jersey-zero'), rosterStride: opts.includes('--roster-stride'), rosterCapacity: opts.includes('--roster-capacity'), rosterTable: opts.includes('--roster-table'), lsGroup: opts.includes('--ls-group'), rosterOffseason: opts.includes('--roster-offseason') });
+    const { output, manifest } = patchBaseline(fs.readFileSync(inputPath), options);
     fs.writeFileSync(outputPath, output, { flag: 'wx' });
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
     console.log(JSON.stringify({ outputPath, sha256: manifest.outputSha256, writes: manifest.writes.length,

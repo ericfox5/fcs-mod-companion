@@ -96,9 +96,19 @@ if (rpcs3) {
   run(process.execPath, ['--import', 'tsx', path.join(root, 'bridge', 'src', 'cli.ts'), 'swap', 'export', '--rpcs3', rpcs3, '--out', m, '--blob', swapBlob]);
   swapPack = JSON.parse(fs.readFileSync(m, 'utf8'));
 } else fs.writeFileSync(swapBlob, Buffer.alloc(0));
-const payload = { builtAt: new Date().toISOString().slice(0, 16).replace('T', ' '), site: 'https://fcs-mod.online', ppuHash, patches: entries, uniforms, uniformSets, ...(roster ? { roster } : {}), ...(genericRosters ? { genericRosters } : {}), ...(scorebug ? { scorebug } : {}), ...(swapDonors ? { swapDonors } : {}), ...(swapPack ? { swapPack } : {}) };
+// Private playbooks the teams shaped on the site (`ncaa-bridge playbook sync` wrote them into this PC's archives; `playbook
+// export` packs them, bridge/src/playbook-pack.ts): the manifest in the payload, the book entries in the SEA asset
+// playbook-pack.bin. join writes each book into the same unused book slot of a member's qkl_fe2ig.ast, renames its list
+// row and points the team at it.
+const playbookBlob = path.join(here, 'generated', 'playbook-pack.bin'); let playbooks;
+if (rpcs3) {
+  const m = path.join(here, 'generated', 'playbook-pack.json');
+  run(process.execPath, ['--import', 'tsx', path.join(root, 'bridge', 'src', 'cli.ts'), 'playbook', 'export', '--rpcs3', rpcs3, '--out', m, '--blob', playbookBlob]);
+  const pm = JSON.parse(fs.readFileSync(m, 'utf8')); if (pm.books.length) playbooks = pm;
+} else fs.writeFileSync(playbookBlob, Buffer.alloc(0));
+const payload = { builtAt: new Date().toISOString().slice(0, 16).replace('T', ' '), site: 'https://fcs-mod.online', ppuHash, patches: entries, uniforms, uniformSets, ...(roster ? { roster } : {}), ...(genericRosters ? { genericRosters } : {}), ...(scorebug ? { scorebug } : {}), ...(swapDonors ? { swapDonors } : {}), ...(swapPack ? { swapPack } : {}), ...(playbooks ? { playbooks } : {}) };
 fs.writeFileSync(path.join(here, 'generated', 'payload.json'), JSON.stringify(payload));
-console.log(`payload: ${entries.length} patch entries (${entries.reduce((a, e) => a + e.words, 0)} words), ${Object.keys(uniforms).length} stop-gap XMLs, ${uniformSets.length} uniform-set files (${(offset / 1048576).toFixed(1)} MB; ${fromLive} read from ${liveDlc ?? 'no DLC folder'}, ${touched} touched up)${roster ? `, roster save ${roster.dir} (${Object.keys(roster.files).length} files)` : ''}${genericRosters ? `, generic rosters ${genericRosters.rows.length} rows (${genericRosters.teams.map((t) => t.team).join(', ')})` : ', no generic roster plan'}${scorebug ? `, score bug fix (${scorebug.teams} teams)` : ''}${swapDonors ? `, swap donors ${swapDonors.name}` : ''}`);
+console.log(`payload: ${entries.length} patch entries (${entries.reduce((a, e) => a + e.words, 0)} words), ${Object.keys(uniforms).length} stop-gap XMLs, ${uniformSets.length} uniform-set files (${(offset / 1048576).toFixed(1)} MB; ${fromLive} read from ${liveDlc ?? 'no DLC folder'}, ${touched} touched up)${roster ? `, roster save ${roster.dir} (${Object.keys(roster.files).length} files)` : ''}${genericRosters ? `, generic rosters ${genericRosters.rows.length} rows (${genericRosters.teams.map((t) => t.team).join(', ')})` : ', no generic roster plan'}${scorebug ? `, score bug fix (${scorebug.teams} teams)` : ''}${swapDonors ? `, swap donors ${swapDonors.name}` : ''}${playbooks ? `, ${playbooks.books.length} private playbook(s)` : ', no private playbooks'}`);
 
 // ---- bundle
 const dist = path.join(here, 'dist'); fs.mkdirSync(dist, { recursive: true });
@@ -109,7 +119,7 @@ if (args.includes('--no-exe')) process.exit(0);
 
 // ---- single executable (Node SEA): blob, node.exe copy, inject
 const seaCfg = path.join(dist, 'sea-config.json'); const blob = path.join(dist, 'sea-prep.blob');
-fs.writeFileSync(seaCfg, JSON.stringify({ main: bundle, output: blob, disableExperimentalSEAWarning: true, assets: { 'uniform-pack.bin': packFile, 'swap-pack.bin': swapBlob } }));
+fs.writeFileSync(seaCfg, JSON.stringify({ main: bundle, output: blob, disableExperimentalSEAWarning: true, assets: { 'uniform-pack.bin': packFile, 'swap-pack.bin': swapBlob, 'playbook-pack.bin': playbookBlob } }));
 run(process.execPath, ['--experimental-sea-config', seaCfg]);
 const exe = path.join(dist, 'FCS-online.exe');
 fs.copyFileSync(process.execPath, exe);

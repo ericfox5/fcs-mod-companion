@@ -41,5 +41,7 @@ Choose **2. Join an online league** instead of 1 and type the address your leagu
 - **Score bug** team names and colours that match the FCS teams.
 - **The 2026 FCS roster**, with up to 90 real players per team, plus real 2026 rosters and home stadiums for the five
   generic teams.
+- **Playbooks the league's coaches shaped on the site** (their own formations, sets, play order and drawn plays), as
+  private playbooks their teams use in game. Every member installs the same release before a game that uses one.
 
 <sub>{{VERSION}} · built {{BUILT}} · {{SIZE}} MB · SHA-256 `{{SHA256}}`</sub>

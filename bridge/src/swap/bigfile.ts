@@ -3,12 +3,9 @@
 // usize-csize, 64-byte name), a same-length rename (entry names, hashes, and the scene / kerning text that refers to
 // them), a rebuild, and DXT texture decoding plus a PNG encoder for logo previews.
 import { deflateSync, inflateSync } from 'node:zlib';
+import { fnv1a64 } from '@ncaa/ncaa14';
 
-export const fnv1a64 = (name: string): bigint => {
-  let h = 0xcbf29ce484222325n;
-  for (const c of Buffer.from(name.toUpperCase(), 'latin1')) { h ^= BigInt(c); h = (h * 0x100000001b3n) & 0xffffffffffffffffn; }
-  return h;
-};
+export { fnv1a64 }; // the entry-name hash lives in @ncaa/ncaa14 (fnv.ts) so the Worker-side tools can use it too
 export const inflateEntry = (raw: Uint8Array): Buffer => (raw[0] === 0x78 ? inflateSync(Buffer.from(raw)) : Buffer.from(raw));
 
 export interface NamedEntry { flags: number; name: string; hash: bigint; raw: Buffer; data?: Buffer; dirty?: boolean }

@@ -20,10 +20,8 @@ code { font: 12px/1.4 Menlo, Consolas, monospace; background: #f1f1f1; padding: 
 .gh-inner { display: flex; align-items: stretch; height: 52px; gap: 18px; }
 .brand { display: flex; align-items: center; gap: 10px; color: #fff; white-space: nowrap; }
 .brand:hover { text-decoration: none; }
-.fcs-mark { width: 38px; height: 36px; display: block; }
-.brand-text { display: flex; flex-direction: column; line-height: 1; }
-.brand-top { font-size: 11px; letter-spacing: 1.6px; text-transform: uppercase; color: #bfc1c4; }
-.brand-sub { font-size: 20px; font-weight: 800; letter-spacing: .5px; color: #fff; }
+.brand picture { display: block; }
+.brand-img { height: 44px; width: auto; display: block; } /* the image's own black matches the bar; the <picture> swaps in the shield alone under 720px */
 /* dynasty menu: the title in the bar is a <details>; its sheet drops over the page under the bar (no layout shift) */
 .dmenu { display: block; min-width: 0; }
 .dm-title { display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 16px; border-left: 1px solid #333; border-right: 1px solid #333; color: #fff; cursor: pointer; list-style: none; user-select: none; }
@@ -168,7 +166,7 @@ table.stats td, table.recruits td, table.roster td { font-size: 12px; }
 }
 @media (max-width: 720px) {
   .gh-inner { height: 48px; gap: 10px; }
-  .brand-text { display: none; }
+  .brand-img { height: 40px; }
   .dyn-stage { display: none; }
   .cols, .grid2, .grid3, .landing .cols { grid-template-columns: minmax(0, 1fr); }
   .landing .thanks-card { margin-top: 12px; border-radius: 10px; }
@@ -834,24 +832,81 @@ table.pp-table td.pp-opp, table.pp-table td.pp-opp + td { text-align: left; }
   .pp-gs-team b { font-size: 13px; }
 }
 
-/* ---- Depth chart page (/depth): one card per position, slots as selects filled from <template id="dc-players"> on demand ---- */
+/* ---- Depth chart page (/depth): lineup cards (depth.ts + depth.js) over the formation-subs tables, whose selects are
+   filled from <template id="dc-players"> on demand ---- */
 .dc .dc-note { padding: 10px 12px; margin: 0; font-size: 12px; color: var(--ink-2); border-bottom: 1px solid var(--line-soft); }
 .dc .dc-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid var(--line-soft); }
 .dc .dc-actions .muted { font-size: 11px; }
 .dc .dc-unit { margin: 12px 12px 6px; }
-.dc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; padding: 0 12px 12px; }
-.dc-pos { border: 1px solid var(--line); border-radius: 2px; background: #fff; }
-.dc-pos h4 { margin: 0; padding: 6px 8px; display: flex; justify-content: space-between; align-items: baseline; background: #f6f6f7; border-bottom: 1px solid var(--line-soft); }
-.dc-pos h4 small { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink-3); }
-.dc-pos ol { margin: 0; padding: 4px 8px 6px 26px; }
-.dc-pos li { padding: 2px 0; font-size: 12px; }
-.dc-pos li::marker { color: var(--ink-3); font-size: 11px; }
-.dc-pos li.changed select, .dc-sets td.changed select { border-color: #b7791f; box-shadow: inset 3px 0 0 #b7791f; }
-.dc-pos li.rs select { color: var(--ink-3); }
+.dc-sets td.changed select { border-color: #b7791f; box-shadow: inset 3px 0 0 #b7791f; }
 .dc select[data-dc] { width: 100%; max-width: 100%; padding: 4px 6px; border: 1px solid var(--line); border-radius: 2px; background: #fff; color: var(--ink); font: inherit; font-size: 12px; }
 .dc select[data-dc].dirty { border-color: var(--blue); box-shadow: inset 3px 0 0 var(--blue); }
 .dc .dc-cls { font-size: 10px; color: var(--ink-3); }
 .dc .dc-name { font-size: 12px; }
+/* lineup cards: team-coloured header with the team OVR ring, unit tabs, one card per position (starter + backups),
+   the roster drawer. --team / --team-2 / --on-team come from the TEAM row's colours (pages/common.ts teamColors). */
+.lc-box { --team: #1d1d1d; --team-2: #fff; --on-team: #fff; }
+.lc-head { display: flex; align-items: center; gap: 14px; padding: 12px 14px; background: var(--team); background: linear-gradient(100deg, var(--team) 0, color-mix(in srgb, var(--team) 76%, #000) 100%); color: var(--on-team); }
+.lc-hlogo { width: 56px; height: 56px; object-fit: contain; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .35)); }
+.lc-htext { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.lc-hk { font-size: 11px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; opacity: .85; }
+.lc-hk .tag.pending { margin-left: 4px; }
+.lc-hname { font-size: 22px; font-weight: 800; letter-spacing: -.4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lc-ovr { position: relative; display: grid; place-items: center; width: 56px; height: 56px; line-height: 1; text-align: center; }
+.lc-ovr svg { position: absolute; inset: 0; width: 56px; height: 56px; transform: rotate(-90deg); }
+.lc-ovr circle { fill: none; stroke: rgba(255, 255, 255, .25); stroke-width: 3; }
+.lc-ovr circle.v { stroke: var(--team-2); stroke-linecap: round; }
+.lc-ovr b { display: block; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.lc-ovr small { display: block; font-size: 8px; font-weight: 700; letter-spacing: .6px; opacity: .85; }
+.lc-tabs { display: flex; gap: 2px; padding: 8px 12px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.lc-tabs button { padding: 7px 14px; border: 0; border-bottom: 3px solid transparent; background: none; font: inherit; font-size: 12px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--ink-3); cursor: pointer; white-space: nowrap; }
+.lc-tabs button[aria-selected=true] { color: var(--ink); border-bottom-color: var(--team); }
+.lc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; padding: 14px 12px 16px; }
+.lc-grid[hidden] { display: none; }
+.lc { display: flex; flex-direction: column; min-width: 0; }
+.lc-slot { display: block; width: 100%; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 3px; background: #fff; color: var(--ink); font: inherit; text-align: left; }
+button.lc-slot { cursor: pointer; transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease; }
+button.lc-slot:hover { box-shadow: 0 2px 8px rgba(0, 0, 0, .12); }
+button.lc-slot:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.lc-slot.on { border-color: #f5c518; box-shadow: 0 0 0 3px #f5c518, 0 4px 14px rgba(0, 0, 0, .18); transform: translateY(-2px); }
+.lc-slot.dirty { border-color: var(--blue); box-shadow: inset 3px 0 0 var(--blue); }
+.lc-slot.changed:not(.dirty) { border-color: #b7791f; box-shadow: inset 3px 0 0 #b7791f; }
+.lc-starter { overflow: hidden; }
+.lc-starter .lc-strip { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 4px 6px; background: var(--team); color: var(--on-team); }
+.lc-num { font-size: 12px; font-weight: 800; }
+.lc-strip .ovr-pill { min-width: 28px; padding: 0 5px; font-size: 12px; font-weight: 800; }
+.lc-strip .tag.rs { background: rgba(0, 0, 0, .35); }
+.lc-pic { position: relative; display: block; height: 104px; background: #f3f4f6; background: radial-gradient(ellipse at 50% 100%, color-mix(in srgb, var(--team) 32%, #fff) 0, #f3f4f6 72%); overflow: hidden; }
+.lc-shot { position: absolute; left: 50%; bottom: 0; width: 86px; height: 104px; transform: translateX(-50%); object-fit: cover; object-position: top; }
+.lc-name { display: block; padding: 6px 8px 0; font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lc-cls { display: block; padding: 0 8px 7px; font-size: 10px; letter-spacing: .4px; text-transform: uppercase; color: var(--ink-3); }
+.lc-backups { list-style: none; display: flex; flex-direction: column; gap: 3px; margin: 4px 0 0; padding: 0; }
+.lc-backup { display: flex; align-items: center; gap: 6px; padding: 3px 6px; font-size: 12px; border-radius: 2px; }
+.lc-d { width: 14px; font-size: 10px; font-weight: 700; color: var(--ink-3); text-align: center; }
+.lc-bname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lc-bname .tag.rs { background: var(--ink-3); }
+.lc-bovr { min-width: 24px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.lc-bovr.t-a { color: #146c2e; } .lc-bovr.t-b { color: #3fa34d; } .lc-bovr.t-c { color: #b7791f; } .lc-bovr.t-d { color: #c0392b; }
+.lc-slot.rs .lc-name, .lc-slot.rs .lc-bname { color: var(--ink-3); }
+.lc-label { display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px; font-size: 12px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; }
+.lc-label small { font-size: 10px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--ink-3); }
+.lc-bench { border-top: 1px solid var(--line); }
+.lc-bench summary { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 10px 12px; font-weight: 700; cursor: pointer; }
+.lc-bench summary small { font-weight: 400; color: var(--ink-3); }
+.lc-bench-tools { padding: 0 12px 8px; }
+.lc-find { width: 100%; max-width: 360px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 2px; font: inherit; }
+.lc-bench-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; padding: 0 12px 12px; }
+.lc-mini { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; column-gap: 8px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 2px; background: #fff; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.lc-mini:hover { background: var(--row-hover); }
+.lc-mini.on { border-color: #f5c518; box-shadow: 0 0 0 3px #f5c518; }
+.lc-mini[hidden] { display: none; }
+.lc-mshot { grid-row: 1 / span 2; width: 28px; height: 34px; border-radius: 2px; background: #e9e9e9; object-fit: cover; object-position: top; }
+.lc-mname { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lc-mmeta { grid-column: 2; font-size: 10px; letter-spacing: .3px; text-transform: uppercase; color: var(--ink-3); }
+.lc-mini .ovr-pill { grid-column: 3; grid-row: 1 / span 2; }
+.lc-mini.rs .lc-mname { color: var(--ink-3); }
+@media (max-width: 480px) { .lc-grid { grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 8px 12px; } .lc-hname { font-size: 18px; } .lc-bench-grid { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { button.lc-slot, .lc-slot.on { transition: none; transform: none; } }
 .dc-books { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 12px 12px; }
 .dc-form { border: 1px solid var(--line); border-radius: 2px; margin: 0 0 6px; background: #fff; }
 .dc-form summary { padding: 7px 10px; font-weight: 700; cursor: pointer; display: flex; justify-content: space-between; align-items: baseline; }
@@ -861,8 +916,7 @@ table.pp-table td.pp-opp, table.pp-table td.pp-opp + td { text-align: left; }
 .dc-sets th { padding: 6px 8px; text-align: left; font-size: 11px; white-space: nowrap; vertical-align: top; }
 .dc-sets td { padding: 4px 4px; vertical-align: top; min-width: 120px; }
 .dc-sets label small { display: block; font-size: 9px; font-weight: 700; letter-spacing: .4px; color: var(--ink-3); text-transform: uppercase; margin-bottom: 2px; }
-@media (max-width: 760px) { .dc-books { grid-template-columns: 1fr; } .dc-grid { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 480px) { .dc-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .dc-books { grid-template-columns: 1fr; } }
 
 /* prospect card (/recruit/<prsi>) and prospect links on the recruiting lists */
 .pr-n a.pr-link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--ink-3); }

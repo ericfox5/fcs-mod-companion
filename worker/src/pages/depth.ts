@@ -9,9 +9,10 @@ import { html, type Raw } from '../html.js';
 import { layout, box } from '../layout.js';
 import { getTeams, getPlayers, getDepthChart, getFormationSubs, getPendingDepthEdit, upsertDepthEdit, deleteDepthEdit, type PlayerRow, type MemberRow, type FormationSub } from '../db/queries.js';
 import { redirect } from '../session.js';
-import { pos, cls, teamLogo } from './common.js';
+import { pos, cls, teamLogo, teamLogoUrl, headshotUrl, teamColors } from './common.js';
+import { tier } from './player-keys.js';
 import { DEPTH_SLOTS } from '@ncaa/ncaa14';
-import { loadBook, loadIndex, teamBooks } from '../supersim/coach/books.js';
+import { loadTeamBook } from '../supersim/coach/books.js';
 import type { Book } from '../supersim/coach/types.js';
 
 const enc = encodeURIComponent;
@@ -73,13 +74,12 @@ function subsFromForm(form: FormData, roster: Set<number>): FormationSub[] {
 }
 export const subKey = (s: { side: string; set: number; slot: number }) => `${s.side}:${s.set}:${s.slot}`;
 
-async function teamBookPair(ctx: PageCtx, raw: string): Promise<{ off: Book | null; def: Book | null }> {
-  try {
-    const index = await loadIndex(ctx.env.ASSETS, ctx.url.origin); let rawObj: Record<string, unknown> | null = null; try { rawObj = JSON.parse(raw || 'null'); } catch { /* none */ }
-    const b = teamBooks(index, rawObj);
-    const [off, def] = await Promise.all([loadBook(ctx.env.ASSETS, ctx.url.origin, b.offBook).catch(() => null), loadBook(ctx.env.ASSETS, ctx.url.origin, b.defBook).catch(() => null)]);
-    return { off, def };
-  } catch { return { off: null, def: null }; }
+// the books the team runs (its playbook edits saved on the site composed over the stock books, else the stock books); null
+// when a book cannot be loaded
+async function teamBookPair(ctx: PageCtx, team: { tgid: number; raw_json: string }): Promise<{ off: Book | null; def: Book | null }> {
+  const one = (side: 'off' | 'def') => loadTeamBook(ctx.env, ctx.url.origin, ctx.dyn.id, team, side).then((t) => t.book).catch(() => null);
+  const [off, def] = await Promise.all([one('off'), one('def')]);
+  return { off, def };
 }
 
 export async function depthPage(ctx: PageCtx, tgid?: number): Promise<Response> {
@@ -106,18 +106,41 @@ export async function depthPage(ctx: PageCtx, tgid?: number): Promise<Response> 
   const sorted = [...players].sort((a, b) => a.pos - b.pos || b.overall - a.overall);
   const groups = new Map<number, PlayerRow[]>(); for (const p of sorted) groups.set(p.pos, [...(groups.get(p.pos) ?? []), p]);
   const option = (p: PlayerRow | undefined, id: number, selected: boolean) => (p ? html`<option value="${p.pgid}" ${selected ? 'selected' : ''}>${label(p)}</option>` : id ? html`<option value="${id}" ${selected ? 'selected' : ''}>#${id} (not on the roster)</option>` : html`<option value="0" ${selected ? 'selected' : ''}>—</option>`);
-  const slotSelect = (name: string, posCode: number, id: number, orig: number, extra = '') => {
+  // Lineup cards: one per position, the starter as a card (team-coloured strip, headshot, name) with the backups listed
+  // under it. Every slot is a button for the coach (depth.js swaps them and keeps the hidden s<pos>_<depth> inputs that
+  // the form posts); viewers get the same cards as plain blocks. depth.js re-renders a slot from the roster card data.
+  const colors = teamColors(team.raw_json);
+  const short = (p: PlayerRow) => `${p.first_name.charAt(0)}. ${p.last_name}`;
+  const rsTag = html`<span class="tag rs" title="Redshirting this season: the game keeps him off the field">RS</span>`;
+  const starterBody = (p: PlayerRow | undefined, id: number) => p
+    ? html`<span class="lc-strip"><span class="lc-num">#${p.jersey}</span>${p.redshirt === 1 ? rsTag : ''}<span class="ovr-pill t-${tier(p.overall)}">${p.overall}</span></span><span class="lc-pic"><img class="lc-shot" src="${headshotUrl(p)}" alt="" loading="lazy" decoding="async" width="86" height="104"></span><span class="lc-name">${short(p)}</span><span class="lc-cls">${cls(p)} · ${pos(p.pos)}</span>`
+    : html`<span class="lc-strip"><span class="lc-num">${id ? `#${id}` : ''}</span></span><span class="lc-pic"><img class="lc-shot" src="/img/faces/0.png" alt="" width="86" height="104"></span><span class="lc-name muted">${id ? 'Not on the roster' : 'Empty'}</span><span class="lc-cls">&nbsp;</span>`;
+  const backupBody = (p: PlayerRow | undefined, id: number, d: number) => p
+    ? html`<span class="lc-d">${d + 1}</span><span class="lc-bname">${short(p)}${p.redshirt === 1 ? html` ${rsTag}` : ''}</span><span class="lc-bovr t-${tier(p.overall)}">${p.overall}</span>`
+    : html`<span class="lc-d">${d + 1}</span><span class="lc-bname muted">${id ? `#${id}` : '—'}</span><span class="lc-bovr"></span>`;
+  const slot = (posCode: number, d: number, id: number, was: number, body: Raw, kind: string) => {
     const p = byId.get(id);
-    return edit
-      ? html`<select name="${name}" data-dc data-pos="${posCode}" data-orig="${orig}" aria-label="${name}" ${extra}>${option(p, id, true)}</select>`
-      : html`<span class="dc-name">${p ? label(p) : id ? `#${id}` : '—'}</span>`;
+    const c = `lc-slot ${kind}${pendingChart && id !== was ? ' changed' : ''}${p && p.redshirt === 1 ? ' rs' : ''}`;
+    return edit ? html`<button type="button" class="${c}" data-slot="${posCode}_${d}" data-pgid="${id}" data-orig="${was}" aria-label="${pos(posCode)} ${d + 1}">${body}</button>` : html`<span class="${c}">${body}</span>`;
   };
   const posCard = (posCode: number) => {
     const n = DEPTH_SLOTS[posCode]!; const ids = chart[String(posCode)] ?? []; const was = consoleChart[String(posCode)] ?? [];
-    return html`<div class="dc-pos"><h4>${pos(posCode)}<small>${groups.get(posCode)?.length ?? 0} on the roster</small></h4>
-      <ol>${Array.from({ length: n }, (_, i) => { const id = ids[i] ?? 0; const p = byId.get(id); const changed = pendingChart && id !== (was[i] ?? 0); return html`<li class="${changed ? 'changed' : ''}${p && p.redshirt === 1 ? ' rs' : ''}">${slotSelect(`s${posCode}_${i}`, posCode, id, was[i] ?? 0)}${p && p.redshirt === 1 ? html` <span class="tag" title="Redshirting this season: the game keeps him off the field">RS</span>` : ''}${p ? html` <span class="dc-cls">${cls(p)}</span>` : ''}</li>`; })}</ol></div>`;
+    const sId = ids[0] ?? 0;
+    return html`<div class="lc" data-pos="${posCode}">
+      ${slot(posCode, 0, sId, was[0] ?? 0, starterBody(byId.get(sId), sId), 'lc-starter')}
+      <ol class="lc-backups">${Array.from({ length: n - 1 }, (_, i) => { const d = i + 1, id = ids[d] ?? 0; return html`<li>${slot(posCode, d, id, was[d] ?? 0, backupBody(byId.get(id), id, d), 'lc-backup')}</li>`; })}</ol>
+      <div class="lc-label">${pos(posCode)}<small>${groups.get(posCode)?.length ?? 0} on roster</small></div>
+      ${edit ? Array.from({ length: n }, (_, d) => html`<input type="hidden" name="s${posCode}_${d}" value="${ids[d] ?? 0}">`) : ''}
+    </div>`;
   };
-  const books = await teamBookPair(ctx, team.raw_json);
+  // the roster drawer: every player as a small card; depth.js reads a player's details from these data attributes
+  const bench = edit ? html`<details class="lc-bench"><summary>Roster<small>${players.length} players · tap one, then the slot he takes (or a slot first)</small></summary>
+    <div class="lc-bench-tools"><input type="search" class="lc-find" placeholder="Find by name, number or position" aria-label="Find a player" data-bench-filter></div>
+    <div class="lc-bench-grid">${sorted.map((p) => html`<button type="button" class="lc-mini${p.redshirt === 1 ? ' rs' : ''}" data-bench="${p.pgid}" data-name="${short(p)}" data-num="${p.jersey}" data-ovr="${p.overall}" data-tier="${tier(p.overall)}" data-pos="${pos(p.pos)}" data-cls="${cls(p)}" data-shot="${headshotUrl(p)}" data-rs="${p.redshirt === 1 ? 1 : 0}" data-search="${`${p.first_name} ${p.last_name} #${p.jersey} ${pos(p.pos)}`.toLowerCase()}"><img class="lc-mshot" src="${headshotUrl(p)}" alt="" loading="lazy" decoding="async" width="28" height="34"><span class="lc-mname">${short(p)}</span><span class="lc-mmeta">#${p.jersey} · ${pos(p.pos)} · ${cls(p)}</span><span class="ovr-pill t-${tier(p.overall)}">${p.overall}</span></button>`)}</div></details>` : html``;
+  const ovr = Math.max(0, Math.min(100, Number(team.overall) || 0));
+  const head = html`<div class="lc-head"><img class="lc-hlogo" src="${teamLogoUrl(team, 'lg')}" alt="" width="56" height="56"><div class="lc-htext"><span class="lc-hk">Depth chart${pending ? html` <span class="tag pending">PENDING</span>` : ''}</span><span class="lc-hname">${team.name}</span></div><span class="lc-ovr" title="Team overall"><svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15.9"></circle><circle class="v" cx="18" cy="18" r="15.9" stroke-dasharray="${ovr} 100"></circle></svg><b>${ovr}</b><small>OVR</small></span></div>`;
+  const tabs = html`<div class="lc-tabs" role="tablist">${UNITS.map(([title], i) => html`<button type="button" role="tab" data-tab="u${i}" aria-selected="${i === 0 ? 'true' : 'false'}">${title}</button>`)}</div>`;
+  const books = await teamBookPair(ctx, team);
   const formationRows = (side: 'off' | 'def', book: Book | null): Raw => {
     if (!book) return html`<p class="muted">Playbook unavailable.</p>`;
     const forms = book.formations.filter((f) => f.sets.length);
@@ -127,16 +150,18 @@ export async function depthPage(ctx: PageCtx, tgid?: number): Promise<Response> 
   };
   const body = html`<h2>Depth Chart</h2>${picker}${flash}
     <form class="dc" method="post" action="${base}"><input type="hidden" name="tgid" value="${team.tgid}"><input type="hidden" name="week" value="${week}">
-    ${box(html`${teamLogo(team, 'sm')} ${team.name} depth chart${pending ? html` <span class="tag pending">PENDING</span>` : ''}`, html`
-      <p class="dc-note">${edit ? html`Pick who starts at every slot. ${pending ? html`<b>A pending chart is shown:</b> it reaches the console the next time the dynasty loads there and Supersim already uses it. ` : ''}The game keeps redshirts (RS) and injured players off the field; a player the game sat down as a transfer can still be placed here, which is what makes him play.` : html`Sign in as this team's coach (or the commissioner) to change it.`}</p>
-      ${edit ? html`<div class="dc-actions"><button class="btn" name="action" value="save">Save depth chart</button><button class="btn light" name="action" value="auto" formnovalidate>Fill by ratings</button>${pending ? html`<button class="btn light" name="action" value="reset" formnovalidate>Discard pending chart</button>` : ''}<span class="muted">Blank slots keep what the console has. Tap a slot to pick from the roster.</span></div>` : ''}
-      ${UNITS.map(([title, codes]) => html`<h4 class="dc-unit">${title}</h4><div class="dc-grid">${codes.map(posCard)}</div>`)}`)}
+    <section class="box lc-box" style="--team:${colors.primary};--team-2:${colors.secondary};--on-team:${colors.onPrimary}">${head}
+      <p class="dc-note">${edit ? html`Tap a player, then tap where he goes: two chart slots swap, a roster player takes the slot. ${pending ? html`<b>A pending chart is shown:</b> it reaches the console the next time the dynasty loads there and Supersim already uses it. ` : ''}The game keeps redshirts (RS) and injured players off the field; a player the game sat down as a transfer can still be placed here, which is what makes him play.` : html`Sign in as this team's coach (or the commissioner) to change it.`}</p>
+      ${edit ? html`<div class="dc-actions"><button class="btn" name="action" value="save" data-save>Save depth chart</button><button class="btn light" name="action" value="auto" formnovalidate>Fill by ratings</button>${pending ? html`<button class="btn light" name="action" value="reset" formnovalidate>Discard pending chart</button>` : ''}<span class="muted" data-hint>Blue: changed here. Amber: pending from an earlier save.</span></div><noscript><p class="dc-note">Changing the chart needs JavaScript; the chart is shown as it stands.</p></noscript>` : ''}
+      <div class="lc-units" data-tabs>${tabs}${UNITS.map(([, codes], i) => html`<div class="lc-grid" data-panel="u${i}" ${i ? 'hidden' : ''}>${codes.map(posCard)}</div>`)}</div>
+      ${bench}
+    </section>
     ${box(html`Formation subs <span class="tag" title="The game's formation-sub table has never carried a row in this league's files, so how the console reads these is unverified. Supersim honours them regardless.">EXPERIMENTAL</span>`, html`
       <p class="dc-note">A player who comes in for one slot of one set, over the depth chart (the in-game Formation Subs screen). Supersim lines up with these at once; whether the console takes them is unverified: set one in the game, advance, and the site will show it here if the encoding matches.</p>
       <div class="dc-books"><div><h4 class="dc-unit">Offense · ${books.off?.name ?? '—'}</h4>${formationRows('off', books.off)}</div><div><h4 class="dc-unit">Defense · ${books.def?.name ?? '—'}</h4>${formationRows('def', books.def)}</div></div>
       ${edit ? html`<div class="dc-actions"><button class="btn" name="action" value="save">Save depth chart and subs</button></div>` : ''}`)}
     </form>
-    ${edit ? html`<template id="dc-players">${[...groups.entries()].map(([p, list]) => html`<optgroup label="${pos(p)}" data-pos="${p}">${list.map((x) => html`<option value="${x.pgid}">${label(x)}</option>`)}</optgroup>`)}</template>` : ''}`;
+    ${edit ? html`<template id="dc-players">${[...groups.entries()].map(([p, list]) => html`<optgroup label="${pos(p)}" data-pos="${p}">${list.map((x) => html`<option value="${x.pgid}">${label(x)}</option>`)}</optgroup>`)}</template><script src="/js/depth.js" defer></script>` : ''}`;
   return layout({ strip: ctx.strip, member, members: ctx.members, path: url.pathname, title: 'Depth Chart', siteName: env.SITE_NAME, dyn, section: 'depth', body, wide: true });
 }
 

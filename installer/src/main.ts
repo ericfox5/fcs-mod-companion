@@ -28,10 +28,12 @@ import { startSwapServer } from '../../bridge/src/swap/server.js';
 import { findCfbrPkg, findDonorRoster } from '../../bridge/src/swap/find.js';
 import { applySwapPack, swapPackSummary, type SwapPackManifest } from '../../bridge/src/swap/pack.js';
 import { SWAP_ROOT } from '../../bridge/src/swap/swap.js';
+import { applyPlaybookPack, packSummary, playbookPackStatus, type PlaybookPackManifest } from '../../bridge/src/playbook-pack.js';
+import { newEntryBackupDir } from '../../bridge/src/archive-entry.js';
 import swapPage from './swap-ui.html';
 
 interface UniformFile { folder: string; name: string; offset: number; size: number; sha1: string }
-interface Payload { builtAt: string; site: string; ppuHash: string; patches: { name: string; block: string; words: number }[]; uniforms: Record<string, string>; uniformSets?: UniformFile[]; roster?: { dir: string; files: Record<string, string>; note: string }; genericRosters?: { built: string; teams: { tgid: number; team: string }[]; rows: GenericPlanRow[] }; scorebug?: { stream: string; sha: string; replaces: string[]; teams: number }; swapDonors?: { name: string; b64: string }; swapPack?: SwapPackManifest }
+interface Payload { builtAt: string; site: string; ppuHash: string; patches: { name: string; block: string; words: number }[]; uniforms: Record<string, string>; uniformSets?: UniformFile[]; roster?: { dir: string; files: Record<string, string>; note: string }; genericRosters?: { built: string; teams: { tgid: number; team: string }[]; rows: GenericPlanRow[] }; scorebug?: { stream: string; sha: string; replaces: string[]; teams: number }; swapDonors?: { name: string; b64: string }; swapPack?: SwapPackManifest; playbooks?: PlaybookPackManifest }
 const P = payload as Payload;
 const GAME = 'BLUS31159';
 const args = process.argv.slice(2);
@@ -287,6 +289,25 @@ function installSwaps(rpcs3: string): string[] {
   return applySwapPack(rpcs3, P.swapPack, blob, path.join(SWAP_ROOT, `${stamp()}-join`)).map((x) => `${x.status === 'error' ? 'NOT done' : x.label}: ${x.status === 'error' ? `${x.label}: ${x.note}` : x.note}`);
 }
 
+// ---- private playbooks the teams shaped on the site (bridge/src/playbook-pack.ts): each book into its slot's entry of
+// qkl_fe2ig.ast (only over the stock donor book or an earlier version of the same book), the list rows renamed, the teams
+// pointed at them in the roster save and the default roster. Every member needs the same books: a game between two
+// consoles with different playbook data crashes.
+function playbookBlob(): Buffer | null {
+  try { const sea = require('node:sea'); if (sea.isSea()) return Buffer.from(sea.getAsset('playbook-pack.bin')); } catch { /* not a SEA build */ }
+  const f = path.resolve(__dirname, '..', 'generated', 'playbook-pack.bin'); return fs.existsSync(f) ? fs.readFileSync(f) : null;
+}
+function installPlaybooks(rpcs3: string): string[] {
+  if (!P.playbooks) return ['this build carries no private playbooks'];
+  const blob = playbookBlob(); if (!blob) return ['this exe has no playbook pack'];
+  if (rpcs3RunningOver(gameArchives(rpcs3))) return ['RPCS3 is running from this install: close it, then run join again'];
+  const dir = newEntryBackupDir('playbook');
+  const steps = applyPlaybookPack(rpcs3, P.playbooks, blob, dir, 'FCS-online.exe join');
+  const out = steps.map((s) => `${s.label}: ${s.status === 'error' ? `NOT done: ${s.note}` : s.status === 'already' ? 'already current' : s.note}`);
+  if (steps.some((s) => s.status === 'done')) out.push(`what they replaced is backed up in ${dir} (ncaa-bridge playbook restore --backup "${dir}" puts it back)`);
+  return out;
+}
+
 // ---- swap: an FBS team into a generic slot, from a local web page (bridge/src/swap; the page is swap-ui.html) ------
 async function swapFlow(): Promise<void> {
   const rpcs3 = await chooseRpcs3(); say(`RPCS3: ${rpcs3}`);
@@ -345,6 +366,7 @@ async function setupFlow(online: boolean): Promise<void> {
   if (P.roster && flags.get('roster') !== 'false') { step(`Roster save ${P.roster.dir} (up to 90 players per team)`); say(`   ${installRoster(rpcs3)}`); }
   step(`Generic teams: home stadiums and FBS swaps${P.swapPack ? ` (${swapPackSummary(P.swapPack)})` : ''}`);
   for (const x of installSwaps(rpcs3)) say(`   ${x}`);
+  if (P.playbooks) { step(`Playbooks the teams shaped on the site (${packSummary(P.playbooks)})`); for (const x of installPlaybooks(rpcs3)) say(`   ${x}`); }
   if (online) {
     step(`Companion site: ${P.site}`);
     say('   Create your account there (Sign in), then tell the commissioner your account name so they can link your team.');
@@ -365,6 +387,7 @@ async function statusFlow(): Promise<void> {
   for (const l of genericRosterStatus(rpcs3)) say(`  ${l}`);
   say(`  ${scorebugStatus(rpcs3)}`);
   if (P.swapPack) say(`  generic slots in this build: ${swapPackSummary(P.swapPack)}`);
+  if (P.playbooks) for (const l of playbookPackStatus(rpcs3, P.playbooks)) say(`  playbook ${l}`);
   const custom = path.join(rpcs3, 'config', 'custom_configs', `config_${GAME}.yml`);
   if (fs.existsSync(custom)) { const t = fs.readFileSync(custom, 'utf8'); for (const k of ['Internet enabled', 'PSN status', 'IP swap list']) say(`  Net ${k}: ${/^  (Internet enabled|PSN status|IP swap list): (.*)$/m.exec(t.split('\n').find((l) => l.startsWith(`  ${k}:`)) ?? '')?.[2] ?? '?'}`); } else say('  no custom game config');
   const rp = path.join(rpcs3, 'config', 'rpcn.yml'); say(`  RPCN: ${fs.existsSync(rp) ? `host ${/^Host: (.*)$/m.exec(fs.readFileSync(rp, 'utf8'))?.[1] ?? '?'}, account ${/^NPID: "?([^"\n]+)"?$/m.test(fs.readFileSync(rp, 'utf8')) ? 'present' : 'none'}` : 'no rpcn.yml'}`);

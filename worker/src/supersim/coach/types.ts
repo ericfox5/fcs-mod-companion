@@ -1,14 +1,8 @@
 // Supersim coaching mode: shared types for the playbook data (tools/playbooks-extract.mts output), the live game
 // state kept in D1 (supersim_live.state_json) and the per-play detail sent to the browser.
 
-// ---- playbook JSON (worker/public/data/playbooks/<id>.json) ----
-export interface Book { id: number; bgid: number; side: 'off' | 'def'; name: string; formations: Formation[]; plays: Record<string, Play>; asg: Assign[]; ai: Record<string, number[][]> }
-export interface Formation { id: number; n: string; t: number; sets: SetDef[] }
-export interface SetDef { id: number; n: string; slots: Slot[]; plays: number[] }
-export interface Slot { i: number; pos: number; depth: number; x: number; y: number } // x: yards to the offense's right, y: yards toward the defense
-export interface Play { id: number; n: string; t: number; sit: number; f: number; v: number; h?: number; prog?: number[][]; a: number[] }
-export interface Assign { r: number; k: string; p?: number[][]; c?: number; t?: number; z?: number }
-export interface BookIndex { generated: string; books: { id: number; bgid: number; side: 'off' | 'def'; name: string; plays: number; formations: string[] }[] }
+// ---- playbook JSON (worker/public/data/playbooks/<id>.json): one definition, in @ncaa/ncaa14 (packages/ncaa14/src/playbook/types.ts) ----
+export type { Book, Formation, SetDef, Slot, Play, Assign, BookIndex } from '@ncaa/ncaa14';
 
 // ---- game input (rosters) ----
 export interface PlayerInput { id: number; name: string; number: number; pos: number; overall: number; ratings: Record<string, number>; photoUrl?: string }

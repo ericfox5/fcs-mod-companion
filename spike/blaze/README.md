@@ -35,8 +35,14 @@ the port becomes 192.168.137.1, the PS3 takes 192.168.137.x from it, and its DNS
   ```
 - webMAN MOD serves the console's file system over FTP (port 21) and its web page (port 80); the game lives in
   `dev_hdd0/GAMES/BLUS31159-[NCAA Football 14]/PS3_GAME/USRDIR` and the 1.02 data + DLC in `dev_hdd0/game/BLUS31159/USRDIR`.
-  Mirror the FCS build from the RPCS3 install (4 disc archives, qkl_patch.ast, the 12 FCS_DLC folders). With curl,
+  Mirror the FCS build from the RPCS3 install (5 disc archives: boot, fe2ig, interface, misc, stream; qkl_patch.ast; the FCS_DLC folders). With curl,
   pass `-g`: the brackets in the RPCS3 disc path are read as a URL pattern otherwise.
+- **Every DLC folder on a real PS3 needs one licensed `.edat` file.** When the game scans `USRDIR/DLC`, it runs
+  sceNpDrmIsAvailable on the files of each folder and skips the whole folder unless one of them is a licensed EDAT.
+  RPCS3 passes plain files ("Assuming npdrm file is unencrypted"), so the FCS mod's folders work there. On the PS3,
+  folders with only plain files are ignored: their teams show the archive's uniforms or crash for missing parts. Fix:
+  copy `FCS_DLC_BIGSKY/EWUXXX_GLOVES_2022_BLACK_BIG.ast.edat` (the mod's own, NPD v3, free licence, 32 KB) into every
+  `FCS_DLC_*` folder under the same name; an EDAT is bound to its file name, so never rename it.
 - A VPN that blocks LAN traffic (Proton VPN without "Allow LAN connections") makes every local address unreachable
   with "forbidden by its access permissions"; disconnect it or allow LAN.
 - Experimental physical-console adapter: see [implementation, builds and validation](../../docs/ps3-no-psn-research.md).

@@ -9,7 +9,7 @@ import { handleSupersimBridge, type SimEnv } from '../supersim/routes.js';
 import { listPendingWebVisits, markWebVisitsDelivered, insertCapture } from '../db/visits.js';
 import { listPendingWireStories, listLiveWebStoryIds, getWebStoryImageKey, markWireDelivered, wireHeadline, upsertConsoleStory, listPendingRecaps, markRecapDelivered } from '../db/wire.js';
 import { loadPlayoff, mergeFromBridge, syncPlayoffGames, type PlayoffState } from '../playoff-state.js';
-import { putPlayoffState, listPendingWebBoards, markWebBoardDelivered, getDynastyByOdId, listPendingPlayerEdits, markPlayerEditDelivered, listPendingDepthEdits, markDepthEditDelivered, listPendingRecruitEdits, markRecruitEditDelivered, listPendingOverhaulRequests, finishOverhaulRequest, getMembers, linkPersonaStatements } from '../db/queries.js';
+import { putPlayoffState, listPendingWebBoards, markWebBoardDelivered, getDynastyByOdId, listPendingPlayerEdits, markPlayerEditDelivered, listPendingDepthEdits, markDepthEditDelivered, listPendingRecruitEdits, markRecruitEditDelivered, listPendingPlaybookEdits, listPlaybookEditTeams, markPlaybookEditDelivered, listPendingOverhaulRequests, finishOverhaulRequest, getMembers, linkPersonaStatements } from '../db/queries.js';
 import { listPendingTransferEdits, markTransferEditDelivered } from '../db/transfers.js';
 
 async function sha256Hex(s: string): Promise<string> {
@@ -169,7 +169,7 @@ export async function handleBridge(req: Request, env: Env, path: string[]): Prom
     if (req.method === 'GET') {
       const odId = Number(new URL(req.url).searchParams.get('od'));
       const dyn = Number.isFinite(odId) ? await getDynastyByOdId(db, odId) : null;
-      if (!dyn) return json({ boards: [], players: [], transfers: [] });
+      if (!dyn) return json({ boards: [], players: [], transfers: [], playbooks: [], playbookTeams: [] });
       const boards = (await listPendingWebBoards(db, dyn.id)).map((b) => ({ id: b.id, tgid: b.tgid, week: b.week, seasonYear: b.season_year, note: b.note, updatedAt: b.updated_at, rows: JSON.parse(b.rows_json) }));
       const players = (await listPendingPlayerEdits(db, dyn.id)).map((p) => ({ id: p.id, tgid: p.tgid, pgid: p.pgid, week: p.week, seasonYear: p.season_year, jersey: p.jersey, pos: p.pos, redshirt: p.redshirt, firstName: p.first_name, lastName: p.last_name, note: p.note, updatedAt: p.updated_at }));
       const visits = (await listPendingWebVisits(db, dyn.id)).map((v) => ({ id: v.id, tgid: v.tgid, week: v.week, seasonYear: v.season_year, note: v.note, updatedAt: v.updated_at, rows: JSON.parse(v.rows_json) }));
@@ -181,13 +181,21 @@ export async function handleBridge(req: Request, env: Env, path: string[]): Prom
       const recruits = (await listPendingRecruitEdits(db, dyn.id)).map((e) => ({ id: e.id, prsi: e.prsi, seasonYear: e.season_year, week: e.week, firstName: e.first_name, lastName: e.last_name, pos: e.pos, height: e.height, weight: e.weight, stars: e.stars, headId: e.head_id ?? null, note: e.note, updatedAt: e.updated_at }));
       // the commissioner's "re-generate the class" requests (Fang's Recruit Overhaul, preseason only)
       const overhaul = (await listPendingOverhaulRequests(db, dyn.id)).map((r) => ({ id: r.id, seasonYear: r.season_year, requestedBy: r.requested_by, createdAt: r.created_at }));
+      // Playbook edits (migration 0027): one team's book per side as BookEdits (@ncaa/ncaa14 playbook/model.ts), written into
+      // the game's playbook database as the team's private book; the ack carries the sha of what was written
+      const playbooks = (await listPendingPlaybookEdits(db, dyn.id)).map((e) => ({ id: e.id, tgid: e.tgid, side: e.side, edits: JSON.parse(e.edits_json), note: e.note, updatedAt: e.updated_at }));
+      // every team that has book edits at all (pending or delivered): a team missing from here reset its book, and the
+      // bridge points it back at the stock one
+      const playbookTeams = (await listPlaybookEditTeams(db, dyn.id)).map((t) => ({ tgid: t.tgid, side: t.side }));
       // members' teams: the transfer-eligibility rule un-redshirts the portal players the game sat down on them
       const memberTeams = [...new Set((await getMembers(db, dyn.id)).map((m) => m.tgid).filter((t) => t > 0))];
-      return json({ dynastyWeek: dyn.week, visits, boards, players, transfers, depth, recruits, overhaul, memberTeams });
+      return json({ dynastyWeek: dyn.week, visits, boards, players, transfers, depth, recruits, overhaul, playbooks, playbookTeams, memberTeams });
     }
-    if (req.method === 'POST' && id && sub === 'delivered') { // ?kind=player / visit / transfer / depth / recruit acks that kind; a board otherwise
+    if (req.method === 'POST' && id && sub === 'delivered') { // ?kind=player / visit / transfer / depth / recruit / playbook acks that kind; a board otherwise
       const kind = new URL(req.url).searchParams.get('kind');
-      if (kind === 'player') await markPlayerEditDelivered(db, Number(id)); else if (kind === 'visit') await markWebVisitsDelivered(db, Number(id)); else if (kind === 'transfer') await markTransferEditDelivered(db, Number(id)); else if (kind === 'depth') await markDepthEditDelivered(db, Number(id)); else if (kind === 'recruit') await markRecruitEditDelivered(db, Number(id)); else await markWebBoardDelivered(db, Number(id));
+      if (kind === 'player') await markPlayerEditDelivered(db, Number(id)); else if (kind === 'visit') await markWebVisitsDelivered(db, Number(id)); else if (kind === 'transfer') await markTransferEditDelivered(db, Number(id)); else if (kind === 'depth') await markDepthEditDelivered(db, Number(id)); else if (kind === 'recruit') await markRecruitEditDelivered(db, Number(id));
+      else if (kind === 'playbook') { const body = (await readJson(req).catch(() => ({}))) as { sha?: unknown }; await markPlaybookEditDelivered(db, Number(id), typeof body?.sha === 'string' ? body.sha.slice(0, 64) : null); } // optional body {sha}: the book as written
+      else await markWebBoardDelivered(db, Number(id));
       return json({ ok: true });
     }
     if (req.method === 'POST' && id && sub === 'overhaul') { // the bridge's result for a re-generate request: {status: 'done'|'failed', message} (gzip JSON like every bridge body)

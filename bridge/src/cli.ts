@@ -17,6 +17,8 @@ import { stdaCli } from './stda.js';
 import { scorebugCli } from './scorebug.js';
 import { swapCli } from './swap/cli.js';
 import { genericCli } from './commands/generic.js';
+import { depthCli } from './commands/depth.js';
+import { playbookCli } from './commands/playbook.js';
 
 const [, , cmd, ...rest] = process.argv;
 const flags = new Map<string, string>();
@@ -150,6 +152,8 @@ switch (cmd) {
   case 'stda': try { stdaCli(args[0], flags); } catch (e) { console.error((e as Error).message); process.exitCode = 1; } break; // generic rosters in the game archives: status | rekey | restore
   case 'generic': try { genericCli(args[0], flags); } catch (e) { console.error((e as Error).message); process.exitCode = 1; } break; // generic opponents -> real teams: extract | swap | team | install
   case 'scorebug': try { scorebugCli(args[0], flags); } catch (e) { console.error((e as Error).message); process.exitCode = 1; } break; // the in-game score bug's team names / colours (qkl_patch.ast): status | export | restore
+  case 'depth': try { depthCli(args[0], args.slice(1), flags); } catch (e) { console.error((e as Error).message); process.exitCode = 1; } break; // depth charts of any save (RTG, dynasty, roster): show | set
+  case 'playbook': try { await playbookCli(args[0], flags, () => loadConfig(flags, { needSlug: false })); } catch (e) { console.error((e as Error).message); process.exitCode = 1; } break; // private playbooks on the console (per-book DBs in qkl_fe2ig.ast): status | add-play | private | sync | export | restore
   case 'swap': try { await swapCli(args[0], args.slice(1), flags); } catch (e) { console.error((e as Error).message); process.exitCode = 1; } break; // FBS team -> generic slot: list | preview | apply | restore | status | stadiums | ui
   case 'export': exportCmd(args[0]!); break;
   case 'info': info(args[0]!); break;
@@ -157,5 +161,5 @@ switch (cmd) {
   case 'verify': verify(args[0]!); break;
   case 'diff': diff(args[0]!, args[1]!); break;
   default:
-    console.log('usage: ncaa-bridge import <USR-DATA> [--url U --token T --dynasty SLUG --name NAME --note N --no-files] | od list|import|watch [--did N] | roster grow|add ... | info <USR-DATA> | export <USR-DATA> [--out file.json] | dump <USR-DATA> TABLE... [--rows n] [--json] | verify <USR-DATA> | diff <A> <B> [--table T] [--samples n]');
+    console.log('usage: ncaa-bridge import <USR-DATA> [--url U --token T --dynasty SLUG --name NAME --note N --no-files] | od list|import|watch [--did N] | roster grow|add ... | depth show|set <save> --team T ... | playbook status|poke|restore ... | info <USR-DATA> | export <USR-DATA> [--out file.json] | dump <USR-DATA> TABLE... [--rows n] [--json] | verify <USR-DATA> | diff <A> <B> [--table T] [--samples n]');
 }
