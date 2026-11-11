@@ -3,13 +3,16 @@
 import type { GameInput, GameState, PStat, Side } from './types.js';
 import { ENGINE_VERSION } from './engine.js';
 
+// players who will miss games after this one (real players only: a generated roster has no rows on the console)
+export interface LongInjury { pgid: number; tgid: number; weeks: number; type: number; name: string }
+export const longInjuries = (st: GameState, input: GameInput): LongInjury[] => (st.inj ?? []).filter((x) => x.weeks > 0 && !input.teams[x.side].synthetic).map((x) => ({ pgid: x.id, tgid: input.teams[x.side].id, weeks: x.weeks, type: x.type ?? 148, name: x.name ?? 'Pulled Hamstring' }));
 export function buildResult(st: GameState, input: GameInput) {
   const [away, home] = input.teams;
   const quarters: [number[], number[]] = [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]];
   let prev: [number, number] = [0, 0];
   for (const e of st.log) { const q = Math.min(4, e.q - 1); for (const s of [0, 1] as const) quarters[s][q]! += e.s[s] - prev[s]; prev = e.s; }
   const overtime = st.ot ? st.ot.period : 0;
-  return { version: ENGINE_VERSION, seed: st.seed, complete: st.final, winner: st.winner, score: st.score, overtime, quarters, plays: st.n, teams: [away.id, home.id], drives: st.drives, events: st.log, stats: st.stats, teamStats: st.team, finishedAt: new Date().toISOString() };
+  return { version: ENGINE_VERSION, seed: st.seed, complete: st.final, winner: st.winner, score: st.score, overtime, quarters, plays: st.n, teams: [away.id, home.id], drives: st.drives, events: st.log, stats: st.stats, teamStats: st.team, injuries: longInjuries(st, input), finishedAt: new Date().toISOString() };
 }
 
 // webMember: the run was started by a web-only member (migration 0014), whose team the console runs as a CPU team
@@ -49,6 +52,7 @@ function gameDetail(st: GameState, input: GameInput, quarters: [number[], number
     return { tgid: T.id, stats: st.team[side], players, ...(T.synthetic ? { synthetic: true } : {}) };
   });
   // v2: player positions, the PStat detail fields and the scoring summary (engine ScoreEv rows, side = team index)
-  return { v: 2, overtime: st.ot ? st.ot.period : 0, quarters, teams, scoring: (st.sc ?? []).map((e) => ({ ...e, tgid: input.teams[e.side].id })) };
+  // injuries: players out for the weeks after this game (the league server writes them to the console's IGAM table)
+  return { v: 2, overtime: st.ot ? st.ot.period : 0, quarters, teams, injuries: longInjuries(st, input), scoring: (st.sc ?? []).map((e) => ({ ...e, tgid: input.teams[e.side].id })) };
 }
 export const sideOf = (input: GameInput, tgid: number): Side | null => (input.teams[0].id === tgid ? 0 : input.teams[1].id === tgid ? 1 : null);

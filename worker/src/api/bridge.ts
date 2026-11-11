@@ -1,5 +1,7 @@
 // Bridge API: authenticated with the BRIDGE_TOKEN secret. Imports a dynasty export in chunks into D1 and stores raw save
 // files in R2. Online dynasties (the Blaze stub's store) also carry their members and uploaded results.
+import { recordLines } from '../odds.js';
+import type { Dynasty } from '../db/queries.js';
 import type { Env } from '../env.js';
 import { json } from '../html.js';
 import { IMPORT_TABLES, buildInserts } from '../db/import-tables.js';
@@ -299,6 +301,9 @@ export async function handleBridge(req: Request, env: Env, path: string[]): Prom
       purge.push(db.prepare("UPDATE dynasties SET current_snapshot_id = ?, season_year = ?, week = ?, stage = ?, week_type = ?, updated_at = datetime('now') WHERE id = ?").bind(s, y, snap.week, snap.stage, snap.week_type ?? null, d));
       purge.push(db.prepare("INSERT INTO audit_log (dynasty_id, actor, action, detail_json) VALUES (?, 'bridge', 'import.commit', ?)").bind(d, JSON.stringify({ snapshotId: s, seasonYear: y, week: snap.week })));
       await db.batch(purge);
+      // the lines of this week's and next week's unplayed games as they now stand (the closing line once a game is played)
+      const dynNow = await db.prepare('SELECT * FROM dynasties WHERE id = ?').bind(d).first<Dynasty>().catch(() => null);
+      if (dynNow) await recordLines(db, dynNow);
       return json({ ok: true, snapshotId: s });
     }
 

@@ -16,13 +16,18 @@ const EP = root?.dataset.endpoint || '';
 const BOOKS = root?.dataset.books || '/data/playbooks/';
 const BACK = root?.dataset.back || '/';
 const MODE = root?.dataset.mode || 'coach'; // 'watch': the page was opened to spectate (the server decides for real)
+// Quickplay (data-endpoint="local"): the game runs in this browser (quickplay.js, the same engine), with no dynasty, no
+// account and no result sent anywhere. QWATCH: CPU against CPU, played out drive by drive after the start.
+const QUICK = EP === 'local';
+const QWATCH = QUICK && new URLSearchParams(location.search).get('side') === 'watch';
+let LOCAL = null;
 const POS =['QB', 'HB', 'FB', 'WR', 'TE', 'LT', 'LG', 'C', 'RG', 'RT', 'LE', 'RE', 'DT', 'LLB', 'MLB', 'RLB', 'CB', 'FS', 'SS', 'K', 'P', 'KR', 'PR', 'KO', 'LS'];
 const REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 // depth-chart fallbacks per position (mirrors the engine's lineup())
 const GROUP = { 0: [0], 1: [1, 2, 21, 22], 2: [2, 1, 4], 3: [3, 21, 22, 1], 4: [4, 2, 5, 9], 5: [5, 9, 6, 8, 7], 6: [6, 8, 7, 5, 9], 7: [7, 6, 8], 8: [8, 6, 7, 9, 5], 9: [9, 5, 8, 6, 7], 10: [10, 11, 12, 15, 13], 11: [11, 10, 12, 13, 15], 12: [12, 10, 11], 13: [13, 15, 14, 18], 14: [14, 13, 15, 18], 15: [15, 13, 14, 18], 16: [16, 17, 18, 3], 17: [17, 18, 16], 18: [18, 17, 16, 14], 19: [19, 20, 23], 20: [20, 19], 21: [21, 22, 3, 1, 16], 22: [22, 21, 3, 16, 1], 23: [23, 19, 20], 24: [24, 7, 4, 6] };
 const FLASH = { throw: 'THROW', catch: 'CATCH', incomplete: 'INCOMPLETE', interception: 'INTERCEPTED', handoff: 'HANDOFF', kick: 'KICK', punt: 'PUNT', faircatch: 'FAIR CATCH', touchback: 'TOUCHBACK', good: "IT'S GOOD!", doinkin: 'DOINK… AND IN!', doink: 'DOINK! NO GOOD', widel: 'WIDE LEFT', wider: 'WIDE RIGHT', short: 'SHORT', blocked: 'BLOCKED' };
 const ROLE = { QB: 'QUARTERBACK', TARGET: 'INTENDED RECEIVER', TACKLE: 'TACKLER', SACK: 'PASS RUSHER', INTERCEPTION: 'INTERCEPTOR', 'QB KEEPER': 'QUARTERBACK' };
-const STATUS = { playoff: 'Recorded in the FCS playoff bracket.', pending: 'Result sent to the league server. Waiting for the bridge to accept it.', accepted: 'Accepted by the league server.', synced: 'Synced with the console.', conflict: 'Overridden: the console recorded its own result for this game (it simmed the game at the advance, or the game was played in-game).' };
+const STATUS = { quickplay: 'Quickplay game: just for fun. Nothing is saved or sent to a console.', playoff: 'Recorded in the FCS playoff bracket.', pending: 'Result sent to the league server. Waiting for the bridge to accept it.', accepted: 'Accepted by the league server.', synced: 'Synced with the console.', conflict: 'Overridden: the console recorded its own result for this game (it simmed the game at the advance, or the game was played in-game).' };
 // The league server turns the final into console game data (spike/blaze/server/gamedata.mjs); first real test pending.
 const CONSOLE_NOTE = 'Console import is new: the league server hands this final to the console as game data, so the week advance should keep this score and these stats instead of simming the game. If the console still sims it, the console result wins.';
 const NOYDS = new Set(['kickoff', 'punt', 'xp', 'fg', 'penalty']);
@@ -86,6 +91,7 @@ const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
 // ---- API ---------------------------------------------------------------------------------------------------------
 async function api(method, body) {
+  if (QUICK) return (await (LOCAL ??= import('./quickplay.js'))).api(method, body);
   const res = await fetch(EP, { method, credentials: 'same-origin', cache: 'no-store', headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
   let data = null; try { data = await res.json(); } catch { /* not JSON */ }
   if (!res.ok) throw Object.assign(new Error(data?.error || `Request failed (${res.status})`), { status: res.status, data });
@@ -554,7 +560,7 @@ function updateLighting() { const time = sceneTime(S.state); root.dataset.time =
 // last: the reading when the count ended (the snap, the play clock running out); the board keeps showing it while the
 // request is out, instead of jumping back to the clock as it stood before the huddle
 const HUD = { timer: 0, on: false, t0: 0, pc0: 40, pcLen: 40, cpuAt: null, clock: 0, running: false, expired: false, mine: false, last: null };
-const hudActive = () => { const st = S.state; return !!st && !st.final && !S.watch && !S.waiting && !S.busy && !A.playing && !S.hold && !S.opponentHuman && st.phase === 'snap' && !!st.huddle; };
+const hudActive = () => { const st = S.state; return !!st && !st.final && !st.decision && !S.watch && !S.waiting && !S.busy && !A.playing && !S.hold && !S.opponentHuman && st.phase === 'snap' && !!st.huddle; };
 function startHud() {
   stopHud(); if (!hudActive()) { renderClocks(null); return; }
   const st = S.state, hd = st.huddle, pcLen = st.pc ?? 40;
@@ -643,7 +649,10 @@ async function startGame() {
   if (S.busy) return; S.busy = true; updateControls();
   try { const r = await post({ action: 'start' }); if (r) { applyPayload(r); render(); await ensureBooks(); drawPreSnap(); toast(S.state?.phase === 'toss' ? 'Captains to midfield for the coin toss.' : 'Kickoff. Every call from here is yours.', { ok: true }); } } catch (e) { toast(e.message, { retry: startGame }); }
   finally { S.busy = false; updateControls(); showPicker(); startHud(); }
+  if (QWATCH) watchOut();
 }
+// Quickplay, CPU against CPU: drive after drive, every play animated, until the final or the Stop button
+async function watchOut() { while (S.state && !S.state.final && !S.busy) { await auto('drive'); if (S.stopAuto) break; } }
 // human opponent: poll until the other sideline's call lands
 function startPoll() {
   stopPoll(); stopHud(); S.waiting = true; renderPicker();
@@ -718,13 +727,13 @@ function suggest() {
 function topbar() {
   E.own = h('div', { class: 'ss-own' }); renderOwn();
   return h('header', { class: 'ss-topbar' },
-    h('a', { class: 'ss-brand', href: BACK }, h('span', { class: 'ss-shield' }, 'FCS'), ' ONLINE DYNASTY ', h('span', { class: 'ss-context' }, S.watch ? '/ SUPERSIM · WATCHING' : '/ SUPERSIM')),
+    h('a', { class: 'ss-brand', href: BACK }, h('span', { class: 'ss-shield' }, 'FCS'), QUICK ? ' QUICKPLAY ' : ' ONLINE DYNASTY ', h('span', { class: 'ss-context' }, S.watch ? '/ SUPERSIM · WATCHING' : '/ SUPERSIM')),
     E.own);
 }
 // the top bar's right side: the coach's own team, or for a spectator the LIVE / FINAL badge and the two coaches
 function renderOwn() {
   if (!E.own) return; clear(E.own); const T = S.input?.teams;
-  const back = S.input?.backUrl ? h('a', { href: S.input.backUrl }, 'Back to game ↗') : h('a', { href: BACK }, 'Dynasty ↗');
+  const back = S.input?.backUrl ? h('a', { href: S.input.backUrl }, QUICK ? 'Change teams ↗' : 'Back to game ↗') : h('a', { href: BACK }, 'Dynasty ↗');
   if (S.watch && T) { E.own.append(liveBadge(), h('span', { class: 'ss-coaches' }, h('b', {}, coachName(0)), ` (${T[0].abbr}) vs `, h('b', {}, coachName(1)), ` (${T[1].abbr})`), back); return; }
   const me = S.you != null ? T?.[S.you] : null;
   E.own.append(me ? h('img', { src: me.logo || '', alt: '' }) : null, me ? h('span', {}, `${me.name} · Your team`) : null, back);
@@ -748,8 +757,8 @@ function liveGamesList(games) {
 function ensureShell() {
   if (S.shell) return; clear(root); root.className = S.watch ? 'ss watch' : 'ss';
   const heading = h('div', { class: 'ss-heading' },
-    h('div', {}, h('div', { class: 'ss-eyebrow' }, `${S.input.dynasty || 'Dynasty'} / Week ${S.input.week}`), h('h1', {}, 'Super', h('span', {}, 'sim')), h('div', { class: 'ss-sub' }, S.watch ? `${coachName(0)} vs ${coachName(1)} · you are watching` : 'Your game. Every snap is yours to call.')),
-    h('div', { class: 'ss-heading-actions' }, h('span', { class: 'ss-tag' }, S.watch ? 'WATCHING' : 'COACH MODE'), h('select',{ 'aria-label': 'Stadium lighting', onchange: (e) => { S.lighting = e.target.value; updateLighting(); } }, [['auto', 'Auto daylight'], ['day', 'Day'], ['dusk', 'Dusk'], ['night', 'Night']].map(([v, l]) => h('option', { value: v }, l))), h('a', { class: 'ss-btnlink', href: S.input.backUrl || BACK }, 'Back to game ↗')));
+    h('div', {}, h('div', { class: 'ss-eyebrow' }, QUICK ? 'Quickplay / FCS 2026 rosters' : `${S.input.dynasty || 'Dynasty'} / Week ${S.input.week}`), h('h1', {}, 'Super', h('span', {}, 'sim')), h('div', { class: 'ss-sub' }, S.watch ? `${coachName(0)} vs ${coachName(1)} · you are watching` : QWATCH ? 'CPU against CPU. Sit back, or stop it and take over the away sideline.' : 'Your game. Every snap is yours to call.')),
+    h('div', { class: 'ss-heading-actions' }, h('span', { class: 'ss-tag' }, S.watch || QWATCH ? 'WATCHING' : 'COACH MODE'), h('select',{ 'aria-label': 'Stadium lighting', onchange: (e) => { S.lighting = e.target.value; updateLighting(); } }, [['auto', 'Auto daylight'], ['day', 'Day'], ['dusk', 'Dusk'], ['night', 'Night']].map(([v, l]) => h('option', { value: v }, l))), h('a', { class: 'ss-btnlink', href: S.input.backUrl || BACK }, QUICK ? 'Change teams ↗' : 'Back to game ↗')));
   E.score = h('div', { class: 'ss-scoreboard' });
   E.side = [0, 1].map((i) => h('aside', { class: `ss-sidebox${i ? ' home' : ''}` }));
   E.popup = h('section', { class: 'ss-play-popup', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true', hidden: true });
@@ -762,7 +771,7 @@ function ensureShell() {
   E.focus = h('button', { type: 'button', 'aria-pressed': 'false', onclick: () => { S.focus = !S.focus; E.focus.setAttribute('aria-pressed', String(S.focus)); E.focus.textContent = S.focus ? 'Full field' : 'Focus play'; focusView(A.los ?? (S.state ? absBall(S.state, actingOff(S.state), S.state.ball) : null)); } }, 'Focus play');
   const stage = h('section', { class: 'ss-stage', 'aria-label': 'Football game' }, E.score, arena, h('div', { class: 'ss-ticker' }, E.down, E.call, E.gain), h('div', { class: 'ss-controls' }, E.speed, E.replay, E.skip, E.focus, h('span', { class: 'ss-legend' }, h('i', { class: 'los' }), 'Scrimmage ', h('i', { class: 'fd' }), 'First down')));
   E.panel = h('section', { class: 'ss-panel ss-collapsible' });
-  root.append(topbar(), h('main', { class: 'ss-wrap' }, heading, stage, E.panel, h('div', { class: 'ss-footer' }, h('span', {}, S.watch ? 'FCS ONLINE DYNASTY · SUPERSIM / WATCHING' : 'FCS ONLINE DYNASTY · SUPERSIM / COACH MODE'), h('span', {}, `Game ${S.input.gameId || ''} · results are rolled at the snap; nothing is pre-decided`))));
+  root.append(topbar(), h('main', { class: 'ss-wrap' }, heading, stage, E.panel, h('div', { class: 'ss-footer' }, h('span', {}, QUICK ? 'FCS · SUPERSIM / QUICKPLAY' : S.watch ? 'FCS ONLINE DYNASTY · SUPERSIM / WATCHING' : 'FCS ONLINE DYNASTY · SUPERSIM / COACH MODE'), h('span', {}, QUICK ? 'Played in your browser · results are rolled at the snap; nothing is saved' : `Game ${S.input.gameId || ''} · results are rolled at the snap; nothing is pre-decided`))));
   S.shell = true; setPicker(S.picker);
 }
 function render() {
@@ -803,7 +812,7 @@ function renderSide() {
 }
 function renderTicker() {
   const st = viewState(), T = S.input?.teams; if (!E.down || !T) return;
-  if (!st) { E.down.textContent = 'PREGAME'; E.call.textContent = `${T[0].name} at ${T[1].name}`; E.gain.textContent = `WEEK ${S.input.week}`; return; }
+  if (!st) { E.down.textContent = 'PREGAME'; E.call.textContent = `${T[0].name} at ${T[1].name}`; E.gain.textContent = QUICK ? 'QUICKPLAY' : `WEEK ${S.input.week}`; return; }
   E.down.textContent = st.final ? 'FINAL' : `${downDist(st).toUpperCase()}${st.phase === 'snap' ? ` · ${spotLabel(st.off, st.ball)}` : st.phase === 'kickoff' ? ` · ${abbr(st.kicking)} ${st.freeKick ? 20 : 35}` : ''}`;
   if (A.playing && A.detail) { E.call.textContent = `${abbr(A.detail.off)} snap it — ${A.detail.offPlay?.n || 'the play'} against ${A.detail.defPlay?.n || 'the defense'}…`; E.gain.textContent = 'LIVE'; return; }
   const d = A.detail || st.last, sel = S.selected;
@@ -818,14 +827,15 @@ function callCtx() {
   return { st, off, side, bookId, book, gs: book ? groups(book, side, st) : [] };
 }
 function matchTeam(i, cls, sub) { const T = S.input.teams[i]; return h('div', { class: `ss-mteam t${i}${cls}` }, h('img', { src: T.logo || '', alt: '' }), h('div', {}, h('b', {}, T.name), h('small', {}, sub))); }
+const CALL_EVERY = 'You call every play of your team’s game from its real NCAA Football 14 playbook: formation, set, play, snap. Results are rolled when you snap; nothing is pre-decided. On defense you call the coverage.';
 function startCard() {
   const f = S.final, T = S.input.teams;
   const sub = (i) => `${coachName(i)} · ${bookName(T[i].offBook)} / ${bookName(T[i].defBook)}`;
   return h('div', { class: 'ss-cardbody' },
-    h('div', { class: 'ss-cardhead' }, h('div', {}, h('div', { class: 'ss-eyebrow' }, 'Coach mode'), h('h2', {}, 'Call every snap')), h('div', { class: 'ss-matchup' }, matchTeam(0, S.you === 0 ? ' you' : '', sub(0)), h('span', { class: 'ss-at' }, 'at'), matchTeam(1, S.you === 1 ? ' you' : '', sub(1)))),
-    h('p', { class: 'ss-summary' }, f ? `This game already has an official result. ${STATUS[f.status] || f.status}` : 'You call every play of your team’s game from its real NCAA Football 14 playbook: formation, set, play, snap. Results are rolled when you snap; nothing is pre-decided. On defense you call the coverage. The final is sent to the league server for the console.'),
-    f ? null : h('p', { class: 'ss-warn' }, CONSOLE_NOTE),
-    h('div', { class: 'ss-row' }, f ? null : h('button', { class: 'primary ss-snap', type: 'button', onclick: startGame }, 'Start game'), h('a', { class: 'ss-btnlink', href: S.input.backUrl || BACK }, 'Back to game page')),
+    h('div', { class: 'ss-cardhead' }, h('div', {}, h('div', { class: 'ss-eyebrow' }, QUICK ? 'Quickplay' : 'Coach mode'), h('h2', {}, QWATCH ? 'Watch it play out' : 'Call every snap')), h('div', { class: 'ss-matchup' }, matchTeam(0, S.you === 0 ? ' you' : '', sub(0)), h('span', { class: 'ss-at' }, 'at'), matchTeam(1, S.you === 1 ? ' you' : '', sub(1)))),
+    h('p', { class: 'ss-summary' }, f ? `This game already has an official result. ${STATUS[f.status] || f.status}` : `${CALL_EVERY} ${QWATCH ? 'Here the CPU calls both sidelines; the Sim menu and Stop are yours.' : QUICK ? 'This is a Quickplay game on the 2026 FCS rosters: it is played in your browser and nothing is saved.' : 'The final is sent to the league server for the console.'}`),
+    f || QUICK ? null : h('p', { class: 'ss-warn' }, CONSOLE_NOTE),
+    h('div', { class: 'ss-row' }, f ? null : h('button', { class: 'primary ss-snap', type: 'button', onclick: startGame }, 'Start game'), h('a', { class: 'ss-btnlink', href: S.input.backUrl || BACK }, QUICK ? 'Change teams' : 'Back to game page')),
     S.liveGames.length ? liveGamesList(S.liveGames) : null);
 }
 // ---- watching the coin toss: the same card, no buttons
@@ -849,6 +859,33 @@ function tossCard() {
     h('p', { class: 'ss-note' }, 'Defer: kick off now and receive the second-half kickoff. Kick off: the other team receives both halves.')];
   else body = [h('p', { class: 'ss-summary' }, 'The other coach won the toss and is choosing…')];
   return h('div', { class: 'ss-cardbody ss-toss' }, h('div', { class: 'ss-cardhead' }, h('div', {}, h('div', { class: 'ss-eyebrow' }, 'Coin toss'), h('h2', {}, 'Who gets the ball?')), coin), ...body);
+}
+// ---- a penalty the coach may accept or decline: both answers side by side, and a clock on the usual call ----------------
+const DECIDE_SECONDS = 12;
+const ORD = ['', '1st', '2nd', '3rd', '4th'];
+function optionLine(o) {
+  const st = S.state; const sc = o.score[0] !== st.score[0] || o.score[1] !== st.score[1] ? ` · ${abbr(0)} ${o.score[0]}, ${abbr(1)} ${o.score[1]}` : '';
+  if (o.phase === 'pat') return `Touchdown ${abbr(o.off)}; the try is next${sc}`;
+  if (o.phase === 'kickoff') return `Kickoff next${sc}`;
+  if (o.phase === 'final') return `End of game${sc}`;
+  return `${abbr(o.off)} ball, ${ORD[o.down] || ''} & ${o.ball + o.toGo >= 100 ? 'goal' : o.toGo} at ${spotLabel(o.off, o.ball)}${sc}`;
+}
+function decisionCard() {
+  const d = S.state.decision, T = S.input.teams, mine = d.side === S.you;
+  if (!mine) { stopDecide(); if (S.opponentHuman) startPoll(); return h('div', { class: 'ss-cardbody ss-decide' }, h('div', { class: 'ss-cardhead' }, h('div', {}, h('div', { class: 'ss-eyebrow' }, 'Flag on the play'), h('h2', {}, `${d.foul}: ${T[d.side].name} have the choice`))), h('p', { class: 'ss-summary' }, 'Waiting for the other coach to accept or decline…')); }
+  const opt = (k, title) => h('button', { class: `ss-option${d.def === k ? ' usual' : ''}`, type: 'button', onclick: () => decidePenalty(k) }, h('b', {}, title, d.def === k ? h('i', {}, 'usual call') : null), h('span', { class: 'ss-opt-next' }, optionLine(d.options[k])), h('small', {}, d.options[k].text));
+  if (!S.decide || S.decide.n !== d.n) { stopDecide(); S.decide = { n: d.n, left: DECIDE_SECONDS, timer: setInterval(() => { const x = S.decide; if (!x) return; x.left -= 1; const el = document.getElementById('ss-decide-clock'); if (el) el.textContent = `:${String(Math.max(0, x.left)).padStart(2, '0')}`; if (x.left <= 0) decidePenalty(d.def); }, 1000) }; }
+  return h('div', { class: 'ss-cardbody ss-decide' },
+    h('div', { class: 'ss-cardhead' }, h('div', {}, h('div', { class: 'ss-eyebrow' }, 'Flag on the play'), h('h2', {}, `${d.foul}: accept or decline?`)), h('div', { class: 'ss-decide-clock', id: 'ss-decide-clock', title: 'The usual call stands when this runs out' }, `:${String(S.decide.left).padStart(2, '0')}`)),
+    h('div', { class: 'ss-options' }, opt('accept', 'Accept the penalty'), opt('decline', 'Decline: the play stands')),
+    h('p', { class: 'ss-note' }, 'The board shows the usual call. Your answer stands when you pick, or the usual call when the clock runs out.'));
+}
+function stopDecide() { if (S.decide) { clearInterval(S.decide.timer); S.decide = null; } }
+async function decidePenalty(choice) {
+  if (S.busy || !S.state?.decision) return; stopDecide(); S.busy = true;
+  try { const r = await post({ action: 'decide', choice }); if (r) { applyPayload(r); render(); drawPreSnap(); toast(choice === 'accept' ? 'Penalty accepted.' : 'Penalty declined: the play stands.', { ok: true }); } }
+  catch (e) { toast(e.message); }
+  finally { S.busy = false; renderSide(); renderTabs(); updateControls(); showPicker(); startHud(); }
 }
 async function toss(body) {
   if (S.busy) return; S.busy = true; S.tossSpin = true; renderPicker();
@@ -897,9 +934,11 @@ function finalCard() {
   return h('div', { class: 'ss-cardbody' },
     h('div', { class: 'ss-cardhead' }, h('div', {}, h('div', { class: 'ss-eyebrow' }, st.ot ? `Final · ${st.q - 4}OT` : 'Final'), h('h2', {}, w == null ? 'Tie game' : `${T[w].name} win`)), h('div', { class: 'ss-matchup final' }, side(0), side(1))),
     h('div', { class: `ss-statuspill s-${f?.status || 'none'}` }, f ? STATUS[f.status] || f.status : 'The result is being recorded.'),
-    f && f.status !== 'synced' && f.status !== 'conflict' ? h('p', { class: 'ss-warn' }, CONSOLE_NOTE) : null,
-    h('div', { class: 'ss-row' }, h('a', { class: 'primary ss-btnlink', href: S.input.backUrl || BACK }, 'Back to game page'), h('button', { type: 'button', onclick: () => { S.tab = 'box'; setTabsOpen(true); E.panel?.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'start' }); } }, 'Box score ↓')));
+    f && !QUICK && f.status !== 'synced' && f.status !== 'conflict' ? h('p', { class: 'ss-warn' }, CONSOLE_NOTE) : null,
+    h('div', { class: 'ss-row' }, QUICK ? h('button', { class: 'primary', type: 'button', onclick: playAgain }, 'Play again') : null, h('a', { class: QUICK ? 'ss-btnlink' : 'primary ss-btnlink', href: S.input.backUrl || BACK }, QUICK ? 'Pick another matchup' : 'Back to game page'), h('button', { type: 'button', onclick: () => { S.tab = 'box'; setTabsOpen(true); E.panel?.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'start' }); } }, 'Box score ↓')));
 }
+// Quickplay: throw the finished game away and kick off the same matchup again
+async function playAgain() { try { applyPayload(await api('POST', { action: 'abandon' })); S.final = null; S.lastPhase = null; render(); showPicker(); } catch (e) { toast(e.message); } }
 function renderPicker() {
   const el = E.picker; if (!el) return; clear(el); el.className = `ss-picker${S.picker === 'open' ? ' show' : ''}`;
   const card = (node) => { el.classList.add('card'); el.append(node); setPicker('open'); };
@@ -907,6 +946,8 @@ function renderPicker() {
   if (S.state.final) return card(finalCard());
   if (S.watch) { if (S.state.phase === 'toss') return card(watchTossCard()); setPicker('off'); return; } // no play picker for a spectator
   if (S.state.phase === 'toss') return card(tossCard());
+  if (S.state.decision) return card(decisionCard());
+  stopDecide();
   const c = callCtx(); if (!c) return; const { st, side, book, gs } = c;
   if (S.waiting) return card(h('div', { class: 'ss-waiting' }, h('div', { class: 'ss-spin' }), h('b', {}, `Waiting for ${S.input.teams[1 - S.you].name}…`), h('p', { class: 'ss-note' }, 'Your call is in. The snap resolves when the other coach sends theirs; this page checks every few seconds.')));
   if (!book) { el.classList.add('card'); el.append(S.bookErr ? h('div', { class: 'ss-waiting' }, h('p', { class: 'ss-warning' }, S.bookErr), h('button', { class: 'primary', type: 'button', onclick: () => { ensureBooks(true); renderPicker(); } }, 'Reload playbook')) : h('div', { class: 'ss-waiting' }, h('div', { class: 'ss-spin' }), 'Loading your playbook…')); return; }
@@ -1060,7 +1101,7 @@ async function afterLoadField() {
 }
 async function boot() {
   if (!root || !EP) return;
-  root.className = 'ss'; clear(root); root.append(h('div', { class: 'ss-loading' }, MODE === 'watch' ? 'Loading the game…' : 'Loading your current matchup…'));
+  root.className = 'ss'; clear(root); root.append(h('div', { class: 'ss-loading' }, MODE === 'watch' ? 'Loading the game…' : QUICK ? 'Loading the two rosters…' : 'Loading your current matchup…'));
   fetch(`${BOOKS}index.json`, { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((idx) => { S.index = idx; if (S.payload && !S.state) renderPicker(); }).catch(() => {});
   try { applyPayload(await api('GET')); render(); afterLoadField(); } catch (e) { screen(errorPanel(e.status === 401 ? `Sign in as a dynasty member to ${MODE === 'watch' ? 'watch this game' : 'coach your game'}.` : e.message, boot)); }
 }

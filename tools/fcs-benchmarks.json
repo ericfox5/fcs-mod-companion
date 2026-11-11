@@ -1,0 +1,169 @@
+{
+ "source": "NCAA.com FCS team statistics",
+ "through_games": "Saturday, November 07, 2026",
+ "built": "2026-11-10",
+ "stats": {
+  "points": {
+   "mean": 26.001,
+   "lo": 17.7,
+   "hi": 36.1,
+   "teams": 124
+  },
+  "plays": {
+   "mean": 65.352,
+   "lo": 59.556,
+   "hi": 70.818,
+   "teams": 124
+  },
+  "yards": {
+   "mean": 360.804,
+   "lo": 288.9,
+   "hi": 437.6,
+   "teams": 124
+  },
+  "yards_per_play": {
+   "mean": 5.514,
+   "lo": 4.57,
+   "hi": 6.55,
+   "teams": 124
+  },
+  "rush_att": {
+   "mean": 35.486,
+   "lo": 30.4,
+   "hi": 40.9,
+   "teams": 124
+  },
+  "rush_yds": {
+   "mean": 152.014,
+   "lo": 100.7,
+   "hi": 206,
+   "teams": 124
+  },
+  "yards_per_carry": {
+   "mean": 4.248,
+   "lo": 3.1,
+   "hi": 5.56,
+   "teams": 124
+  },
+  "pass_att": {
+   "mean": 29.867,
+   "lo": 23.4,
+   "hi": 37.7,
+   "teams": 124
+  },
+  "completion_pct": {
+   "mean": 59.19,
+   "lo": 53.055,
+   "hi": 66.554,
+   "teams": 124
+  },
+  "pass_yds": {
+   "mean": 208.791,
+   "lo": 153.4,
+   "hi": 266.3,
+   "teams": 124
+  },
+  "yards_per_att": {
+   "mean": 6.992,
+   "lo": 5.79,
+   "hi": 8.14,
+   "teams": 124
+  },
+  "sacks": {
+   "mean": 1.891,
+   "lo": 1.2,
+   "hi": 2.6,
+   "teams": 124
+  },
+  "tfl": {
+   "mean": 5.402,
+   "lo": 4,
+   "hi": 6.9,
+   "teams": 124
+  },
+  "interceptions": {
+   "mean": 0.819,
+   "lo": 0.4,
+   "hi": 1.2,
+   "teams": 124
+  },
+  "fumbles_lost": {
+   "mean": 0.572,
+   "lo": 0.222,
+   "hi": 0.9,
+   "teams": 124
+  },
+  "turnovers": {
+   "mean": 1.391,
+   "lo": 0.875,
+   "hi": 2,
+   "teams": 124
+  },
+  "penalties": {
+   "mean": 6.326,
+   "lo": 5,
+   "hi": 8,
+   "teams": 124
+  },
+  "penalty_yds": {
+   "mean": 56.791,
+   "lo": 42.88,
+   "hi": 72.7,
+   "teams": 124
+  },
+  "first_downs": {
+   "mean": 19.192,
+   "lo": 15.5,
+   "hi": 23,
+   "teams": 124
+  },
+  "third_down_pct": {
+   "mean": 38.677,
+   "lo": 30.9,
+   "hi": 46.2,
+   "teams": 124
+  },
+  "fourth_down_pct": {
+   "mean": 52.408,
+   "lo": 33.3,
+   "hi": 75,
+   "teams": 124
+  },
+  "punts": {
+   "mean": 4.573,
+   "lo": 3.375,
+   "hi": 5.9,
+   "teams": 124
+  },
+  "punt_avg": {
+   "mean": 40.642,
+   "lo": 37.275,
+   "hi": 44.395,
+   "teams": 124
+  },
+  "punt_net": {
+   "mean": 36.091,
+   "lo": 32.25,
+   "hi": 40.56,
+   "teams": 124
+  },
+  "red_zone_score_pct": {
+   "mean": 79.852,
+   "lo": 67.5,
+   "hi": 90.9,
+   "teams": 124
+  },
+  "fg_pct": {
+   "mean": 72.635,
+   "lo": 55.6,
+   "hi": 88.9,
+   "teams": 86
+  },
+  "fg_att": {
+   "mean": 1.494,
+   "lo": 1,
+   "hi": 1.9,
+   "teams": 86
+  }
+ }
+}

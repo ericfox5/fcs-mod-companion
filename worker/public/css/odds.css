@@ -1,0 +1,125 @@
+/* The odds module on a game preview (pages/odds.ts oddsBox): a black scoreboard with the projected score (the site's
+   own scoreboard numerals) and a win-probability bar in the two teams' colours, three line tiles in a heavy condensed
+   italic numeral face, and the matchup edges as bars. Same sports-network look as base.css: black bars, red tag, white cards, tight caps labels. */
+/* the line numbers: Barlow Condensed ExtraBold Italic (SIL Open Font License), self-hosted; without the file the
+   condensed system faces stand in */
+@font-face { font-family: "Odds Numerals"; src: url("/fonts/barlow-condensed-800-italic.woff2") format("woff2"); font-weight: 800; font-style: italic; font-display: swap; }
+.oddsbox { background: var(--card); border: 1px solid var(--line); border-radius: 3px; margin: 0 0 18px; overflow: hidden; }
+.oddsbox .ob-ab { font: 800 15px/1 "Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif; font-stretch: condensed; letter-spacing: .4px; text-transform: uppercase; }
+.oddsbox .ob-k { display: block; font-size: 10px; font-weight: 700; letter-spacing: .9px; text-transform: uppercase; color: var(--ink-3); }
+
+/* scoreboard numerals (segNumber): lit segments take the text colour, unlit ones stay faintly visible */
+.seg { display: inline-block; vertical-align: middle; flex: none; }
+.seg .n { fill: currentColor; }
+.seg .o { fill: currentColor; opacity: .09; }
+
+/* header bar */
+.ob-head { display: flex; align-items: center; gap: 10px; background: var(--black); color: #fff; padding: 0 12px 0 0; min-height: 30px; }
+.ob-tag { align-self: stretch; display: flex; align-items: center; background: var(--red); padding: 0 12px; font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+.ob-title { font-size: 12px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; }
+
+/* the board */
+.ob-board { display: grid; grid-template-columns: minmax(84px, 1fr) auto minmax(84px, 1fr); align-items: center; gap: 8px; padding: 16px 18px 12px; color: #fff;
+  background: radial-gradient(120% 140% at 50% 0%, #26282c 0%, #121315 55%, #08090a 100%); border-bottom: 3px solid var(--red); position: relative; }
+.ob-board::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, .035) 0 1px, transparent 1px 46px); }
+.ob-side { display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; animation: ob-rise .5s both; }
+.ob-side.right { animation-delay: .08s; }
+.ob-side .tlogo { filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .6)); }
+.ob-side .ob-ab { font-size: 18px; padding-bottom: 4px; border-bottom: 3px solid var(--tc); }
+.ob-side .ob-pct { font: 800 22px/1 "Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif; font-stretch: condensed; font-variant-numeric: tabular-nums; color: #e9eaeb; }
+.ob-mid { display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative; min-width: 0; }
+.ob-score { display: flex; align-items: center; gap: 14px; }
+.ob-proj { color: #ffd23f; filter: drop-shadow(0 0 6px rgba(255, 196, 0, .45)); animation: ob-flicker .9s both; }
+.ob-proj:last-child { animation-delay: .12s; }
+.ob-lbl { font-size: 9px; font-weight: 700; letter-spacing: 1px; line-height: 1.25; text-align: center; text-transform: uppercase; color: #8f9296; }
+/* win probability: one thick bar, the visitors' colour from the left and the home colour from the right, blended where
+   they meet; the split eases out from the middle on load */
+@property --s { syntax: "<percentage>"; inherits: true; initial-value: 50%; }
+.ob-tugwrap { width: 320px; max-width: 100%; margin-top: 12px; }
+.ob-wp { display: flex; align-items: center; gap: 8px; }
+.ob-tug-end { font: 800 13px/1 "Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif; font-stretch: condensed; font-variant-numeric: tabular-nums; min-width: 34px; padding: 5px 5px; border-radius: 2px; text-align: center; color: #0b0c0d; }
+.ob-tug-end.a { background: var(--ca); } .ob-tug-end.h { background: var(--ch); }
+.ob-wpbar { flex: 1; height: 14px; border-radius: 3px; background: linear-gradient(90deg, var(--ca) calc(var(--s) - 4%), var(--ch) calc(var(--s) + 4%));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), inset 0 -3px 4px rgba(0, 0, 0, .28), 0 0 0 1px #000; animation: ob-split 1.1s .15s cubic-bezier(.2, .8, .2, 1) both; }
+.ob-tugtxt { text-align: center; margin-top: 10px; animation: ob-rise .6s .35s both; }
+.ob-tugtxt b { font: 800 17px/1.2 "Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif; font-stretch: condensed; letter-spacing: .3px; }
+.ob-tugtxt span { display: block; font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #8f9296; margin-top: 2px; }
+
+/* the three lines: big italic numerals on the white card, each number in its own treatment */
+.ob-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ob-tile { padding: 12px 14px 12px; border-right: 1px solid var(--line-soft); min-width: 0; animation: ob-rise .45s both; }
+.ob-tile:nth-child(2) { animation-delay: .08s; } .ob-tile:nth-child(3) { animation-delay: .16s; border-right: 0; }
+.ob-num { font: italic 800 clamp(30px, 4.6vw, 44px)/.92 "Odds Numerals", "Barlow Condensed", "Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif; font-stretch: condensed; font-variant-numeric: tabular-nums lining-nums; letter-spacing: -.5px; white-space: nowrap; }
+.ob-v { display: flex; align-items: center; gap: 8px; min-height: 44px; margin-top: 4px; min-width: 0; }
+.ob-v .ob-ab { font-size: 18px; color: var(--ink-2); }
+/* spread: the favourite's number in his colour over a ruler, a touchdown per tick, the marker on his side */
+.ob-spread .ob-num { color: var(--tc); }
+.ob-ruler { display: flex; align-items: center; gap: 7px; margin-top: 8px; font: 800 10px/1 "Arial Narrow", "Roboto Condensed", Arial, sans-serif; letter-spacing: .5px; color: var(--ink-3); }
+.ob-rule { position: relative; flex: 1; height: 10px; background: repeating-linear-gradient(90deg, #b9bcc0 0 1px, transparent 1px 12.5%), linear-gradient(var(--line), var(--line)) center / 100% 2px no-repeat; border-right: 1px solid #b9bcc0; }
+.ob-rule i { position: absolute; top: 3px; height: 4px; left: min(50%, var(--m)); width: max(calc(var(--m) - 50%), calc(50% - var(--m))); background: var(--tc); animation: ob-grow .8s .2s both; transform-origin: center; }
+.ob-rule b { position: absolute; top: -3px; left: var(--m); width: 0; height: 0; margin-left: -5px; border: 5px solid transparent; border-top: 8px solid var(--tc); animation: ob-mark .9s cubic-bezier(.2, .8, .2, 1) both; }
+/* total: the number runs from yellow through orange to red as it climbs (a black keyline keeps yellow readable on
+   white), with the same scale underneath */
+.ob-total .ob-num { color: var(--heat); -webkit-text-stroke: 4px #111; paint-order: stroke fill; padding: 0 3px; letter-spacing: .5px; }
+.ob-heat { position: relative; height: 6px; margin-top: 10px; border-radius: 3px; background: linear-gradient(90deg, #ffd60a, #ff8a00 50%, #ff2d20); }
+.ob-heat b { position: absolute; top: -3px; left: var(--m); width: 4px; height: 12px; margin-left: -2px; background: #111; border-radius: 1px; box-shadow: 0 0 0 1px #fff; animation: ob-heat 1s cubic-bezier(.2, .8, .2, 1) both; }
+.ob-ou { display: inline-flex; flex-direction: column; gap: 2px; flex: none; }
+.ob-ou i { font: 800 10px/1 Arial, sans-serif; font-style: normal; width: 16px; height: 15px; display: grid; place-items: center; color: #fff; background: #111; border-radius: 2px; }
+.ob-ou i:last-child { background: var(--heat); color: #111; }
+/* moneyline: green for the favourite's (minus) price, red for the underdog's (plus) price */
+.ob-mls { display: grid; gap: 5px; margin-top: 6px; }
+.ob-ml { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 7px; padding: 3px 8px 3px 6px; border-left: 4px solid var(--line); background: var(--row-hover); color: var(--ink-2); min-width: 0; }
+.ob-ml.fav { border-left-color: var(--tc); color: var(--ink); background: #f1f2f3; }
+.ob-ml .ob-ab { font-size: 13px; min-width: 38px; }
+.ob-price { font-size: clamp(22px, 3.2vw, 28px); }
+.ob-price.fav { color: #0a8a3a; } .ob-price.dog { color: #d0021b; }
+.ob-imp { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ob-foot { border-top: 1px solid var(--line-soft); padding: 7px 14px; font-size: 11px; color: var(--ink-3); }
+
+/* matchup edges */
+.ob-edges { border-top: 1px solid var(--line); padding: 10px 14px 12px; display: grid; gap: 7px; }
+.ob-edge { display: grid; grid-template-columns: 20px minmax(150px, 1.1fr) minmax(60px, 1fr) 44px; align-items: center; gap: 9px; font-size: 12px; }
+.ob-ic { width: 18px; height: 18px; fill: none; stroke: var(--tc); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ob-el b { font: 800 13px/1 "Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif; font-stretch: condensed; letter-spacing: .3px; }
+.ob-bar { height: 8px; background: var(--line-soft); border-radius: 1px; overflow: hidden; transform: skewX(-18deg); }
+.ob-bar i { display: block; height: 100%; width: var(--w); background: var(--tc); transform-origin: left; animation: ob-grow .7s var(--d, 0ms) cubic-bezier(.2, .8, .2, 1) both; }
+.ob-eb { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* each side's best player: an animated 3D figure in team colours (js/hero3d.js), his name and rating under it */
+.ob-hero { position: relative; width: 150px; height: 214px; max-width: 100%; margin-bottom: -4px; opacity: 0; transition: opacity .6s; }
+.ob-hero.ready { opacity: 1; }
+.ob-hero.failed { display: none; }
+.ob-hero canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.ob-hero::after { content: ""; position: absolute; left: 18%; right: 18%; bottom: 2px; height: 10px; border-radius: 50%; background: radial-gradient(closest-side, rgba(0, 0, 0, .7), transparent); z-index: -1; }
+.ob-star { display: flex; flex-direction: column; align-items: center; gap: 2px; color: #fff; text-align: center; }
+a.ob-star:hover { text-decoration: none; } a.ob-star:hover b { text-decoration: underline; }
+.ob-star b { font: 800 14px/1.1 "Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif; font-stretch: condensed; letter-spacing: .3px; text-transform: uppercase; }
+.ob-star span { font-size: 10px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; color: #9a9da1; }
+@media (max-width: 640px) { .ob-hero { width: 110px; height: 160px; } }
+
+@keyframes ob-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes ob-split { from { --s: 50%; } }
+@keyframes ob-mark { from { left: 50%; } to { left: var(--m); } }
+@keyframes ob-heat { from { left: 0; } to { left: var(--m); } }
+@keyframes ob-grow { from { transform: scaleX(0); } to { transform: none; } }
+@keyframes ob-flicker { 0% { opacity: 0; } 12% { opacity: .9; } 20% { opacity: .15; } 34% { opacity: 1; } 42% { opacity: .5; } 55%, 100% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .oddsbox * { animation: none !important; } }
+@media (max-width: 640px) {
+  .ob-board { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding: 14px 10px 10px; }
+  .ob-mid { grid-column: 1 / -1; grid-row: 2; margin-top: 8px; }
+  .ob-tiles { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .ob-tile { padding: 10px 10px 12px; }
+  .ob-tile:nth-child(2) { border-right: 0; }
+  .ob-tile:nth-child(3) { grid-column: 1 / -1; border-top: 1px solid var(--line-soft); }
+  .ob-num { font-size: clamp(28px, 9.5vw, 40px); } .ob-price { font-size: 24px; }
+  .ob-v .ob-ab { font-size: 15px; } .ob-v .tlogo { flex: none; }
+  .ob-edge { grid-template-columns: 20px 1fr 44px; } .ob-bar { grid-column: 2 / 4; grid-row: 2; }
+}
+/* narrow phones: one line per row, so no number is squeezed */
+@media (max-width: 420px) {
+  .ob-tiles { grid-template-columns: minmax(0, 1fr); }
+  .ob-tile { border-right: 0; } .ob-tile + .ob-tile { border-top: 1px solid var(--line-soft); }
+  .ob-tile:nth-child(3) { grid-column: auto; }
+  .ob-star b { font-size: 12px; }
+}

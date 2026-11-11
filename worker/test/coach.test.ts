@@ -2,7 +2,7 @@
 // are absent: run `npx tsx tools/playbooks-extract.mts` first).
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
-import { newGame, runPlay, mulberry32, lineup, findPlay, expirePlayClock } from '../src/supersim/coach/engine.js';
+import { newGame, runPlay, decide, mulberry32, lineup, findPlay, expirePlayClock } from '../src/supersim/coach/engine.js';
 import { cpuOffense, cpuDefense } from '../src/supersim/coach/cpu.js';
 import { buildEnvelope } from '../src/supersim/coach/result.js';
 import type { Book, GameInput, PlayerInput, TeamInput, GameState } from '../src/supersim/coach/types.js';
@@ -144,5 +144,70 @@ describe.skipIf(!have)('coaching engine', () => {
       if (d.headline === 'PICK SIX') { pick6++; expect(st.score[def]).toBe(before.score[def]! + 6); expect(st.score[off]).toBe(before.score[off]); expect(d.scoring).toContain('defensive touchdown'); expect(st.patTeam).toBe(def); }
     }, () => prTd > 0 && pick6 > 0);
     expect(prTd).toBeGreaterThan(0); expect(pick6).toBeGreaterThan(0);
+  });
+  it('follows the rules on missed field goals, penalties, injuries and fatigue', () => {
+    const rng = mulberry32(41);
+    const input: GameInput = { dynasty: 't', dynastyId: 1, season: 2013, week: 2, gameNo: 1, gameId: 'g', snapshot: 1, ownedTeamId: 1, quarterSeconds: 900, teams: [roster(1, rng, 236, 109), roster(2, rng, 105, 112)], backUrl: '/', home: 2, away: 1 };
+    let missed = 0, flags = 0, firstByFlag = 0, hurt = 0, games = 0, pens = 0, sacks = 0, pts = 0, tired = 0;
+    let prev: { ball: number; down: number; toGo: number; off: 0 | 1; out: Set<number> } | null = null; let lastN = 0;
+    playGames(input, rng, 40, (d, st, before) => {
+      if (st.n < lastN) prev = null; lastN = st.n;
+      const snapBall = d.pre?.ball ?? 0, snapToGo = d.pre?.toGo ?? 0;
+      // a missed (not blocked) field goal: the other team takes over at the previous spot, or its 20 when the snap was inside it
+      if (d.kind === 'fg' && /no good/i.test(d.text) && !st.ot && st.phase === 'snap' && d.post?.q === d.pq) { missed++; expect(st.off).toBe(before.def); expect(st.ball).toBe(snapBall > 80 ? 20 : 100 - snapBall); }
+      // a defensive foul that reaches the line to gain is a first down; an offensive one replays the down
+      if (d.kind === 'penalty' && d.pre?.phase === 'snap' && st.phase === 'snap' && st.off === before.off && d.post?.q === d.pq) {
+        flags++; expect(d.penalty).toBeTruthy();
+        if (d.yards > 0 && d.yards >= snapToGo) { firstByFlag++; expect(st.down).toBe(1); }
+        if (d.yards < 0) expect(st.down).toBe(d.pre.down);
+      }
+      // nobody who is hurt lines up while he is out, and energy stays within bounds
+      if (prev && d.anim.actors.length === 22) for (const a of d.anim.actors) expect(prev.out.has(a.id)).toBe(false);
+      for (const v of Object.values(st.energy ?? {})) { expect(v).toBeGreaterThanOrEqual(0); expect(v).toBeLessThan(1); if (v < 0.45) tired++; }
+      if (d.people.some((p) => p.role === 'INJURED')) { hurt++; expect(d.text).toMatch(/shaken up|hurt on the play|will not return/); }
+      prev = { ball: st.ball, down: st.down, toGo: st.toGo, off: st.off, out: new Set((st.inj ?? []).filter((x) => st.n < x.until).map((x) => x.id)) };
+      if (st.final) { games++; pts += st.score[0] + st.score[1]; for (const s of [0, 1] as const) { pens += st.team[s].pen; sacks += st.team[s].sk; } }
+    });
+    expect(games).toBe(40); expect(missed).toBeGreaterThan(0); expect(flags).toBeGreaterThan(40); expect(firstByFlag).toBeGreaterThan(0); expect(hurt).toBeGreaterThan(0); expect(tired).toBeGreaterThan(0);
+    // realism bounds per team per game (the real FCS averages: about 6 penalties, 2 sacks, 26 points)
+    const per = (n: number) => n / games / 2;
+    expect(per(pens)).toBeGreaterThan(3); expect(per(pens)).toBeLessThan(10);
+    expect(per(sacks)).toBeGreaterThan(0.8); expect(per(sacks)).toBeLessThan(4);
+    expect(per(pts)).toBeGreaterThan(14); expect(per(pts)).toBeLessThan(38);
+  });
+  it('sits a gassed player for a fresh backup and never plays a hurt one', () => {
+    const rng = mulberry32(9); const team = roster(1, rng, 236, 109); const set = books.get(236)!.formations.find((f) => f.t === 1)!.sets[0]!;
+    const base = lineup(team, set, 'o'); const hb = base.find((p) => p.pos === 1), qb = base.find((p) => p.pos === 0)!;
+    expect(lineup(team, set, 'o', { out: new Set([qb.id]) }).some((p) => p.id === qb.id)).toBe(false);
+    if (hb) { const tiredOut = lineup(team, set, 'o', { energy: { [String(hb.id)]: 0.2 } }); expect(tiredOut.some((p) => p.id === hb.id)).toBe(false); expect(tiredOut.filter((p) => p.pos === 1).length).toBeGreaterThan(0); }
+    // the quarterback stays in however tired he is
+    expect(lineup(team, set, 'o', { energy: { [String(qb.id)]: 0.1 } }).some((p) => p.id === qb.id)).toBe(true);
+  });
+  it('holds an accept-or-decline penalty for a human coach, with both answers played out from the same snap', () => {
+    const rng = mulberry32(31); let seen = 0, swapped = 0, sacksAsRushes = 0;
+    for (let g = 0; g < 14 && (seen < 6 || swapped < 2); g++) {
+      const input: GameInput = { dynasty: 't', dynastyId: 1, season: 2013, week: 2, gameNo: 1, gameId: 'g', snapshot: 1, ownedTeamId: 1, quarterSeconds: 720, teams: [roster(1, rng, 236, 109), roster(2, rng, 105, 112)], backUrl: '/', home: 2, away: 1 };
+      const st: GameState = newGame(input, 700 + g, `d${g}`); let guard = 0;
+      while (!st.final && guard++ < 500) {
+        const off = st.phase === 'kickoff' ? st.kicking! : st.off; const def = (1 - off) as 0 | 1;
+        const ob = books.get(input.teams[off].offBook)!, db = books.get(input.teams[def].defBook)!;
+        // both sidelines coached by people: every open penalty is put to its coach
+        runPlay(st, input, { off: ob, def: db }, { off: cpuOffense(ob, st, input, off, rng), def: cpuDefense(db, st, input, def, rng) }, rng, st.tempo, { cpu: [false, false] });
+        const d = st.decision; if (!d) continue; seen++;
+        // the state shows the usual call; the other answer is a whole game state at the same play number
+        expect(d.options.accept.text).toBeTruthy(); expect(d.options.decline.text).toBeTruthy(); expect(d.options.accept.text).not.toBe(d.options.decline.text);
+        expect(d.alt!.n).toBe(st.n); expect(d.alt!.log.length).toBe(st.log.length); expect(d.alt!.decision).toBeUndefined();
+        const shown = d.options[d.def]; expect([shown.ball, shown.down, shown.toGo]).toEqual([st.ball, st.down, st.toGo]);
+        const other = d.def === 'accept' ? 'decline' : 'accept'; const want = d.options[other];
+        if (seen % 2) { // take the other answer: the game carries on from that state
+          const last = decide(st, other)!; swapped++;
+          expect(st.decision).toBeUndefined(); expect([st.ball, st.down, st.toGo]).toEqual([want.ball, want.down, want.toGo]); expect(last.n).toBe(st.n); expect(st.last).toBe(last);
+        } else { decide(st, d.def); expect(st.decision).toBeUndefined(); expect([st.ball, st.down, st.toGo]).toEqual([shown.ball, shown.down, shown.toGo]); }
+      }
+      expect(st.final).toBe(true);
+      // college scoring: every sack is a rushing attempt for the team that gave it up
+      for (const s of [0, 1] as const) { const sacked = Object.values(st.stats[s]).reduce((a, p) => a + p.sacked, 0); const carries = Object.values(st.stats[s]).reduce((a, p) => a + p.ra, 0); expect(carries).toBe(st.team[s].ra); if (sacked) sacksAsRushes++; }
+    }
+    expect(seen).toBeGreaterThanOrEqual(6); expect(swapped).toBeGreaterThanOrEqual(2); expect(sacksAsRushes).toBeGreaterThan(0);
   });
 });

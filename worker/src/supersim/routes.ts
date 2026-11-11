@@ -23,26 +23,26 @@
 // engine applies the delay of game (or the end of the period). Games between two members keep the tempo model.
 import type { Env } from '../env.js';
 import type { Dynasty, GameRow, MemberRow } from '../db/queries.js';
-import { getMembers, getGames, getGame, getTeam, getTeams, teamMap, getPlayers, getDepthChart, getFormationSubs, getPendingDepthEdit, listPendingPlayerEdits, type FormationSub } from '../db/queries.js';
+import { getMembers, getGames, getGame, getTeam, getTeams, teamMap, getPlayers, getCoaches, getDepthChart, getFormationSubs, getPendingDepthEdit, listPendingPlayerEdits, type FormationSub } from '../db/queries.js';
 import { teamLogoUrl, headshotUrl } from '../pages/common.js';
 import { syntheticRoster, autoDepthChart } from './generic.js';
 import { html, page } from '../html.js';
+import { recordLines } from '../odds.js';
 import { allowedGame, sameOrigin } from './access.js';
 import { bracketGameFor, bracketControls, finishBracketGame, type BracketGame } from './playoff-games.js';
 import { loadBook, loadIndex, teamBooks, loadTeamBook, composeEdits } from './coach/books.js';
 import { playbookJsonUrl } from '../pages/playbook-edit.js';
 import type { BookEdits } from '@ncaa/ncaa14';
-import { newGame, runPlay, mulberry32, type Rng, coinToss, tossChoice, cpuTossChoice, expirePlayClock, rollPlayClock, PLAY_CLOCK, PLAY_CLOCK_SHORT } from './coach/engine.js';
-import { cpuOffense, cpuDefense } from './coach/cpu.js';
+import { newGame, mulberry32, type Rng } from './coach/engine.js';
+import { act, actingOff, RECENT_PLAYS, type ActionBody, type ActionError, type LiveState } from './coach/session.js';
+export { RECENT_PLAYS };
 import { buildResult, buildEnvelope, sideOf } from './coach/result.js';
-import type { Book, GameInput, GameState, PlayDetail, PlayerInput, Side, TeamInput, TossChoice } from './coach/types.js';
+import type { Book, GameInput, GameState, PlayDetail, PlayerInput, Side, TeamInput } from './coach/types.js';
 
 export type SimEnv = Env & { SUPERSIM_SESSION_SECRET?: string; SUPERSIM_ENABLED?: string; SUPERSIM_QUARTER_SECONDS?: string };
+export const actionSeed = (seed: number, n: number, version: number) => (Math.imul((seed >>> 0) ^ 0x9e3779b9, 2654435761) ^ Math.imul(n + 1, 0x85ebca6b) ^ Math.imul(version + 1, 0xc2b2ae35)) >>> 0;
 const reply = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store', vary: 'Cookie', 'x-content-type-options': 'nosniff' } });
 const fail = (msg: string, status: number) => Object.assign(new Error(msg), { status });
-const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
-// seconds the play clock has really been running on the server: since the huddle began, less the playback allowance
-const huddleElapsed = (st: GameState) => (st.huddle ? (Date.now() - st.huddle.at) / 1000 - st.huddle.allow : 0);
 // The stored input also freezes each team's playbook edits (web_playbook_edits, the site's Playbook page) as they stood at
 // kickoff, per side ([away, home]), so a game is played from one book throughout; the browser gets bookUrls instead
 // (slimInput). null: the team runs its stock book (offBook / defBook).
@@ -50,11 +50,6 @@ type BookEditsPair = { off: BookEdits | null; def: BookEdits | null };
 export type SimInput = GameInput & { bookEdits?: [BookEditsPair, BookEditsPair] };
 type Run = { id: string; status: string; input_json: string; result_json: string; envelope_json: string };
 type LiveRow = { dynasty_id: number; season_year: number; week: number; game_no: number; snapshot_id: number; home_tgid: number; away_tgid: number; started_by: number; status: string; version: number; input_json: string; state_json: string };
-interface Pending { side: Side; play: number; tempo: GameState['tempo']; by: number }
-// recent: the last plays in order (a ring the watching browser animates from; st.last stays for reloads)
-type LiveState = GameState & { pending?: Pending | null; recent?: PlayDetail[] };
-export const RECENT_PLAYS = 6;
-const pushRecent = (st: LiveState, d: PlayDetail) => { const r = (st.recent ??= []); r.push(d); if (r.length > RECENT_PLAYS) r.splice(0, r.length - RECENT_PLAYS); };
 
 // A game named explicitly: ?game=<week>:<game_no> on the data endpoint, /supersim/<week>/<game_no> as a page.
 export interface GameKey { week: number; gameNo: number }
@@ -136,6 +131,9 @@ export async function buildInput(env: SimEnv, dyn: Dynasty, game: GameRow, owned
   const built = await Promise.all([game.away_tgid, game.home_tgid].map(async (tgid): Promise<{ team: TeamInput; bookEdits: BookEditsPair }> => {
     const [team, players, consoleChart, consoleSubs, pendingChart] = await Promise.all([getTeam(env.DB, dyn.id, tgid), getPlayers(env.DB, dyn.id, tgid), getDepthChart(env.DB, dyn.id, tgid, dyn.current_snapshot_id), getFormationSubs(env.DB, dyn.id, tgid, dyn.current_snapshot_id), getPendingDepthEdit(env.DB, dyn.id, tgid, dyn.season_year, dyn.week ?? 0)]);
     if (!team) throw fail('Team missing from the current snapshot.', 409);
+    // the head coach's run/pass lean for CPU play-calling (COCH sim tendency, taken as 0 run .. 100 pass; missing = balanced)
+    const hc = await getCoaches(env.DB, dyn.id, tgid).then((cs) => cs.find((c) => c.position_code === 0)).catch(() => undefined);
+    const lean = Number((hc as { sim_rp_off?: number } | undefined)?.sim_rp_off); const runPass = Number.isFinite(lean) && lean >= 0 && lean <= 100 ? lean : undefined;
     // a pending redshirt / position / jersey change applies at once (a transfer the game sat down plays once un-redshirted)
     for (const e of edits) { if (e.tgid !== tgid) continue; const p = players.find((x) => x.pgid === e.pgid); if (!p) continue; if (e.redshirt !== null) p.redshirt = e.redshirt; if (e.pos !== null) p.pos = e.pos; if (e.jersey !== null) p.jersey = e.jersey; }
     // the pending depth chart and formation subs from the site's Depth Chart page, else the console's own
@@ -159,7 +157,7 @@ export async function buildInput(env: SimEnv, dyn: Dynasty, game: GameRow, owned
     if (synthetic) { roster = syntheticRoster(tgid, `${dyn.id}:${dyn.season_year}`); depthChart = autoDepthChart(roster); }
     else if (!depthChart.length) depthChart = autoDepthChart(roster);
     if (!depthChart.length) throw fail(`Depth chart missing for ${team.name}; sync the dynasty before simulating.`, 409);
-    return { team: { id: tgid, name: team.name, abbr: team.abbr, logo: teamLogoUrl(team, 'lg'), offBook: books.offBook, defBook: books.defBook, depthChart, ...(fsubs ? { fsubs } : {}), players: roster, ...(synthetic ? { synthetic: true } : {}) }, bookEdits };
+    return { team: { id: tgid, name: team.name, abbr: team.abbr, logo: teamLogoUrl(team, 'lg'), offBook: books.offBook, defBook: books.defBook, depthChart, ...(fsubs ? { fsubs } : {}), players: roster, ...(synthetic ? { synthetic: true } : {}), ...(runPass !== undefined ? { runPass } : {}) }, bookEdits };
   }));
   const [away, home] = built as [typeof built[number], typeof built[number]];
   const anyEdits = built.some((b) => b.bookEdits.off || b.bookEdits.def);
@@ -193,10 +191,6 @@ async function booksFor(env: SimEnv, origin: string, input: SimInput, st: GameSt
   const [o, d] = await Promise.all([sideBook(env, origin, input, st, off, 'off'), sideBook(env, origin, input, st, def, 'def')]);
   return { off: o, def: d };
 }
-// the side that must choose next on each sideline: on kickoffs the kicking team "has the ball"
-const actingOff = (st: GameState): Side => (st.phase === 'kickoff' ? st.kicking! : st.off);
-// the CPU offense hurries when trailing late in a half and bleeds the clock when protecting a fourth-quarter lead
-const cpuTempo = (st: GameState, side: Side): GameState['tempo'] => { const lead = st.score[side] - st.score[1 - side as Side]; if (st.ot) return 'normal'; if (lead < 0 && (st.q === 2 || st.q >= 4) && st.clock < 150) return 'hurry'; if (lead > 0 && st.q >= 4 && st.clock < 360) return 'chew'; return 'normal'; };
 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'";
 // rest: the path parts after `resource` (/supersim/<week>/<game_no> -> resource '<week>', rest ['<game_no>'];
@@ -231,14 +225,14 @@ export async function handleSupersim(req: Request, env: SimEnv, dyn: Dynasty, re
       // a bracket game's final lives in the playoff state, not the console outbox
       const bracketFinal = bracket && st && liveRow?.status === 'final' ? { id: st.id, status: 'playoff', result: buildResult(st, input) } : null;
       const coaches = coachNames(members, input.teams[0].id, input.teams[1].id);
-      return { input: slimInput(input), you, watch: watch || drive, drive, bracket: bracket ? { round: bracket.game.round, idx: bracket.game.idx, open: bracket.open } : null, controls: you === null ? [] : [you], coaches, opponentHuman: watch ? coaches.every((c) => c !== 'CPU') : !!other, books: { off: [input.teams[0].offBook, input.teams[1].offBook], def: [input.teams[0].defBook, input.teams[1].defBook] }, bookUrls: bookUrls(dyn.slug, input), state: st ? { ...st, pending: undefined, recent: undefined } : null, recent: st?.recent ?? [], pendingSide: pending ? pending.side : null, pendingMine: pending ? pending.by === member.blaze_id : false, version: liveRow?.version ?? 0, status: liveRow?.status ?? null, final: run ? { id: run.id, status: run.status, result: JSON.parse(run.result_json) } : bracketFinal, now: Date.now(), ...extra };
+      return { input: slimInput(input), you, watch: watch || drive, drive, bracket: bracket ? { round: bracket.game.round, idx: bracket.game.idx, open: bracket.open } : null, controls: you === null ? [] : [you], coaches, opponentHuman: watch ? coaches.every((c) => c !== 'CPU') : !!other, books: { off: [input.teams[0].offBook, input.teams[1].offBook], def: [input.teams[0].defBook, input.teams[1].defBook] }, bookUrls: bookUrls(dyn.slug, input), state: st ? { ...st, seed: st.final ? st.seed : 0, pending: undefined, recent: undefined, decision: st.decision ? { ...st.decision, alt: undefined } : undefined } : null, recent: st?.recent ?? [], pendingSide: pending ? pending.side : null, pendingMine: pending ? pending.by === member.blaze_id : false, version: liveRow?.version ?? 0, status: liveRow?.status ?? null, final: run ? { id: run.id, status: run.status, result: JSON.parse(run.result_json) } : bracketFinal, now: Date.now(), ...extra };
     };
     if (req.method === 'GET') return reply(await payload(live, live ? {} : { liveGames: await listLiveGames(env, dyn, members) }));
     if (req.method !== 'POST') return reply({ error: 'Method not allowed' }, 405);
     if (!sameOrigin(req)) return reply({ error: 'Same-origin JSON request required.' }, 403);
     if (watch) return reply({ error: 'You are watching this game; only its two coaches can act.' }, 403);
     const text = await req.text(); if (text.length > 4096) return reply({ error: 'Request too large' }, 413);
-    const body = JSON.parse(text) as { action?: string; version?: number; play?: number; tempo?: GameState['tempo']; plays?: number; snapshot?: number | null; call?: string; choice?: string; pos?: number; depth?: number; pgid?: number; elapsed?: number };
+    const body = JSON.parse(text) as ActionBody;
     const key = [dyn.id, dyn.season_year, game.week, game.game_no] as const;
     if (drive && !['start', 'auto', 'abandon'].includes(String(body.action))) return reply({ error: 'This playoff game is between two CPU teams: start it and let it play out; nobody calls its plays.' }, 403);
     if (bracket && !bracket.open) return reply({ error: 'This playoff game is over.' }, 409);
@@ -252,6 +246,7 @@ export async function handleSupersim(req: Request, env: SimEnv, dyn: Dynasty, re
       const st: LiveState = { ...newGame(input, seed, id, { toss: true }), pending: null };
       await env.DB.prepare('INSERT OR IGNORE INTO supersim_live(dynasty_id,season_year,week,game_no,snapshot_id,home_tgid,away_tgid,started_by,input_json,state_json) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(...key, dyn.current_snapshot_id ?? 0, game.home_tgid, game.away_tgid, member.blaze_id, JSON.stringify(input), JSON.stringify(st)).run();
       const row = await env.DB.prepare('SELECT * FROM supersim_live WHERE dynasty_id=? AND season_year=? AND week=? AND game_no=?').bind(...key).first<LiveRow>();
+      await recordLines(env.DB, dyn); // kickoff: the line this game closes at
       return reply(await payload(row), 201);
     }
     if (!live) return reply({ error: 'No game in progress. Start one first.' }, 409);
@@ -265,94 +260,15 @@ export async function handleSupersim(req: Request, env: SimEnv, dyn: Dynasty, re
     if (!Number.isInteger(body.version) || body.version !== live.version) return reply({ error: 'The game moved on since you loaded it. Reloading…', stale: true, ...(await payload(live)) }, 409);
     const input: SimInput = JSON.parse(live.input_json); const st: LiveState = JSON.parse(live.state_json);
     const you: Side | null = sideOf(input, member.tgid) ?? (drive ? 0 : null); if (you === null) return reply({ error: 'You are not part of this game.' }, 403); // a driver stands in on the away sideline; the CPU calls both
-    const rng: Rng = mulberry32(crypto.getRandomValues(new Uint32Array(1))[0]!); // fresh randomness every call: nothing is predetermined
-    const details: PlayDetail[] = [];
+    // each action's randomness comes from the game's own seed and the action's place in the game (play number and stored
+    // version), so a finished game can be re-run exactly from its seed and calls; the seed never leaves the server while
+    // the game is live (payload), so nothing can be read ahead
+    const rng: Rng = mulberry32(actionSeed(st.seed, st.n, live.version));
     const otherSide = (1 - you) as Side; const humanOther = !!other && sideOf(input, other.tgid) === otherSide;
-    // pcLeft: the play-clock reading at the snap when the clock was real (a coached snap against the CPU), else rolled
-    const resolve = async (mine: { side: Side; play: number; tempo: GameState['tempo'] } | null, cpuMine = false, pcLeft?: number) => {
-      const off = actingOff(st); const def = (1 - off) as Side; const books = await booksFor(env, origin, input, st);
-      const callFor = (side: Side): number => (side === off ? cpuOffense(books.off, st, input, side, rng) : cpuDefense(books.def, st, input, side, rng));
-      let myCall = mine && !cpuMine ? mine.play : callFor(you);
-      if (mine && !cpuMine) { /* validate the member's play belongs to the book they are calling from */ const book = you === off ? books.off : books.def; if (!book.plays[String(mine.play)]) throw fail('That play is not in your playbook for this situation.', 400); }
-      let theirCall: number | null = null;
-      if (humanOther) {
-        if (st.pending && st.pending.side === otherSide) theirCall = st.pending.play;
-        else { st.pending = { side: you, play: myCall, tempo: mine?.tempo ?? st.tempo, by: member.blaze_id }; return false; }
-      } else theirCall = callFor(otherSide);
-      const calls = you === off ? { off: myCall, def: theirCall! } : { off: theirCall!, def: myCall };
-      const tempo = off === you ? (mine?.tempo ?? st.tempo) : humanOther ? (st.pending?.tempo ?? st.tempo) : cpuTempo(st, off);
-      const detail = runPlay(st, input, books, calls, rng, tempo, { pcLeft }); details.push(detail); st.pending = null; return true;
-    };
-    // the huddle after this request's plays: when it began, the playback the browser gets before its clock starts
-    // (the animations, the clock runoff and a celebration), and the CPU offense's snap point on the play clock
-    const setHuddle = () => {
-      if (st.final || st.phase === 'toss') { st.huddle = undefined; return; }
-      const off = actingOff(st); const cpuOff = !humanOther && off !== you;
-      const allow = details.reduce((a, d) => a + (d.anim?.dur ?? 0) + 2.6 + (d.scoring ? 3.8 : 0), 0);
-      st.huddle = { at: Date.now(), allow: Math.round(allow * 10) / 10, cpuAt: cpuOff && st.phase === 'snap' ? rollPlayClock(rng, cpuTempo(st, off), st.pc ?? PLAY_CLOCK) : null };
-    };
-    // coin toss: the away team calls it (the CPU calls for a CPU side); a human winner then picks receive / kick / defer
-    const humanSide = (side: Side) => side === you || (!!other && sideOf(input, other.tgid) === side);
-    const settleToss = (call: 'heads' | 'tails' | null, choice: TossChoice | null) => {
-      const t = st.toss!; if (!t.result) coinToss(st, rng, call ?? (rng() < 0.5 ? 'heads' : 'tails'));
-      const w = st.toss!.winner!; if (!humanSide(w)) tossChoice(st, input, cpuTossChoice(rng)); else if (choice) tossChoice(st, input, choice);
-    };
-    if (body.action === 'toss') {
-      if (st.phase !== 'toss' || !st.toss) return reply({ error: 'The coin toss is over.' }, 409);
-      const call = body.call === 'heads' || body.call === 'tails' ? body.call : null; const choice = ['receive', 'kick', 'defer'].includes(String(body.choice)) ? (body.choice as TossChoice) : null;
-      if (!st.toss.result) {
-        if (humanSide(st.toss.caller) && st.toss.caller !== you) return reply({ error: 'Waiting for the other coach to call the toss.' }, 409);
-        if (st.toss.caller === you && !call) return reply({ error: 'Call heads or tails.' }, 400);
-        settleToss(call, null);
-      } else {
-        if (st.toss.winner !== you) return reply({ error: 'The other coach won the toss and is choosing.' }, 409);
-        if (!choice) return reply({ error: 'Choose to receive, kick or defer.' }, 400);
-        settleToss(null, choice);
-      }
-    } else if (body.action === 'sub' || body.action === 'subreset') {
-      // substitutions: put a player at a depth-chart slot of a position for the rest of this game (your team only)
-      const team = input.teams[you]; const subs = (st.subs ??= [{}, {}]);
-      if (body.action === 'subreset') subs[you] = {};
-      else {
-        const posN = Number(body.pos), depth = Math.max(0, Math.min(9, Number(body.depth) || 0)), pgid = Number(body.pgid);
-        if (!Number.isInteger(posN) || posN < 0 || posN > 24) return reply({ error: 'Unknown position.' }, 400);
-        if (!team.players.some((p) => p.id === pgid)) return reply({ error: 'That player is not on your roster.' }, 400);
-        const current = subs[you][String(posN)] ?? team.depthChart.filter((d) => d.pos === posN).sort((a, b) => a.depth - b.depth).map((d) => d.pgid);
-        const order = current.filter((id) => id !== pgid); order.splice(Math.min(depth, order.length), 0, pgid);
-        subs[you][String(posN)] = order.slice(0, 12);
-      }
-    } else if (body.action === 'tempo') { if (['normal', 'hurry', 'chew'].includes(String(body.tempo))) st.tempo = body.tempo!; }
-    else if (body.action === 'timeout') {
-      if (st.phase === 'snap' && st.to[you] > 0 && st.running && !st.final) { st.to[you] -= 1; st.running = false; st.pc = PLAY_CLOCK_SHORT; setHuddle(); } else return reply({ error: 'No timeout available right now.' }, 400);
-    } else if (body.action === 'play') {
-      if (st.final) return reply({ error: 'The game is over.' }, 409);
-      if (!Number.isInteger(body.play)) return reply({ error: 'Choose a play.' }, 400);
-      if (st.pending && st.pending.side === you) return reply({ error: 'Your call is in; waiting for the other sideline.' }, 409);
-      let pcLeft: number | undefined;
-      if (!humanOther && st.phase === 'snap') {
-        if (actingOff(st) === you) { // the coach snapped: charge what the browser showed, or more if the server saw more time pass
-          const pc = st.pc ?? PLAY_CLOCK; const el = Number(body.elapsed);
-          pcLeft = pc - clamp(Math.max(Number.isFinite(el) ? el : 0, huddleElapsed(st)), 0, pc);
-        } else pcLeft = st.huddle?.cpuAt ?? undefined; // the CPU snapped where the browser counted down to
-      }
-      await resolve({ side: you, play: body.play!, tempo: ['normal', 'hurry', 'chew'].includes(String(body.tempo)) ? body.tempo! : st.tempo }, false, pcLeft);
-      setHuddle();
-    } else if (body.action === 'delay') {
-      // the browser's play clock ran out on the coach's own offense: the server must have seen that much time pass too
-      if (humanOther || st.final || st.phase !== 'snap' || actingOff(st) !== you) return reply({ error: 'No play clock is running on you.' }, 400);
-      // either the play clock ran out, or the game clock did first while it was running
-      const gone = huddleElapsed(st); const clockOut = st.running && gone >= st.clock - 1;
-      if (gone < (st.pc ?? PLAY_CLOCK) - 3 && !clockOut) return reply({ error: 'The play clock has not run out yet.', stale: true, ...(await payload(live)) }, 409);
-      details.push(expirePlayClock(st, input)); setHuddle();
-    } else if (body.action === 'auto') {
-      // the CPU calls the member's plays too (skip ahead); bounded per request to keep each call short
-      const n = Math.min(12, Math.max(1, Number(body.plays) || 1)); // each snap is a full field simulation (~3 ms CPU)
-      if (st.phase === 'toss') settleToss(null, 'defer'); // simming from the start: the toss is called and a human winner defers
-      for (let i = 0; i < n && !st.final; i++) { const ok = await resolve(null, true); if (!ok) break; }
-      setHuddle();
-    } else return reply({ error: 'Unknown action.' }, 400);
-    if (body.action === 'toss') setHuddle();
-    for (const d of details) pushRecent(st, d); // every resolved play, expired play clock and kick: the spectators' ring
+    // the action itself (coach/session.ts: the same code Quickplay runs in the browser); the state is changed in place
+    let details: PlayDetail[];
+    try { ({ details } = await act({ input, st, you, humanOther, by: member.blaze_id, rng, books: (s) => booksFor(env, origin, input, s) }, body)); }
+    catch (e) { const err = e as ActionError; if (err.stale) return reply({ error: err.message, stale: true, ...(await payload(live)) }, err.status); throw e; }
     // persist with the version guard
     let finalRun: Run | null = null;
     if (st.final && !run && bracket) { // the playoff bracket takes the final (and the next round follows); nothing goes to the console outbox

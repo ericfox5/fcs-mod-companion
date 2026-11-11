@@ -1,9 +1,16 @@
 import type { PageCtx } from '../index.js';
 import { html, notFound, type Raw } from '../html.js';
 import { layout, box } from '../layout.js';
-import { getTeams, getGame, getGames, getGameLogs, getTeamSeasonStats, getTeamPlayerSeasonStats, getPlayersByIds, teamMap, type TeamRow, type GameRow, type PlayerRow, type StatRow } from '../db/queries.js';
+import { getPlayers, getTeams, getGame, getGames, getGameLogs, getTeamSeasonStats, getTeamPlayerSeasonStats, getPlayersByIds, teamMap, type TeamRow, type GameRow, type PlayerRow, type StatRow } from '../db/queries.js';
 import { teamLogo, teamLink, playerLink, headshot, weekLabel, rankOf, pos } from './common.js';
 import { allowedGame } from '../supersim/access.js';
+import { gameOdds, leagueOdds, storedLines } from '../odds.js';
+import { oddsBox, closingLine, type Star } from './odds.js';
+import { positionName } from '@ncaa/ncaa14';
+import { FACE_LABELS, faceGroup } from './faces.js';
+import { FACE_SKIN } from './face-skin.generated.js';
+import { keyRatings } from './player-keys.js';
+import { getSeasonStatsFor } from '../db/queries.js';
 
 type Stats = Record<string, number>;
 const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
@@ -20,6 +27,11 @@ function cmpRow(label: string, a: number, h: number, fmt: (v: number) => string 
     <tr><td colspan="3" class="bar"><div class="cmp-bar"><span class="l" style="width:${(Math.abs(a) / tot) * 100}%"></span><span class="r" style="width:${(Math.abs(h) / tot) * 100}%"></span></div></td></tr>`;
 }
 const cmpTable = (away: TeamRow, home: TeamRow, rows: Raw[]) => html`<table class="cmp"><tr><th>${teamLogo(away, 'xs')}${away.abbr}</th><th class="lbl"></th><th>${teamLogo(home, 'xs')}${home.abbr}</th></tr>${rows}</table>`;
+
+// the skin colour of a player's in-game head (PGHE): sampled from that face's image; a face with no image takes the
+// DB editor's Light / Medium / Dark label for it, and one with neither a neutral medium tone
+const TONE: Record<string, string> = { Light: '#c9a88f', Medium: '#a17f69', Dark: '#77604f' };
+export const skinOf = (headId: number | null | undefined): string => FACE_SKIN.get(headId ?? -1) ?? TONE[faceGroup(FACE_LABELS.get(headId ?? -1) ?? '')] ?? TONE.Medium!;
 
 export async function gamePage(ctx: PageCtx, week: number, gameNo: number) {
   const { env, dyn } = ctx;
@@ -43,11 +55,32 @@ export async function gamePage(ctx: PageCtx, week: number, gameNo: number) {
   const qtr = (q: number) => (q > 4 ? 'OT' : `Q${q}`);
   const cta = g.source === 'supersim' ? 'Supersim result' : live?.status === 'live' ? `Resume your Supersim game (${live.a}-${live.h}, ${qtr(live.q)})` : 'Coach this game in Supersim';
   const watchUrl = `/d/${dyn.slug}/supersim/watch/${g.week}/${g.game_no}`;
-  const simLink = canSim ? html`<p class="sim-cta"><a class="btn" href="/d/${dyn.slug}/supersim">${cta}</a> <span class="muted">${g.source === 'supersim' ? 'Official result recorded; the console picks it up on load.' : 'Call every play from your real playbook; the final is recorded for the console.'}</span></p>`
+  const simLink = canSim ? html`<p class="sim-cta badge"><a class="sim-badge" href="/d/${dyn.slug}/supersim" title="${cta}"><img src="/img/supersim-button.webp" alt="SuperSim: ${cta}" width="900" height="181"></a> <span class="muted"><b>${cta}.</b>${g.source === 'supersim' ? 'Official result recorded; the console picks it up on load.' : 'Call every play from your real playbook; the final is recorded for the console.'}</span></p>`
     : live?.status === 'live' ? html`<p class="sim-cta"><a class="btn light" href="${watchUrl}"><i class="live-dot"></i>Watch live (${live.a}-${live.h}, ${qtr(live.q)})</a> <span class="muted">This game is being coached in Supersim right now; dynasty members can follow it play by play.</span></p>`
     : live?.status === 'final' ? html`<p class="sim-cta"><a class="btn light" href="${watchUrl}">Supersim final ${live.a}-${live.h} · replay</a> <span class="muted">Coached in Supersim; the console records the result at the advance.</span></p>` : html``;
-  const body = played ? await boxScore(env, dyn.id, y, g, away, home, dyn.slug) : await preview(env, dyn.id, y, away, home, dyn.slug);
-  return layout({ strip: ctx.strip, member: ctx.member, members: ctx.members, path: ctx.url.pathname, title: `${away.name} at ${home.name}`, siteName: env.SITE_NAME, dyn, section: 'schedule', body: html`${header}${simLink}${body}`, wide: true });
+  const line = played ? null : gameOdds(await leagueOdds(env.DB, dyn), g);
+  // each side's best player (highest overall, not redshirted) for the figures on the odds board
+  const star = async (tgid: number): Promise<Star | undefined> => {
+    const p = (await getPlayers(env.DB, dyn.id, tgid).catch(() => [])).filter((x) => x.redshirt !== 1).sort((a, b) => b.overall - a.overall)[0]; if (!p) return undefined;
+    // skin tone from his in-game head (PGHE): the DB editor's Light / Medium / Dark label for that face
+    const skin = skinOf(p.head_id);
+    // his headline number: this season's best stat line for his position, or his best rating before he has played
+    const lines = await getSeasonStatsFor(env.DB, dyn.id, y, [p.pgid]).catch(() => []);
+    const S = (kind: string): Record<string, number> => { try { return JSON.parse(lines.find((l) => l.kind === kind)?.stats_json || '{}'); } catch { return {}; } };
+    const of = S('PSOF'), de = S('PSDE'), ki = S('PSKI'), ol = S('PSOL'); const v = (x: number | undefined) => Number(x) || 0; const num = (x: number) => x.toLocaleString('en-US');
+    const cands: [number, string][] = [
+      [v(of.saya), `${num(v(of.saya))} pass yds, ${v(of.satd)} TD`], [v(of.suya) * 2, `${num(v(of.suya))} rush yds, ${v(of.sutd)} TD`], [v(of.scya) * 2, `${num(v(of.scya))} rec yds, ${v(of.sctd)} TD`],
+      [v(de.slsk) * 220, `${v(de.slsk)} sacks`], [v(de.ssin) * 320, `${v(de.ssin)} INT`], [v(de.sdta) * 12, `${v(de.sdta)} tackles`], [v(ol.sopa) * 30, `${v(ol.sopa)} pancakes`],
+      [v(ki.skfm) * 70, `${v(ki.skfm)}/${v(ki.skfa)} FG`], [v(ki.spat) ? v(ki.spya) / v(ki.spat) * 8 : 0, `${v(ki.spat) ? (v(ki.spya) / v(ki.spat)).toFixed(1) : 0} punt avg`],
+    ];
+    const top = cands.sort((a, b) => b[0] - a[0])[0]!; const best = keyRatings(p.pos, p.ratings_json).sort((a, b) => b.value - a.value)[0];
+    const stat = top[0] > 0 ? top[1] : best ? `${best.value} ${best.long}` : `${p.overall} overall`;
+    return { pgid: p.pgid, name: `${p.first_name} ${p.last_name}`, pos: positionName(p.pos), number: p.jersey, stat, skin };
+  };
+  const stars = line ? { away: await star(away.tgid), home: await star(home.tgid) } : {};
+  const closed = played ? (await storedLines(env.DB, dyn, g.week, g.game_no)).get(g.game_no) : undefined;
+  const body = played ? html`${closed ? closingLine(away, home, g, closed) : ''}${await boxScore(env, dyn.id, y, g, away, home, dyn.slug)}` : html`${line ? oddsBox(away, home, line, dyn.slug, stars) : ''}${await preview(env, dyn.id, y, away, home, dyn.slug)}`;
+  return layout({ strip: ctx.strip, member: ctx.member, members: ctx.members, path: ctx.url.pathname, title: `${away.name} at ${home.name}`, siteName: env.SITE_NAME, dyn, section: 'schedule', body: html`${header}${simLink}${body}`, wide: true, css: ['/css/odds.css'] });
 }
 
 // ---- preview: season averages head to head + each team's stat leaders ----
@@ -122,7 +155,10 @@ async function boxScore(env: PageCtx['env'], d: number, y: number, g: GameRow, a
     cmpRow('Possession', n(A.tspt), n(H.tspt), (v) => mmss(v)),
   ];
   const pgids = [...new Set(logs.filter((l) => l.kind !== 'BTES').map((l) => l.pgid))];
-  const players = new Map((await getPlayersByIds(db, d, pgids)).map((p) => [p.pgid, p]));
+  // a Supersim game: the players it put out for the weeks after it (result_json.injuries)
+  let hurt: { pgid: number; weeks: number; name: string }[] = [];
+  if (g.source === 'supersim') { try { const row = await db.prepare("SELECT json_extract(result_json, '$.injuries') AS inj FROM supersim_games WHERE dynasty_id=? AND season_year=? AND week=? AND game_no=?").bind(d, y, g.week, g.game_no).first<{ inj: string | null }>(); hurt = JSON.parse(row?.inj || '[]'); } catch { /* none */ } }
+  const players = new Map((await getPlayersByIds(db, d, [...pgids, ...hurt.map((x) => x.pgid)])).map((p) => [p.pgid, p]));
   const lines = (kind: string, tgid: number) => logs.filter((l) => l.kind === kind).map((l) => ({ p: players.get(l.pgid), s: parse(l.stats_json) })).filter((x) => x.p && x.p.tgid === tgid) as { p: PlayerRow; s: Stats }[];
   const table = (title: string, list: { p: PlayerRow; s: Stats }[], cols: [string, (s: Stats) => string | number][], sortKey: (s: Stats) => number) => {
     const rowsL = list.filter((x) => sortKey(x.s) > 0 || cols.some(([, f]) => Number(f(x.s)) > 0)).sort((a, b) => sortKey(b.s) - sortKey(a.s));
@@ -139,6 +175,6 @@ async function boxScore(env: PageCtx['env'], d: number, y: number, g: GameRow, a
   return html`<div class="cols">
     <div class="col-main">${box('Team stats', cmpTable(away, home, rows))}
       <div class="grid2">${box(html`${teamLogo(away, 'xs')}${away.name}`, teamLines(away))}${box(html`${teamLogo(home, 'xs')}${home.name}`, teamLines(home))}</div></div>
-    <div class="col-side">${box('Game', html`<p>${weekLabel(g.week)} · ${g.overtime ? 'Overtime' : 'Regulation'}${g.user_played ? ' · played by a league member' : ' · simulated'}</p>`)}</div>
+    <div class="col-side">${box('Game', html`<p>${weekLabel(g.week)} · ${g.overtime ? 'Overtime' : 'Regulation'}${g.user_played ? ' · played by a league member' : ' · simulated'}</p>`)}${hurt.length ? box('Injuries', html`<ul class="plain">${hurt.map((x) => html`<li>${playerLink(slug, players.get(x.pgid))} <span class="muted">${x.name}, out about ${x.weeks} week${x.weeks === 1 ? '' : 's'}</span></li>`)}</ul>`) : ''}</div>
   </div>`;
 }

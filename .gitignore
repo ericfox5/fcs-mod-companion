@@ -44,3 +44,7 @@ __pycache__/
 # installer: generated payload (patch words from the game binary) and the built exe
 installer/generated/
 installer/dist/
+# Quickplay rosters generated from the roster save: regenerate with `npx tsx tools/quickplay-data.mts`
+worker/public/data/quickplay/
+# the 3D player model on the odds board: a third-party Sketchfab model (see tools/hero-model.md); add your own copy locally
+worker/public/data/models/

@@ -200,3 +200,83 @@ by its starter or a commissioner until it is final.
   console through the dynasty-file copy and show an EDIT tag until a console file carries them. The commissioner's
   "Recruiting class" box on /recruiting re-generates the class with Fang's overhaul during the preseason (week 0) and
   reports the bridge's result (migration 0019).
+
+### 2026-11-10 additions: engine 4.0.0 and simulated odds
+
+**Engine 4.0.0** (`worker/src/supersim/coach/`). Measured on real rosters with `npx tsx tools/supersim-calibrate.mts`
+(games between teams of the FCS roster save, compared with this season's NCAA.com team averages in
+`tools/fcs-benchmarks.json`; rebuild that file with `npx tsx tools/fcs-benchmarks.mts`). `tools/supersim-probe.mts`
+breaks single snaps down when a game-level number is off.
+
+- Blocking: blockers cut off the rusher's path to the ball instead of chasing where he is; the line slides to an
+  overload; a blitzer on a run goes to the nearest free blocker. The CPU defense rushes four as its base call.
+- Fatigue: every snap costs the 22 on the field (`GameState.energy`), tired players play below their physical
+  ratings, and backs, receivers, tight ends, the defensive front and the secondary rotate when gassed. Players can be
+  hurt on a tackle or a sack (`GameState.inj`): a few snaps, the quarter, or the game. Multi-week injuries are recorded
+  (`Injury.weeks`) and written to the console (see the 2026-11-11 additions).
+- Fouls: before the snap they come from the players lined up (discipline, awareness, the road team, hurry-up, a hard
+  count); during the play they are called where the contact happens (holding, pass interference, defensive holding,
+  facemask, roughing). A CPU sideline takes the better of the play and the penalty; a coach is asked (2026-11-11 additions).
+- Kicks: a place kick's flight comes from the kicker's accuracy (angle off the aim) and leg (carry); blocks come from
+  the rush against the protection and are credited to a rusher; punters take distance off to pin and can put it out
+  of bounds; the returner decides on a kickoff in the end zone; onside recoveries depend on the players involved;
+  a defender alone with a loose ball can scoop it and run.
+- Rules: a missed field goal goes over at the previous spot (the 20 when snapped inside it); a defensive foul that
+  reaches the line to gain is a first down, with half-the-distance near a goal line; an untimed down after a defensive
+  foul at 0:00; overtime possessions alternate correctly after a defensive score, a two-point try is required from the
+  second overtime, and from the third each possession is one two-point try; touchdowns count as first downs; out of
+  bounds only stops the clock in the last two minutes of a half.
+- CPU: timeouts late in a half, a fourth-down chart by field position and score, the head coach's run/pass lean
+  (`TeamInput.runPass` from `coaches.sim_rp_off`).
+
+**Simulated odds** (`/d/<slug>/odds`, `worker/src/odds.ts`, `packages/ncaa14/src/odds.ts`, migration 0028). Each
+team's depth chart and ratings are reduced to nine unit grades; a matchup sets offense against defense to get expected
+points, then the spread, total, win probability and moneylines. The grades are cached per snapshot in `odds_cache`
+(one row per dynasty; without the table the page still works, uncached). Lines also show on unplayed rows of the
+schedule and in a box on the game preview. Refit the scale with `npx tsx tools/odds-calibrate.mts` after engine
+changes and copy the numbers into `ODDS_PARAMS`. Entertainment only: nothing can be wagered.
+
+## 2026-11-11 additions
+
+**Quickplay** (`/quickplay`, `worker/src/pages/quickplay.ts`). Any two 2026 FCS teams in Supersim with no dynasty and
+no account. The picker shows the same odds box as a game preview and swaps it when a team changes
+(`/quickplay/preview`, `public/js/quickplay-pick.js`). The game itself runs in the browser:
+`worker/client/quickplay.mjs` (built to `public/js/supersim/quickplay.js` with `npm run build:quickplay -w worker`)
+bundles the engine and answers `coach.js` in place of the dynasty data endpoint (`data-endpoint="local"`). Nothing is
+stored on the server; the state sits in `sessionStorage`. The rosters are static files under
+`public/data/quickplay/` (git-ignored): rebuild them with `npx tsx tools/quickplay-data.mts` after every roster rebuild.
+
+**One play loop** (`worker/src/supersim/coach/session.ts`). The toss, substitutions, tempo, timeouts, a called play,
+an expired play clock, a penalty decision and "let the CPU call it" live in `act()`. `routes.ts` loads and stores the
+state around it; Quickplay calls the same function in the browser.
+
+**Penalty decisions.** A foul the offended team may accept or decline (offensive holding, pass interference, defensive
+holding, roughing on a play that failed) is settled the usual way for a CPU sideline. For a coached sideline
+`runPlay` plays out both answers from the same roll, shows the usual call and keeps the other in
+`GameState.decision`; the coach answers with the `decide` action inside 12 seconds (`decisionCard` in `coach.js`),
+after which the usual call stands. A coach who is simming ahead is not asked. Holding is now flagged whatever the play
+did, and fouls by both teams offset.
+
+**Injuries on the console.** An injury that costs games gets a named type (`Injury.type`, `Injury.name`). The result
+and the envelope carry `injuries`, the game page lists them, and the league server writes them to the console's IGAM
+table (`spike/blaze/server/gamedata.mjs`), in the form the console uploads itself. Not yet seen on a console.
+
+**Closing lines** (`game_lines`, migration 0029, `recordLines` in `worker/src/odds.ts`). The lines of this week's and
+next week's unplayed games are rewritten at every import commit and at a Supersim kickoff. A played game shows the line
+it closed at, whether the favourite covered and whether it went over (game page and the Odds page, where the last two
+played weeks stay in the week nav). Games played before the table existed have none.
+
+**Replayable seeds.** Each action's randomness comes from the game's seed, the play number and the stored version
+(`actionSeed` in `routes.ts`); the seed is not sent to the browser while the game is live.
+
+**Engine 4.1.0.** A sack is a rushing attempt for the lost yards (college scoring) and only a tackle for loss when
+yards were lost; a back met behind the line on a run slips the first man a little more often and falls forward. All 27
+benchmarked stats are inside the FCS range (`npx tsx tools/supersim-calibrate.mts 60`).
+
+**Odds box.** The 3D figures wear the main colours of the team's real Home or Away set, read from the game's uniform
+art, and take the skin colour of the player's in-game head; both tables are generated by
+`node tools/uniform-colours.mjs` (`worker/src/pages/uniforms.generated.ts`, `face-skin.generated.ts`; needs the RPCS3
+folder and the faces folder from `~/.ncaa-bridge/config.json`). Ten teams whose art is encrypted fall back to the
+team's two colours. The win probability is one bar in the two teams' colours; Spread, Total and Moneyline use a heavy
+condensed italic numeral face (`/fonts/barlow-condensed-800-italic.woff2` when present, condensed system faces
+otherwise). The SuperSim and QuickPlay badges are `public/img/supersim-button.webp` and `quickplay-button.webp`.

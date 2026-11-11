@@ -5,7 +5,7 @@ import { weekLabel, seasonLabel } from './pages/common.js';
 
 // Section links, grouped for the dynasty menu (key, label, group). The menu adds Members and All dynasties to League.
 export const NAV: [string, string, string][] = [
-  ['home', 'Home', 'Season'], ['schedule', 'Scores', 'Season'], ['standings', 'Standings', 'Season'], ['rankings', 'Rankings', 'Season'], ['bracket', 'Bracket', 'Season'], ['stats', 'Stats', 'Season'], ['awards', 'Awards', 'Season'],
+  ['home', 'Home', 'Season'], ['schedule', 'Scores', 'Season'], ['odds', 'Odds', 'Season'], ['standings', 'Standings', 'Season'], ['rankings', 'Rankings', 'Season'], ['bracket', 'Bracket', 'Season'], ['stats', 'Stats', 'Season'], ['awards', 'Awards', 'Season'],
   ['teams', 'Teams', 'Team'], ['rosters', 'Rosters', 'Team'], ['depth', 'Depth Chart', 'Team'], ['playbook', 'Playbook', 'Team'], ['recruiting', 'Recruiting', 'Team'], ['transfers', 'Transfer Portal', 'Team'],
   ['stories', 'News Wire', 'League'],
 ];

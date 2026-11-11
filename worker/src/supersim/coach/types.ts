@@ -9,7 +9,8 @@ export interface PlayerInput { id: number; name: string; number: number; pos: nu
 // fsubs: formation subs from the site's depth chart page, "<side>:<set id>:<slot>" -> pgid (a player for one slot of one set)
 // synthetic: the game keeps no roster for this team (generic FCS slot); the players are generated placeholders and
 // nothing about them goes back to the console (team totals only)
-export interface TeamInput { id: number; name: string; abbr: string; logo: string; color?: string; offBook: number; defBook: number; players: PlayerInput[]; depthChart: { pos: number; depth: number; pgid: number }[]; fsubs?: Record<string, number>; synthetic?: boolean }
+// runPass: the head coach's run/pass lean for CPU play-calling (coaches.sim_rp_off, 0 run-heavy .. 100 pass-heavy; 50 balanced)
+export interface TeamInput { id: number; name: string; abbr: string; logo: string; color?: string; offBook: number; defBook: number; players: PlayerInput[]; depthChart: { pos: number; depth: number; pgid: number }[]; fsubs?: Record<string, number>; synthetic?: boolean; runPass?: number }
 export interface GameInput {
   dynasty: string; dynastyId: number; season: number; week: number; gameNo: number; gameId: string; snapshot: number | null; ownedTeamId: number;
   quarterSeconds: number; teams: [TeamInput, TeamInput]; backUrl: string; home: number; away: number;
@@ -48,6 +49,15 @@ export interface Drive { off: Side; q: number; start: number; plays: number; yds
 export interface ScoreEv { side: Side; q: number; clk: number; type: number; y: number; ti: number; fi: number; pi: number; pf: number; pt: number; sc: number; de: number; dp: number }
 export interface LogEntry { n: number; q: number; clk: number; off: Side; ball: number; d: number; tg: number; op: number; dp: number; k: string; y: number; s: [number, number]; t: string; p?: number[] }
 export interface OtState { period: number; first: Side; possessions: number }
+// a player hurt in this game: out until play number `until` (a few plays, the quarter, or 9999 for the rest of the game);
+// weeks > 0 when he will miss games after this one
+// type / name: the console's injury type (INJT) and its name, for an injury that costs games (weeks > 0)
+export interface Injury { id: number; side: Side; n: number; until: number; weeks: number; what: string; type?: number; name?: string }
+// a penalty the offended team may accept or decline, waiting for its coach: the state already shows the usual call
+// (`def`); `alt` is the whole game as it stands with the other answer (swapped in by decide()). The browser gets it
+// without `alt`. at: when the question was put (ms), for the answer clock.
+export interface DecisionOption { text: string; off: Side; ball: number; down: number; toGo: number; phase: Phase; score: [number, number] }
+export interface Decision { side: Side; foul: string; def: 'accept' | 'decline'; n: number; options: { accept: DecisionOption; decline: DecisionOption }; alt?: GameState; at?: number }
 export interface GameState {
   v: 2; id: string; seed: number; n: number; q: number; clock: number; qs: number; score: [number, number]; off: Side; ball: number; down: number; toGo: number;
   phase: Phase; kicking?: Side; running: boolean; to: [number, number]; drives: Drive[]; log: LogEntry[]; stats: [Record<string, PStat>, Record<string, PStat>]; team: [TStat, TStat];
@@ -59,6 +69,9 @@ export interface GameState {
   // possession, penalty, timeout, kick, new quarter). huddle: when it started on the server (ms epoch), the seconds the
   // browser needs to play the previous plays back before it starts counting, and for a CPU offense the reading it snaps at.
   pc?: number; huddle?: { at: number; allow: number; cpuAt: number | null };
+  // energy per player id (1 fresh .. 0 spent; absent = fresh), players hurt in this game, and an untimed down owed
+  // after a defensive foul on the last play of a period
+  energy?: Record<string, number>; inj?: Injury[]; untimed?: boolean; decision?: Decision;
 }
 // the game as it stood at the snap / after the play, for the scoreboard while a play is animated
 export interface SnapState { phase: Phase; off: Side; kicking?: Side; ball: number; down: number; toGo: number; q: number; clock: number; score: [number, number]; to: [number, number]; running: boolean; patTeam?: Side; freeKick?: boolean; pc?: number; final?: boolean }

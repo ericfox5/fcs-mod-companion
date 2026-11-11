@@ -4,11 +4,13 @@ import { json, notFound } from './html.js';
 import { servePhoto, serveLogo, serveStoryImage } from './api/photos.js';
 import { serveDownload } from './api/downloads.js';
 import { getDynasty, listDynasties } from './db/queries.js';
+import { quickplay } from './pages/quickplay.js';
 import { landingPage } from './pages/landing.js';
 import { scoreStrip, stripTiles } from './pages/common.js';
 import { homePage } from './pages/home.js';
 import { teamsPage, teamPage } from './pages/teams.js';
 import { schedulePage } from './pages/schedule.js';
+import { oddsPage } from './pages/odds.js';
 import { standingsPage } from './pages/standings.js';
 import { rankingsPage } from './pages/rankings.js';
 import { bracketPage } from './pages/bracket.js';
@@ -46,8 +48,9 @@ export default {
       if (parts[0] === 'img' && parts[1] === 'logos' && parts[2] && parts[3]) return serveLogo(env, `logos/${parts[2]}/${decodeURIComponent(parts[3])}`, url.searchParams.get('t') ?? '');
       if (parts[0] === 'img' && parts[1] === 'stories' && parts[2] && parts[3]) return serveStoryImage(env, `stories/${parts[2]}/${decodeURIComponent(parts[3])}`);
       if (parts[0] === 'downloads' && parts[1] && parts.length === 2) return serveDownload(env, decodeURIComponent(parts[1])); // roster saves from R2 downloads/
-      if (parts[0] === 'css' || parts[0] === 'js' || parts[0] === 'img' || parts[0] === 'data' || parts[0] === 'favicon.ico') return env.ASSETS.fetch(req); // data/: playbook JSON for Supersim
+      if (parts[0] === 'css' || parts[0] === 'js' || parts[0] === 'img' || parts[0] === 'data' || parts[0] === 'fonts' || parts[0] === 'favicon.ico') return env.ASSETS.fetch(req); // data/: playbook JSON for Supersim
       if (parts.length === 0) return landingPage(env, await listDynasties(env.DB));
+      if (parts[0] === 'quickplay') return quickplay(req, env, parts); // any two FCS teams in Supersim, no dynasty (pages/quickplay.ts)
       if (parts[0] === 'd' && parts[1]) {
         const dyn = await getDynasty(env.DB, parts[1]);
         if (!dyn) return notFound('No such dynasty');
@@ -87,6 +90,7 @@ export default {
           case 'team': return teamPage(ctx, Number(parts[3]));
           case 'schedule': return schedulePage(ctx);
           case 'game': return gamePage(ctx, Number(parts[3]), Number(parts[4]));
+          case 'odds': return oddsPage(ctx);
           case 'standings': return standingsPage(ctx);
           case 'rankings': return rankingsPage(ctx);
           case 'bracket': return bracketPage(ctx);

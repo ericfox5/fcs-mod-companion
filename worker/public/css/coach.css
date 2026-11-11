@@ -483,3 +483,16 @@ body { margin: 0; background: #edeef0; font: 13px/1.45 "Helvetica Neue", Helveti
 @keyframes ss-cel-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes ss-cel-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .ss-celebrate, .ss-celebrate.out, .ss-cel-logo, .ss-cel-kind, .ss-cel-sub, .ss-cel-player, .ss-cel-score, .ss-cel-hint, .ss-cel-rays { animation: none; } }
+
+/* a penalty to accept or decline (coach.js decisionCard): the two answers as big buttons, a clock on the usual call */
+.ss-decide .ss-cardhead { align-items: center; }
+.ss-decide-clock { font: 800 28px/1 "Arial Narrow", "Roboto Condensed", Arial, sans-serif; font-variant-numeric: tabular-nums; padding: 8px 12px; border-radius: 3px; background: #111; color: #ffd23f; }
+.ss-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 6px 0 8px; }
+.ss-option { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; text-align: left; padding: 12px 14px; border: 2px solid #c9ccd1; border-radius: 4px; background: #fff; color: inherit; cursor: pointer; font: inherit; }
+.ss-option:hover, .ss-option:focus-visible { border-color: #111; }
+.ss-option.usual { border-color: var(--brand, #c8102e); }
+.ss-option b { font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.ss-option b i { font-style: normal; font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; padding: 2px 6px; border-radius: 2px; background: #111; color: #fff; }
+.ss-opt-next { font-weight: 700; font-size: 14px; }
+.ss-option small { color: #5d6268; font-size: 12px; line-height: 1.35; }
+@media (max-width: 640px) { .ss-options { grid-template-columns: 1fr; } }

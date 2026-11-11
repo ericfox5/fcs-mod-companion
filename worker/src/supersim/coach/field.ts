@@ -18,7 +18,13 @@ const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
 const sig = (z: number) => 1 / (1 + Math.exp(-z));
 const gauss = (rng: Rng, m = 0, sd = 1) => { const u = Math.max(1e-9, rng()), v = rng(); return m + sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
 const r1 = (n: number) => Math.round(n * 10) / 10;
-export const rate = (p: PlayerInput | undefined, key: string, dflt?: number) => { const n = p?.ratings?.[key]; if (Number.isFinite(n) && (n as number) > 0) return clamp(n as number, 1, 99); return dflt ?? clamp(p?.overall ?? 60, 1, 99); };
+// Fatigue: the engine sets each player's energy (1 fresh .. 0 spent) before a play; below 0.7 his physical ratings
+// drop, up to about 15 points when he is spent. Reads, hands, discipline and kicking are not affected.
+const PHYSICAL = new Set(['PSPD', 'PACC', 'PAGI', 'PSTR', 'PJMP', 'PBTK', 'PTRK', 'PJMV', 'PSMV', 'PSAR', 'PPBK', 'PPBS', 'PPBF', 'PRBK', 'PRBS', 'PBFW', 'PIBL', 'PTAK', 'PHIT', 'PPMV', 'PFMV', 'PBSH', 'PPRS', 'PMCV', 'PZCV', 'PRTR', 'RELS', 'PYRS']);
+let ENERGY: Record<string, number> | null = null;
+export const setEnergy = (e: Record<string, number> | null | undefined) => { ENERGY = e ?? null; };
+export const tired = (p: PlayerInput | undefined) => { const e = p && ENERGY ? ENERGY[String(p.id)] : undefined; return e === undefined || e >= 0.7 ? 0 : (0.7 - Math.max(0, e)) * 22; };
+export const rate = (p: PlayerInput | undefined, key: string, dflt?: number) => { const n = p?.ratings?.[key]; const drop = ENERGY && PHYSICAL.has(key) ? tired(p) : 0; if (Number.isFinite(n) && (n as number) > 0) return clamp((n as number) - drop, 1, 99); return dflt ?? clamp((p?.overall ?? 60) - drop, 1, 99); };
 
 // ---- players ----------------------------------------------------------------------------------------------------------
 export interface Agent {
@@ -37,6 +43,14 @@ const accel = (p: PlayerInput) => 6 + ((rate(p, 'PACC') - 40) / 59) * 5; // yd/s
 const turnRate = (p: PlayerInput) => 8 + ((rate(p, 'PAGI') - 40) / 59) * 9; // lateral yd/s^2
 
 export interface Contact { t: number; by: Agent; on: Agent; made: boolean; move: string }
+// a foul seen on the field: pass interference / defensive holding in coverage, a facemask on a tackle, a late hit on
+// the passer, a block in the back on a return; x: where it happened
+export interface Flag { k: 'dpi' | 'dhold' | 'facemask' | 'rough' | 'back'; by: Agent; x: number }
+// how foul-prone a player is: discipline (PDIS 0..7, 4 = average) and awareness
+export const foulRate = (p: PlayerInput) => { const d = p.ratings?.['PDIS']; return clamp(1 + (4 - clamp(Number.isFinite(d) ? (d as number) : 4, 0, 7)) / 6 + (70 - rate(p, 'PAWR')) / 120, 0.4, 2.2); };
+export // a back met behind the line on a run has room to slip the first man: real offenses lose yards on about one run in eleven
+const BACKFIELD_SLIP = 0.28;
+const LIVE_FOUL = { holding: 0.42, dpi: 0.34, dhold: 0.08, facemask: 0.03, rough: 0.15, back: 0.05 };
 export interface ThrowInfo { t: number; x: number; y: number; air: number; cx: number; cy: number; target: Agent; result: 'catch' | 'drop' | 'pd' | 'int' | 'miss' | 'away'; by?: Agent; contested?: boolean; hurried?: boolean }
 export interface SimResult {
   end: 'tackle' | 'oob' | 'td' | 'incomplete' | 'sack' | 'time' | 'fumble' | 'faircatch' | 'touchback';
@@ -47,6 +61,7 @@ export interface SimResult {
   contacts: Contact[]; fumble?: { by: Agent; forced: Agent; rec: Agent; t: number; x: number; at: number }; // at: where he lost it, x: where it was recovered
   turnover?: 'int' | 'fumble'; retFrom?: number; holding?: Agent; pancakes: Agent[];
   qbKeep?: boolean; pitch?: boolean;
+  flags: Flag[]; // fouls by the defense during the play (the offense's holding is `holding`)
   muffed?: boolean; // a return: the ball came loose at the catch
   nearAtCatch?: number; // a return: how close the nearest cover man was when the ball came down (yards)
 }
@@ -73,7 +88,7 @@ class Field {
   carrier: Agent | null = null; lastCarrier: Agent | null = null; dir = 1; // dir: where the carrier is going (+1 offense, -1 a return)
   ballXY: [number, number] = [0, 0]; ballRec: number[][] = []; events: { t: number; k: string }[] = [];
   air: Air | null = null; over: SimResult['end'] | null = null; tEnd = 0;
-  contacts: Contact[] = []; tackler: Agent | null = null; assists: Agent[] = []; firstContact?: number; holding?: Agent; pancakes = new Set<Agent>();
+  contacts: Contact[] = []; tackler: Agent | null = null; assists: Agent[] = []; firstContact?: number; holding?: Agent; pancakes = new Set<Agent>(); flags: Flag[] = [];
   goal = 100; own = -1e9; fum?: SimResult['fumble']; turnover?: 'o' | 'd'; retFrom?: number;
   recognized = 1e9; // when the defense can see who has the ball (handoff, catch, scramble)
   constructor(public rng: Rng) {}
@@ -88,6 +103,7 @@ class Field {
   dist(a: { x: number; y: number }, b: { x: number; y: number }) { return Math.hypot(a.x - b.x, a.y - b.y); }
   free(a: Agent) { return !a.blk && !a.held.length && a.stun <= this.t; }
   give(a: Agent | null) { this.carrier = a; if (a) this.lastCarrier = a; }
+  runPlay = false; // a called run: tackles behind the line are less sure and the back falls forward (BACKFIELD_SLIP)
 
   // ---- movement: steer toward (tx, ty) at up to `want`, with acceleration, braking and turning limits ----
   steer(a: Agent) {
@@ -124,6 +140,12 @@ class Field {
     return [c.x + (px - c.x) * q, c.y + (py - c.y) * q];
   }
 
+  // where a blocker goes to meet `d` on his way to `to` (the QB, the ball carrier): the nearest point of that path to
+  // the blocker, at least a yard in front of the man. Running at where the man is now loses the race to anyone faster.
+  cutoff(a: Agent, d: Agent, to: { x: number; y: number }, lead = 1.1): [number, number] {
+    const ux = to.x - d.x, uy = to.y - d.y, L = Math.hypot(ux, uy) || 1; const f = clamp(((a.x - d.x) * ux + (a.y - d.y) * uy) / L, Math.min(lead, L), Math.max(lead, L - 0.6));
+    return [d.x + (ux / L) * f, d.y + (uy / L) * f];
+  }
   // ---- blocking: blocker.blk = the man he is on; that man's held = his blockers ----
   engage(b: Agent, d: Agent, push?: [number, number]) { if (d.held.length >= 2 || b.blk || b.held.length || (d.free ?? 0) > this.t) return; b.blk = d; d.held.push(b); d.wasHeld = true; b.engT = this.t; b.engX = d.x; b.push = push; }
   releaseAll(d: Agent, stunB = 0.45) { for (const b of d.held) { b.blk = null; b.stun = this.t + stunB; } d.held = []; }
@@ -138,17 +160,17 @@ class Field {
       const B = d.held.reduce((s, b, k) => s + this.blockPower(b, pass) * (k ? 0.6 : 1), 0), Dp = (pass ? Math.max(rate(d.p, 'PPMV'), rate(d.p, 'PFMV')) * 0.5 : rate(d.p, 'PBSH') * 0.5) + rate(d.p, 'PSTR') * 0.5;
       const ux = tg.x - d.x, uy = tg.y - d.y, ul = Math.hypot(ux, uy) || 1;
       const px = b0.push ? b0.push[0] : -ux / ul, py = b0.push ? b0.push[1] : -uy / ul;
-      const win = (Dp - B) / 40; const vd = clamp((pass ? 0.4 : 0.15) + win, -0.2, 1.8), vb = clamp((pass ? 0.05 : 0.7) - win, 0, 2.2);
+      const win = (Dp - B) / 40; const vd = clamp((pass ? 0.4 : 0.1) + win, -0.2, 1.8), vb = clamp((pass ? 0.05 : 0.95) - win, 0, 2.4);
       const vx = (ux / ul) * vd + px * vb, vy = (uy / ul) * vd + py * vb;
       d.vx = vx; d.vy = vy; d.x += vx * DT; d.y += vy * DT;
       for (const b of d.held) { const ox = b.x - d.x, oy = b.y - d.y, ol = Math.hypot(ox, oy) || 1; b.x = d.x + (ox / ol) * 0.95; b.y = d.y + (oy / ol) * 0.95; b.vx = vx; b.vy = vy; }
       const c = this.carrier; const near = !!c && c !== d && Math.hypot(c.x - d.x, c.y - d.y) < 3.5;
       // pass rush: about one rusher in eight beats his man inside 2.5 s at even ratings (team pressure ~40%, as measured
       // in the pros); run blocks give way faster, and much faster when the ball carrier is right there
-      const lam = (pass ? 0.075 : 0.11) * Math.exp((this.shedSkill(d, pass) - this.holdSkill(b0, d, pass)) / 11) * (d.held.length > 1 ? 0.35 : 1) * (near && !pass ? 1.5 : 1) * (pass && this.t - b0.engT < 0.6 ? 0.4 : 1);
+      const lam = (pass ? 0.075 : 0.052) * Math.exp((this.shedSkill(d, pass) - this.holdSkill(b0, d, pass)) / 11) * (d.held.length > 1 ? 0.35 : 1) * (near && !pass ? 1.25 : 1) * (pass && this.t - b0.engT < 0.6 ? 0.4 : 1);
       if (this.rng() < 1 - Math.exp(-lam * DT)) {
         // beaten right at the ball: sometimes he grabs, and the flag comes out (discipline)
-        if (near && !this.holding && b0.s !== d.s && this.rng() < 0.05 * (1 + (4 - clamp(b0.p.ratings?.['PDIS'] ?? 4, 0, 7)) / 7)) this.holding = b0;
+        if (near && !this.holding && b0.s !== d.s && b0.s === 'o' && this.rng() < LIVE_FOUL.holding * foulRate(b0.p)) this.holding = b0;
         this.releaseAll(d); d.stun = this.t + 0.12; d.free = this.t + 0.7; d.vx += (ux / ul) * 1.5; d.vy += (uy / ul) * 1.5;
       } else if (!pass && Math.abs(d.x - b0.engX) > 2.5 && (d.x - b0.engX) * this.dir > 0 && b0.s === 'o') this.pancakes.add(b0);
     }
@@ -160,7 +182,7 @@ class Field {
     // a new read every 0.1 s (about a reaction time); in between he holds his line
     if (Math.round(this.t / DT) % 2 === 1 && c.want > 0) return;
     const v = rate(c.p, 'PBCV', 65); const noise = ((100 - v) / 100) * 2.6; let best = -1e9, bx = c.x + this.dir * 5, by = c.y;
-    const goalNear = this.dir > 0 ? this.goal - c.x < 6 : c.x - this.own < 6; const spd = Math.hypot(c.vx, c.vy); const cur = spd > 1 ? Math.atan2(c.vy, c.vx * this.dir) : 0;
+    const goalNear = this.dir > 0 ? this.goal - c.x < 6 : c.x - this.own < 6; const behind = this.dir > 0 && c.s === 'o' && c.x < 0.5; const spd = Math.hypot(c.vx, c.vy); const cur = spd > 1 ? Math.atan2(c.vy, c.vx * this.dir) : 0;
     for (let k = -6; k <= 6; k++) {
       const ang = (k / 6) * (Math.PI * 0.47); const hx = Math.cos(ang) * this.dir, hy = Math.sin(ang);
       let score = 0;
@@ -168,7 +190,7 @@ class Field {
         const px = c.x + hx * L, py = c.y + hy * L; if (Math.abs(py) > SIDE - 0.3) { score -= 6; break; }
         let danger = 0; const tc = L / Math.max(4, c.top);
         for (const d of chasers) { if (d.held.length || d.stun > this.t + tc) continue; const m = Math.hypot(d.x - px, d.y - py) / d.top - tc; danger += Math.exp(-Math.max(0, m) / 0.3) * (m < 0 ? 1.6 : 1); }
-        score += hx * this.dir * L * 0.6 - danger * 2.4;
+        score += hx * this.dir * L * (behind ? 0.95 : 0.6) - danger * 2.4; // behind the line he gets north: a loss is the worst lane
       }
       if (goalNear) score += hx * this.dir * 6;
       if (spd > 2) score -= Math.abs(ang - cur) * 0.9; // he keeps his line unless something is worth the cut
@@ -191,7 +213,7 @@ class Field {
     let mv = moves[0]!, mvs = -1e9; for (const m of moves) { const s = m[1] + gauss(this.rng, 0, 5); if (s > mvs) { mvs = s; mv = m; } }
     const evade = mv[1] * 0.65 + rate(c.p, 'PBTK') * 0.35;
     const tack = rate(d.p, 'PTAK') * 0.62 + rate(d.p, 'PHIT') * 0.13 + rate(d.p, 'PSTR') * 0.25;
-    const z = 1.9 + (tack - evade) / 16 + (facing < -0.3 ? -0.8 : facing < 0.3 ? -0.3 : 0.1) - (sp > 7.5 ? 0.2 : 0) - (armOnly ? 2.4 : 0) - (dive ? 1.0 : 0) + bonus + (this.helpNear(c, d) ? 0.5 : 0);
+    const z = 1.9 + (tack - evade) / 16 + (facing < -0.3 ? -0.8 : facing < 0.3 ? -0.3 : 0.1) - (sp > 7.5 ? 0.2 : 0) - (armOnly ? 2.4 : 0) - (dive ? 1.0 : 0) + bonus + (this.helpNear(c, d) ? 0.5 : 0) - (this.dir > 0 && c.s === 'o' && c.x < 0 && this.runPlay ? BACKFIELD_SLIP : 0);
     const made = this.rng() < sig(z);
     this.contacts.push({ t: this.t, by: d, on: c, made, move: mv[0] });
     if (!made) { d.stun = this.t + (dive ? 1.2 : 0.7) + this.rng() * 0.6; d.vx *= dive ? 0.1 : 0.3; d.vy *= dive ? 0.1 : 0.3; c.vx *= dive ? 0.8 : 0.62; c.vy *= dive ? 0.8 : 0.62; }
@@ -212,8 +234,9 @@ class Field {
   attempt(d: Agent, c: Agent, armOnly = false, dive = false, bonus = 0): boolean {
     if (!this.tryTackle(d, c, armOnly, dive, bonus)) return false;
     const opp = c.s === 'o' ? this.D : this.O;
-    const fwd = Math.max(0, c.vx * this.dir); const fall = clamp(0.25 + fwd * 0.11 + (rate(c.p, 'PSTR') - rate(d.p, 'PSTR')) / 90 + rate(c.p, 'PTRK') / 260 + gauss(this.rng, 0, 0.25), 0, 2.2);
+    const fwd = Math.max(0, c.vx * this.dir); const fall = clamp(0.55 + (this.dir > 0 && c.s === 'o' && c.x < 0 && this.runPlay ? 1.0 : 0) + fwd * 0.13 + (rate(c.p, 'PSTR') - rate(d.p, 'PSTR')) / 90 + rate(c.p, 'PTRK') / 260 + gauss(this.rng, 0, 0.25), 0, 2.2);
     c.x += this.dir * fall; this.tackler = d; this.assists = opp.filter((e) => e !== d && !e.held.length && Math.hypot(e.x - c.x, e.y - c.y) < 1.8);
+    if (d.s === 'd' && c.s === 'o' && this.rng() < LIVE_FOUL.facemask * foulRate(d.p)) this.flags.push({ k: 'facemask', by: d, x: c.x });
     const fp = clamp(0.011 * (1 + (rate(d.p, 'PHIT') - 60) / 45) * (1 + (60 - rate(c.p, 'PCAR')) / 35) * (this.assists.length ? 1.25 : 1), 0.002, 0.04);
     if (this.rng() < fp) this.looseBall(c, d); else this.whistle('tackle');
     return true;
@@ -266,7 +289,7 @@ class Field {
     this.events.push({ t: this.tEnd, k: this.over === 'oob' ? 'oob' : this.over === 'td' ? 'td' : this.over === 'tackle' || this.over === 'sack' ? 'down' : this.over! });
     this.coast(0.8);
     for (const a of this.A) a.rec = Field.simplify(a.rec);
-    return { end: this.over!, agents: this.A, ball: Field.simplify(this.ballRec, 0.08), events: this.events, dur: this.t, tEnd: this.tEnd, carrier: lc, passer: null, tackler: this.tackler, assists: this.assists, x: ex, y: ey, firstContact: this.firstContact, scramble: false, contacts: this.contacts, fumble: this.fum, turnover: this.turnover === 'd' ? (this.fum ? 'fumble' : 'int') : this.turnover === 'o' ? 'fumble' : undefined, retFrom: this.retFrom, holding: this.holding, pancakes: [...this.pancakes], ...extra };
+    return { end: this.over!, agents: this.A, ball: Field.simplify(this.ballRec, 0.08), events: this.events, dur: this.t, tEnd: this.tEnd, carrier: lc, passer: null, tackler: this.tackler, assists: this.assists, x: ex, y: ey, firstContact: this.firstContact, scramble: false, contacts: this.contacts, fumble: this.fum, turnover: this.turnover === 'd' ? (this.fum ? 'fumble' : 'int') : this.turnover === 'o' ? 'fumble' : undefined, retFrom: this.retFrom, holding: this.holding, pancakes: [...this.pancakes], flags: this.flags, ...extra };
   }
 }
 
@@ -275,7 +298,7 @@ const PASSER = ['qb', 'qbpa', 'qbopt', 'handoff', 'kneel', 'spike'];
 export function simulateScrimmage(inp: ScrimmageInput): SimResult {
   const { rng, family, sub } = inp; const F = new Field(rng); F.goal = 100 - inp.ball; F.own = -inp.ball;
   inp.O.forEach((p, i) => F.agent('o', i, p, inp.oa[i]!, inp.oSlots[i]!)); inp.D.forEach((p, i) => F.agent('d', i, p, inp.da[i]!, inp.dSlots[i]!));
-  const O = F.O, D = F.D; const pass = family === 'pass';
+  const O = F.O, D = F.D; const pass = family === 'pass'; F.runPlay = !pass;
   // backed up to his own goal line the offense tightens up: nobody lines up in his own end zone
   for (const a of O) if (a.x0 < F.own + 0.4) { a.x = a.x0 = F.own + 0.4; a.rec[0] = [0, a.x, a.y]; }
   const qb = O[Math.max(0, O.findIndex((a) => PASSER.includes(a.a.k)))]!; const underC = qb.x0 > -3;
@@ -298,7 +321,7 @@ export function simulateScrimmage(inp: ScrimmageInput): SimResult {
   for (const d of D) {
     const k = d.a.k; const ppr = rate(d.p, 'PPRC', 60); F.route(d, d.a.p);
     // the box reads run off the linemen's blocks quickly; the secondary later
-    d.react = !pass && d.x0 < 6 && Math.abs(d.y0) < 10 ? 0.15 + ((99 - ppr) / 99) * 0.35 + rng() * 0.1 : 0.25 + ((99 - ppr) / 99) * 0.6 + rng() * 0.15;
+    d.react = !pass && d.x0 < 6 && Math.abs(d.y0) < 10 ? 0.32 + ((99 - ppr) / 99) * 0.5 + rng() * 0.15 : 0.35 + ((99 - ppr) / 99) * 0.6 + rng() * 0.15;
     if (k === 'rush') { d.mode = 'rush'; continue; }
     if (k === 'man' && d.man) d.mode = 'man';
     else {
@@ -319,6 +342,12 @@ export function simulateScrimmage(inp: ScrimmageInput): SimResult {
       let best: Agent | null = null, bc = 1e9; for (const b of free) { const c = Math.abs(b.y0 - d.y0) + (b.p.pos >= 5 && b.p.pos <= 9 ? 0 : 2.5); if (c < bc && c < 7) { bc = c; best = b; } }
       if (best) { best.pick = d; free.splice(free.indexOf(best), 1); } else unblocked.push(d);
     }
+    // the line slides: a rusher with nobody in his lane goes to the nearest blocker still without a man (the centre
+    // sliding to an overload, a back picking up the edge); only one more rusher than blockers comes free
+    for (const d of unblocked.slice().sort((a, b) => Math.abs(a.y0) - Math.abs(b.y0))) {
+      let best: Agent | null = null, bc = 1e9; for (const b of free) { const c = Math.abs(b.y0 - d.y0); if (c < bc && c < 13) { bc = c; best = b; } }
+      if (best) { best.pick = d; free.splice(free.indexOf(best), 1); unblocked.splice(unblocked.indexOf(d), 1); }
+    }
   }
   // run blocking scheme, set at the snap: the box from the line back (down linemen first, then linebackers), each to
   // the nearest run blocker by lane; blockers with a linebacker climb to him
@@ -326,6 +355,11 @@ export function simulateScrimmage(inp: ScrimmageInput): SimResult {
     const blockers = O.filter((a) => a.mode === 'rblock'); const free = [...blockers];
     for (const d of D.filter((d) => d.x0 < 8 && Math.abs(d.y0) < 11).sort((a, b) => a.x0 - b.x0 || Math.abs(a.y0) - Math.abs(b.y0))) {
       let best: Agent | null = null, bc = 1e9; for (const b of free) { const c = Math.abs(b.y0 - d.y0) + (b.p.pos >= 5 && b.p.pos <= 9 ? 0 : 1); if (c < bc && c < 6) { bc = c; best = b; } }
+      if (best) { best.pick = d; free.splice(free.indexOf(best), 1); }
+    }
+    // a blitzer nobody has by lane goes to the nearest blocker still free (a back, a tight end, a pulling guard)
+    for (const d of D.filter((d) => d.a.k === 'rush' && !blockers.some((b) => b.pick === d)).sort((a, b) => a.x0 - b.x0)) {
+      let best: Agent | null = null, bc = 1e9; for (const b of free) { const c = Math.abs(b.y0 - d.y0); if (c < bc && c < 10) { bc = c; best = b; } }
       if (best) { best.pick = d; free.splice(free.indexOf(best), 1); }
     }
   }
@@ -375,7 +409,13 @@ export function simulateScrimmage(inp: ScrimmageInput): SimResult {
     if (F.air && t >= F.air.t1) {
       const air = F.air; F.air = null; F.ballXY = [air.x1, air.y1];
       if (air.kind === 'snap') { F.give(qb); if (keeper) F.recognized = t + 0.3; }
-      else if (air.kind === 'loose') { const rec = F.fum!.rec; rec.x = air.x1; rec.y = air.y1; if (rec.s !== F.fum!.by.s) F.turnover = rec.s; F.events.push({ t, k: 'recovered' }); F.whistle('fumble'); break; }
+      else if (air.kind === 'loose') {
+        const rec = F.fum!.rec; rec.x = air.x1; rec.y = air.y1; if (rec.s !== F.fum!.by.s) F.turnover = rec.s; F.events.push({ t, k: 'recovered' });
+        // a defender who gets to it with nobody on him scoops it up and runs; in a crowd he falls on it
+        const crowd = O.some((o) => o !== F.fum!.by && Math.hypot(o.x - rec.x, o.y - rec.y) < 2.2);
+        if (rec.s === 'd' && F.fum!.by.s === 'o' && !crowd && rng() < 0.35 + (rate(rec.p, 'PCTH', 50) - 50) / 160) { F.give(rec); rec.mode = 'carrier'; rec.stun = 0; F.dir = -1; F.retFrom = rec.x; F.recognized = t; for (const a of F.A) { a.blk = null; a.held = []; } for (const o of O) o.mode = 'chase'; continue; }
+        F.whistle('fumble'); break;
+      }
       else if (air.kind === 'pitch') { F.give(air.to); air.to!.mode = 'carrierDesign'; F.events.push({ t, k: 'catch' }); F.recognized = Math.min(F.recognized, t); }
       else if (air.kind === 'away') { F.events.push({ t, k: 'incomplete' }); F.whistle('incomplete'); break; }
       else if (air.kind === 'pass') { catchContest(F, thrown!, rng); if (F.over) break; }
@@ -497,11 +537,15 @@ export function simulateScrimmage(inp: ScrimmageInput): SimResult {
   }
   function throwTo(q: Agent, r: Agent, aim: [number, number], hurried: boolean) {
     const t = F.t; const dist = Math.hypot(aim[0] - q.x, aim[1] - q.y); const moving = Math.hypot(q.vx, q.vy) > 2.5;
-    const sd = (0.5 + dist * 0.05) * (1.45 - (rate(q.p, 'PTHA') / 99) * 0.9) * (hurried ? 1.55 : 1) * (moving ? 1.35 : 1);
+    const sd = (0.68 + dist * 0.088) * (1.45 - (rate(q.p, 'PTHA') / 99) * 0.9) * (hurried ? 1.55 : 1) * (moving ? 1.35 : 1);
     const ex = gauss(rng, 0, sd * 1.25), ey = gauss(rng, 0, sd); const ux = (aim[0] - q.x) / (dist || 1), uy = (aim[1] - q.y) / (dist || 1);
     const x1 = aim[0] + ux * ex - uy * ey, y1 = aim[1] + uy * ex + ux * ey; const T = Math.hypot(x1 - q.x, y1 - q.y) / (vBall * (dist > 25 ? 0.88 : 1)) + 0.12;
     thrown = { t, x: q.x, y: q.y, air: Math.round(x1), cx: x1, cy: y1, target: r, result: 'miss', hurried };
     F.air = { x0: q.x + 0.3, y0: q.y, x1, y1, t0: t, t1: t + T, to: r, kind: 'pass' }; F.give(null); F.lastCarrier = null; F.events.push({ t, k: 'throw' });
+    // a rusher already on top of him as he lets it go can arrive late; a man defender beaten badly can have grabbed
+    const late = F.nearest(q, D, (d) => !d.held.length && d.stun <= t && d.mode === 'rush' && F.dist(d, q) < 1.7);
+    if (late && rng() < LIVE_FOUL.rough * foulRate(late.p)) F.flags.push({ k: 'rough', by: late, x: q.x });
+    for (const d of D) if (d.mode === 'man' && d.man && d.man.mode === 'route' && !d.held.length && F.dist(d, d.man) > 2.2 && d.man.x > 3 && rng() < LIVE_FOUL.dhold * foulRate(d.p)) { F.flags.push({ k: 'dhold', by: d, x: d.man.x }); break; }
     for (const d of D) { const cov = d.mode === 'man' ? rate(d.p, 'PMCV') : rate(d.p, 'PZCV'); d.react2 = d.held.length || Math.hypot(d.x - x1, d.y - y1) > (d.x > 10 ? 26 : 18) ? 1e9 : t + 0.1 + ((99 - cov) / 99) * 0.25 + ((99 - rate(d.p, 'PAWR')) / 99) * 0.15; }
   }
   function throwAway(q: Agent) { const t = F.t; const side = q.y >= 0 ? 1 : -1; thrown = { t, x: q.x, y: q.y, air: 0, cx: q.x + 8, cy: side * (SIDE + 2), target: progOrder[0] ?? q, result: 'away' }; F.air = { x0: q.x, y0: q.y, x1: q.x + 6 + rng() * 6, y1: side * (SIDE + 2), t0: t, t1: t + 0.9, to: null, kind: 'away' }; F.give(null); F.lastCarrier = null; F.events.push({ t, k: 'throw' }); }
@@ -511,10 +555,10 @@ export function simulateScrimmage(inp: ScrimmageInput): SimResult {
       const cc = F.carrier; if (cc && cc.s === 'o') { const d = F.nearest(cc, D, (d) => d.held.length < 2 && F.dist(d, cc) < 8); if (d) { if (F.dist(a, d) < 1.1) F.engage(a, d, [F.dir, 0]); else F.go(a, d.x, d.y, a.top * 0.9); return; } }
       F.go(a, a.x + 0.5, a.y, 2); return;
     }
-    const home = a.y0; const mine = a.pick && !a.pick.held.length && a.pick.stun <= t && a.pick.mode === 'rush' && F.dist(a, a.pick) < 6 ? a.pick : null;
+    const home = a.y0; const mine = a.pick && !a.pick.held.length && a.pick.stun <= t && a.pick.mode === 'rush' && F.dist(a, a.pick) < 12 ? a.pick : null;
     const threat = mine ?? F.nearest(a, D, (d) => !d.held.length && d.stun <= t && d.mode === 'rush' && Math.abs(d.y - home) < 4.5 && d.x < 6 && !O.some((o) => o !== a && o.pick === d && !o.blk && o.stun <= t));
     // he sets up a yard in front of his man on the man's line to the QB, wherever the QB goes
-    if (threat) { if (F.dist(a, threat) < 1.15) { F.engage(a, threat); return; } const ux = qb.x - threat.x, uy = qb.y - threat.y, ul = Math.hypot(ux, uy) || 1; F.go(a, Math.min(threat.x + (ux / ul) * 1.1, a.x0 + 0.3), threat.y + (uy / ul) * 1.1, a.top * 0.9); return; }
+    if (threat) { if (F.dist(a, threat) < 1.15) { F.engage(a, threat); return; } const [cx, cy] = F.cutoff(a, threat, qb); F.go(a, Math.min(cx, a.x0 + 0.3), cy, a.top); return; }
     const help = F.nearest(a, D, (d) => d.held.length === 1 && F.dist(d, a) < 2.2);
     if (help && F.dist(a, help) < 1.1) F.engage(a, help); else F.go(a, Math.max(qb.x + 1.5, a.x0 - 1.4), a.y0 * 0.9, 2.5);
   }
@@ -561,7 +605,8 @@ export function simulateScrimmage(inp: ScrimmageInput): SimResult {
     const t = F.t;
     if (d.bite && t < d.bite) { F.go(d, d.x0 - 1, d.y0, d.top * 0.5); return; }
     if (d.route && d.ri < d.route.length && t < SNAP_T + 0.45) { F.runRoute(d, d.top); return; }
-    const tg = F.carrier ?? qb; const [px, py] = tg === qb ? [qb.x + 0.3, qb.y] : F.pursuit(d, tg);
+    // a rusher keeps coming at the quarterback's spot until he has read the handoff, like everyone else
+    const cr = F.carrier; const tg = cr && (cr === qb || t >= F.recognized + d.react * 0.7) ? cr : qb; const [px, py] = tg === qb ? [qb.x + 0.3, qb.y] : F.pursuit(d, tg);
     F.go(d, px, py, d.top);
     if (!pass || handoffT) for (const o of O) if (o.mode === 'rblock' && !o.blk && o.stun <= t && F.dist(o, d) < 1.0) { F.engage(o, d); break; }
   }
@@ -619,6 +664,7 @@ function catchContest(F: Field, th: ThrowInfo, rng: Rng) {
     if (rng() < pInt) { th.result = 'int'; th.by = d0; turnOver(F, d0, t, bx); return; }
     if (rng() < 0.62) { th.result = 'pd'; th.by = d0; F.events.push({ t, k: 'incomplete' }); F.whistle('incomplete'); return; }
   }
+  if (d0 && dd < 1.15 && dr <= reach + 0.6 && th.cx > 1 && rng() < LIVE_FOUL.dpi * foulRate(d0.p) * clamp(1 + (rate(r.p, 'PRTR') - cov) / 40, 0.5, 2)) F.flags.push({ k: 'dpi', by: d0, x: bx });
   if (dr <= reach) {
     // hands and reach first, then how close the coverage is: a defender on his hip takes about half of them away
     const hands = rate(r.p, 'PCTH'); const traffic = rate(r.p, 'TRAF', hands); const stretch = Math.max(0, dr - 0.6) / Math.max(0.2, reach - 0.6);

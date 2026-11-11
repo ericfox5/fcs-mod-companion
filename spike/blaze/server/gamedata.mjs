@@ -48,8 +48,14 @@ const OL = (p) => n(p.pos) >= 5 && n(p.pos) <= 9;
 // follow the box-score codes (docs/tables.md; names from the EA DB Editor config): BOFF ga*/gu*/gc*, BDEF gd*/gl*/gs*,
 // BKIC gk*/gp*, BKPR grk*/grp*, BOLN go*, BTES ts*. UWQS holds points per quarter (GQTR 1-4, 5 = OT). SCOS is the
 // scoring summary (see ScoreEv in worker/src/supersim/coach/types.ts). The coach tables need the dynasty file the console
-// loads (opts.db, tdb-read.mjs); without it they go out empty and the coach gets no in-game XP. IGAM (injuries) stays
-// empty: the engine has no injuries.
+// loads (opts.db, tdb-read.mjs); without it they go out empty and the coach gets no in-game XP. IGAM (injuries): one row
+// per player the game put out for the weeks after it (envelope detail.injuries), in the form the console uploads itself:
+// INJL is the time left (24-43 one week, then 20 per week more, as the console counts it down), IIIG 1 = hurt in this game,
+// INJT the injury type, INJR 1, INIR 0 (not on injured reserve).
+// INJL for an injury of so many weeks: the middle of that week's band (1 week = 24..43, 2 weeks = 44..63, ...)
+export const injuryLength = (weeks) => 24 + 20 * (weeks - 1) + 10;
+// the console writes these byte columns signed (164 goes out as -92): the rows are stored the way it sends them
+const sbyte = (v) => (v > 127 ? v - 256 : v);
 export function buildGameTables(env, sched, opts = {}) {
   const g = env.gameResult, det = env.detail;
   if (!det || !Array.isArray(det.teams)) throw new Error('envelope has no game detail (site Supersim older than envelope v3)');
@@ -80,6 +86,7 @@ export function buildGameTables(env, sched, opts = {}) {
       if (n(p.snaps) > 0 || ['pa', 'ra', 'rec', 'tk', 'sk', 'int', 'fga', 'xpa', 'pt', 'kr', 'pr', 'ko'].some((k) => n(p[k]))) t.PGNG.push({ PGID, ggmP: 1, ggmS: p.starter ? 1 : 0, ggdp: n(p.snaps) });
     }
   });
+  for (const x of det.injuries ?? []) { const PGID = n(x.pgid), weeks = Math.min(12, Math.max(1, n(x.weeks))); if (PGID) t.IGAM.push({ PGID, INJL: sbyte(injuryLength(weeks)), IIIG: 1, INJT: sbyte(n(x.type) || 148), INJR: 1, INIR: 0 }); }
   (det.scoring ?? []).forEach((e, i) => t.SCOS.push({ SSOR: i + 1, GQTR: n(e.q), GTIM: n(e.clk), TGID: n(e.tgid), SSTY: n(e.type), SSPY: n(e.y), SSPT: n(e.pt), SSTI: n(e.ti), SSFI: n(e.fi), SSPI: n(e.pi), SSPF: n(e.pf), SSSC: n(e.sc), SSDE: n(e.de), SSDP: n(e.dp), SSDS: 0 }));
   if (opts.db) { const ct = coachTables(opts.db, env); t.CSGM = ct.CSGM; t.CACG = ct.CACG; t.CASG = ct.CASG; opts.coachXp = ct.xp ?? 0; }
   return t;

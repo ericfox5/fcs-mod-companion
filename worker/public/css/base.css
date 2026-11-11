@@ -446,6 +446,16 @@ table.members .tag { margin-left: 4px; }
 
 /* mobile: the dynasty menu becomes a full-width sheet; the account area moves from the bar into it */
 .sim-cta { margin: 0 0 14px; }
+/* the SuperSim badge as the button (img/supersim-button.webp, img/quickplay-button.webp) */
+.sim-cta.badge { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sim-cta.badge b { color: var(--ink); }
+.sim-badge { display: inline-block; line-height: 0; border-radius: 10px; transition: transform .12s ease, filter .12s ease; }
+.sim-badge img { display: block; height: 46px; width: auto; max-width: 100%; }
+.sim-badge.wide img { height: auto; width: 520px; }
+.sim-badge:hover { transform: translateY(-1px); filter: brightness(1.08) drop-shadow(0 3px 6px rgba(0, 0, 0, .3)); }
+.sim-badge:active { transform: translateY(1px); }
+.sim-badge:focus-visible { outline: 3px solid var(--red); outline-offset: 2px; }
+@media (max-width: 640px) { .sim-cta.badge .sim-badge { width: 100%; max-width: 260px; } .sim-cta.badge .sim-badge img { height: auto; width: 100%; } }
 .sim-cta .live-dot { display: inline-block; width: 7px; height: 7px; margin: 0 6px 1px 0; border-radius: 50%; background: var(--red); animation: mg-pulse 1.2s ease-in-out infinite; }
 @media (max-width: 720px) {
   .dm-title { height: 48px; padding: 0 12px; gap: 10px; border-right: 0; }
@@ -964,3 +974,53 @@ button.bk-act{width:100%;text-align:left;background:#fff;border:0;border-top:1px
 button.bk-act:disabled{color:#888;cursor:default}
 .bk-act.bk-sim-all{display:inline-block;width:auto;margin-left:4px;padding:2px 8px;border:1px solid #cfcfcf;border-radius:3px;background:#fff}
 .bk-simlog{margin:6px 0 0;font-size:12px}
+
+/* ---- simulated odds (pages/odds.ts): the lines table, the win-probability bar, the box on a game preview ---- */
+table.odds td.team { white-space: nowrap; }
+table.odds td.at { color: var(--ink-3); width: 18px; text-align: center; }
+table.odds td.line b { font-size: 14px; }
+table.odds td.ml { font-size: 11px; line-height: 1.35; white-space: nowrap; }
+table.odds td.wp { min-width: 150px; }
+table.odds tr.final td { color: var(--ink-3); }
+.wp-n { display: block; font-size: 11px; color: var(--ink-3); margin-top: 2px; }
+.prob { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--line-soft); flex: 1; }
+.prob span { display: block; height: 100%; }
+.prob .a { background: #8a8d91; }
+.prob .h { background: var(--ink); }
+table.games td.status .line { color: var(--ink); font-weight: 700; text-transform: none; letter-spacing: 0; }
+table.odds-box th { text-align: left; color: var(--ink-3); font-weight: 400; width: 90px; }
+.odds-wp { display: flex; align-items: center; gap: 10px; margin: 10px 0 6px; font-weight: 700; }
+ul.edges { margin: 8px 0; padding-left: 18px; }
+@media (max-width: 700px) { table.odds th:nth-child(6), table.odds td.ml { display: none; } table.odds td.wp { min-width: 90px; } }
+/* simulated moneyline on a ticker tile for a game still to be played */
+.st-ml { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .2px; }
+
+/* Quickplay (pages/quickplay.ts): the home page's entry and the team picker above the matchup board */
+.qp-promo { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.qp-promo p { flex: 1 1 260px; margin: 0; color: var(--ink-2); }
+.qp-promo .sim-badge.wide img { width: min(460px, 100%); }
+.quickplay .qp-head { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin: 4px 0 14px; }
+.quickplay .qp-mark { width: min(420px, 100%); height: auto; }
+.quickplay .qp-head .lede { flex: 1 1 280px; margin: 0; color: var(--ink-2); }
+.qp-form { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; gap: 12px; margin: 0 0 14px; }
+.qp-pick { display: block; min-width: 0; }
+.qp-lbl { display: block; font-size: 10px; font-weight: 700; letter-spacing: .9px; text-transform: uppercase; color: var(--ink-3); margin-bottom: 4px; }
+.qp-sel { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--card); border: 1px solid var(--line); border-radius: 3px; }
+.qp-sel select { flex: 1; min-width: 0; font: inherit; font-size: 15px; font-weight: 700; padding: 4px 2px; border: 0; background: transparent; color: var(--ink); }
+.qp-mid { display: flex; flex-direction: column; align-items: center; gap: 4px; padding-bottom: 2px; }
+.qp-at { font-weight: 800; font-size: 13px; color: var(--ink-3); text-transform: uppercase; }
+#qp-board { transition: opacity .15s; min-height: 200px; } #qp-board.loading { opacity: .55; }
+.qp-go .qp-gorow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.qp-go .btn { padding: 9px 16px; font-size: 14px; }
+.qp-len { font-size: 12px; font-weight: 700; color: var(--ink-2); margin-right: 6px; } .qp-len select { font: inherit; margin-left: 4px; padding: 5px 4px; }
+@media (max-width: 640px) {
+  .qp-form { grid-template-columns: minmax(0, 1fr); } .qp-mid { flex-direction: row; justify-content: center; }
+  .qp-go .btn { flex: 1 1 100%; text-align: center; }
+}
+
+ul.plain { list-style: none; margin: 0; padding: 0; } ul.plain li { padding: 3px 0; }
+
+/* a played game against the line it closed at (pages/odds.ts closingLine) */
+.box.closing { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 9px 12px; }
+.closing .cl-tag { background: var(--red); color: #fff; font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; padding: 3px 8px; border-radius: 2px; }
+.closing .cl-line { font-size: 14px; } .closing .cl-res { font-weight: 700; } .closing .cl-note { margin-left: auto; font-size: 11px; }

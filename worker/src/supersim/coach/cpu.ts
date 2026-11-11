@@ -3,6 +3,7 @@
 import type { Book, GameInput, GameState, Play, Side } from './types.js';
 import { PASS_SUB, playFamily, R, type Rng } from './engine.js';
 
+const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
 const weighted = <T>(rng: Rng, list: T[], w: (x: T) => number): T => { const ws = list.map((x) => Math.max(0.01, w(x))); const total = ws.reduce((a, b) => a + b, 0); let r = rng() * total; for (let i = 0; i < list.length; i++) { r -= ws[i]!; if (r <= 0) return list[i]!; } return list[list.length - 1]!; };
 const SPECIAL_SETS = new Set(['Special Teams', 'QB Kneel', 'Stop Clock', 'Field Goal', 'Hail Mary', 'Punt Max Protect', 'Tight Max Protect', 'Tight Max Protect Fake', 'FakePuntDirectSnap', 'NCAA', 'Field Goal Return', 'Field Goal Block', 'Punt Return Safe', 'Punt Return Normal', 'NCAA Onside Return', 'NCAA Kick Return', 'Normal Kick Return']);
 
@@ -27,7 +28,7 @@ export function cpuOffense(book: Book, st: GameState, input: GameInput, side: Si
   const normal = cs.filter((c) => c.formType === 1 && !SPECIAL_SETS.has(c.set) && !SPECIAL_SETS.has(c.form) && c.form !== 'Hail Mary' && playFamily(book, c.play, { t: c.formType }) !== 'fg' && playFamily(book, c.play, { t: c.formType }) !== 'punt' && ![37, 38, 104, 105, 106, 154, 155].includes(c.play.t));
   const fg = cs.find((c) => c.set === 'Field Goal' && c.play.t === 21), punt = cs.find((c) => c.play.t === 21 && book.asg.some((a, i) => c.play.a.includes(i) && a.k === 'punt') && !/max|tight/i.test(c.set)) ?? cs.find((c) => c.play.t === 21 && c.form === 'Special Teams');
   if (st.phase === 'pat') {
-    const need = -lead; const goTwo = (st.ot && st.ot.period >= 3) || (st.q >= 4 && !st.ot && st.clock < 420 && [2, 5, 10, 16, 18].includes(need - 6)) || (st.q >= 4 && need - 6 === 2);
+    const need = -lead; const goTwo = (st.ot && st.ot.period >= 2) || (st.q >= 4 && !st.ot && st.clock < 420 && [2, 5, 10, 16, 18].includes(need - 6)) || (st.q >= 4 && need - 6 === 2);
     if (!goTwo && fg) return fg.play.id;
     const two = normal.filter((c) => playFamily(book, c.play, { t: 1 }) !== 'option' && !/screen|draw/i.test(c.play.n)); return weighted(rng, two.length ? two : normal, (c) => c.weight).play.id;
   }
@@ -40,13 +41,18 @@ export function cpuOffense(book: Book, st: GameState, input: GameInput, side: Si
   const dist = 100 - st.ball + 17; const range = 44 + (kicker ? (R(kicker, 'PKPR') - 70) / 3 : 0);
   if (st.down === 4) {
     const desperate = lead < 0 && ((st.q >= 4 && st.clock < 300) || st.ot) ;
-    if (fg && dist <= range && !(desperate && lead < -3 && st.clock < 120)) return fg.play.id;
-    if (!desperate && !(st.toGo <= 2 && st.ball > 55) && punt && st.ball < 62) return punt.play.id;
-    if (!desperate && punt && st.ball < 62 && st.toGo > 4) return punt.play.id;
+    // go for it: a yard or less past the own 40, two or less past midfield, four or less in no man's land (too far to
+    // kick, too close to punt), inside the 3 unless three points matter; a team that is behind takes more chances
+    const inRange = !!fg && dist <= range; const behind = lead < 0 ? (st.q >= 3 ? 1 : 0) + (lead <= -9 ? 1 : 0) : 0;
+    const go = (st.toGo <= 1 && st.ball >= 40 - behind * 8) || (st.toGo <= 2 + behind && st.ball >= 50 && !inRange) || (st.toGo <= 4 + behind && st.ball >= 60 && !inRange)
+      || (st.toGo <= 1 && st.ball >= 97 && !(st.q >= 4 && lead >= -3 && lead <= 0)) || (st.toGo <= 2 && inRange && st.ball < 85 && behind > 0 && lead < -3);
+    if (!go && inRange && !(desperate && lead < -3 && st.clock < 120)) return fg!.play.id;
+    if (!go && !desperate && punt && st.ball < 62) return punt.play.id;
   }
   // family mix
   let passP = 0.5; const long = st.toGo >= 8, short = st.toGo <= 3;
   if (st.down === 1) passP = 0.47; else if (st.down === 2) passP = long ? 0.62 : short ? 0.35 : 0.5; else passP = short ? 0.4 : long ? 0.85 : 0.7;
+  passP += clamp(((input.teams[side].runPass ?? 50) - 50) / 250, -0.12, 0.12); // the head coach's lean
   if (st.ball >= 90) passP -= 0.12; if (late4 && lead < 0) passP = Math.max(passP, 0.8); if (st.q >= 4 && lead > 8) passP -= 0.2; if (st.toGo >= 15) passP = 0.9;
   const wantPass = rng() < passP;
   const pool = normal.filter((c) => { const fam = playFamily(book, c.play, { t: 1 }); return wantPass ? fam === 'pass' : fam === 'run' || fam === 'option'; });
@@ -70,7 +76,7 @@ export function cpuDefense(book: Book, st: GameState, input: GameInput, side: Si
     return (ret.find((c) => c.formType === 12) ?? ret[0] ?? cs[0])!.play.id;
   }
   const normal = cs.filter((c) => c.formType === 11 && !SPECIAL_SETS.has(c.set) && !SPECIAL_SETS.has(c.form) && c.form !== 'Special Teams' && c.play.t !== 35 && c.play.t < 49);
-  if (st.phase === 'pat') { const need = st.score[opp] - st.score[side]; const expectTwo = (st.ot && st.ot.period >= 3) || (st.q >= 4 && [2, 5, 10, 16, 18].includes(need - 6)); if (!expectTwo) { const b = cs.find((c) => c.play.t === 51 || c.play.t === 50); if (b) return b.play.id; } return weighted(rng, normal.filter((c) => /goal|gl/i.test(c.form) || /goal/i.test(c.set)).length ? normal.filter((c) => /goal|gl/i.test(c.form) || /goal/i.test(c.set)) : normal, (c) => c.weight).play.id; }
+  if (st.phase === 'pat') { const need = st.score[opp] - st.score[side]; const expectTwo = (st.ot && st.ot.period >= 2) || (st.q >= 4 && [2, 5, 10, 16, 18].includes(need - 6)); if (!expectTwo) { const b = cs.find((c) => c.play.t === 51 || c.play.t === 50); if (b) return b.play.id; } return weighted(rng, normal.filter((c) => /goal|gl/i.test(c.form) || /goal/i.test(c.set)).length ? normal.filter((c) => /goal|gl/i.test(c.form) || /goal/i.test(c.set)) : normal, (c) => c.weight).play.id; }
   // fourth-and-long or punt range: punt return / FG block looks
   const oppDist = 100 - st.ball + 17;
   if (st.down === 4 && !st.ot) { if (oppDist <= 50 && oppDist > 20) { const b = cs.find((c) => c.play.t === 50 || c.play.t === 49) ?? cs.find((c) => c.play.t === 51); if (b && rng() < 0.85) return b.play.id; } else if (st.ball < 62 && st.toGo > 2) { const pr = cs.find((c) => /pr middle|punt return|pr safe/i.test(c.play.n)) ?? cs.find((c) => c.play.t === 35 && /punt|pr /i.test(c.play.n)); if (pr && rng() < 0.9) return pr.play.id; } }
@@ -85,5 +91,9 @@ export function cpuDefense(book: Book, st: GameState, input: GameInput, side: Si
   };
   const formW = (f: string) => (goalLine ? (/goal/i.test(f) ? 4 : 0.3) : short ? (/goal|4-4|46|5-2/i.test(f) ? 1.6 : /dime|quarter|dollar/i.test(f) ? 0.3 : 1) : long ? (/dime|quarter|nickel|dollar/i.test(f) ? 1.6 : /goal/i.test(f) ? 0.05 : 1) : /goal/i.test(f) ? 0.05 : /dime|quarter|dollar/i.test(f) ? 0.6 : 1);
   const prevent = st.q >= 4 && lead > 0 && st.clock < 120 && !st.ot;
-  return weighted(rng, normal, (c) => c.weight * kindW(c.play.t) * formW(c.form) * (prevent ? (/prevent/i.test(c.play.n) ? 4 : c.play.t === 45 ? 1.5 : 0.6) : /prevent/i.test(c.play.n) ? 0.05 : 1)).play.id;
+  // how many come: four is the base call; five or more is a blitz, called on about a quarter of snaps (more on third
+  // and long and at the goal line, less when protecting a lead late)
+  const rushers = (p: Play) => p.a.reduce((n, ai) => n + (book.asg[ai]?.k === 'rush' ? 1 : 0), 0);
+  const blitzW = (p: Play) => { const n = rushers(p); if (n <= 4) return n <= 2 ? 0.5 : 1; const base = n === 5 ? 0.28 : n === 6 ? 0.1 : 0.04; return base * (goalLine || short ? 2.5 : st.down === 3 && long ? 1.6 : 1) * (prevent ? 0.3 : 1); };
+  return weighted(rng, normal, (c) => c.weight * blitzW(c.play) * kindW(c.play.t) * formW(c.form) * (prevent ? (/prevent/i.test(c.play.n) ? 4 : c.play.t === 45 ? 1.5 : 0.6) : /prevent/i.test(c.play.n) ? 0.05 : 1)).play.id;
 }

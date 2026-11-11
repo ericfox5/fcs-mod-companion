@@ -3,6 +3,7 @@ import { getTeams, getGames, getWeeks, teamMap, type TeamRow, type GameRow, type
 import type { Env } from '../env.js';
 import { positionName, classYear } from '@ncaa/ncaa14';
 
+import { gameOdds, leagueOdds } from '../odds.js';
 export const teamLink = (slug: string, t: TeamRow | undefined, fallback = '?') => t ? html`<a class="team-link" href="/d/${slug}/team/${t.tgid}">${t.name}</a>` : html`${fallback}`;
 export const teamAbbr = (t: TeamRow | undefined) => t?.abbr ?? '?';
 export const playerName = (p: { first_name: string; last_name: string }) => `${p.first_name} ${p.last_name}`;
@@ -44,7 +45,8 @@ export const interestStack = (tm: Map<number, TeamRow>, json: string | null, max
 };
 export const rankBadge = (r: number) => (r > 0 && r <= 25 ? html`<span class="rank">#${r}</span> ` : html``);
 
-export function scoreLine(slug: string, g: GameRow, teams: Map<number, TeamRow>): Raw {
+// line: the simulated spread for a game still to be played ("MONT -6.5"), shown next to Preview
+export function scoreLine(slug: string, g: GameRow, teams: Map<number, TeamRow>, line?: string): Raw {
   const h = teams.get(g.home_tgid), a = teams.get(g.away_tgid);
   const played = g.status >= 2;
   const homeWon = g.status === 3;
@@ -54,7 +56,7 @@ export function scoreLine(slug: string, g: GameRow, teams: Map<number, TeamRow>)
     <td class="at">@</td>
     <td class="home ${played && homeWon ? 'winner' : ''}">${teamLogo(h, 'xs')}${rankBadge(rankOf(h))}${teamLink(slug, h)}</td>
     <td class="score">${played ? g.home_score : ''}</td>
-    <td class="status"><a href="${gameHref(slug, g)}">${played ? (g.overtime ? 'Final/OT' : 'Final') : 'Preview'}</a>${g.user_played ? ' · user' : ''}</td>
+    <td class="status">${!played && line ? html`<span class="line">${line}</span> · ` : ''}<a href="${gameHref(slug, g)}">${played ? (g.overtime ? 'Final/OT' : 'Final') : 'Preview'}</a>${g.user_played ? ' · user' : ''}</td>
   </tr>`;
 }
 
@@ -64,20 +66,26 @@ export const miniScores = (slug: string, games: GameRow[], teams: Map<number, Te
   return games.length ? html`<div class="mini-scores">${games.map((g) => { const played = g.status >= 2; const a = teams.get(g.away_tgid), h = teams.get(g.home_tgid); return html`<a class="ms-game" href="${gameHref(slug, g)}">${row(a, g.away_score, played && g.status === 2, played)}${row(h, g.home_score, played && g.status === 3, played)}<div class="ms-status">${played ? (g.overtime ? 'Final/OT' : 'Final') : 'Preview'}${g.user_played ? ' · user' : ''}</div></a>`; })}</div>` : html`<p class="muted">${empty}</p>`;
 };
 
-export const gamesTable = (slug: string, games: GameRow[], teams: Map<number, TeamRow>, empty = 'No games.') =>
-  games.length ? html`<table class="games">${games.map((g) => scoreLine(slug, g, teams))}</table>` : html`<p class="muted">${empty}</p>`;
+export const gamesTable = (slug: string, games: GameRow[], teams: Map<number, TeamRow>, empty = 'No games.', lines?: Map<string, string>) =>
+  games.length ? html`<table class="games">${games.map((g) => scoreLine(slug, g, teams, lines?.get(`${g.week}:${g.game_no}`)))}</table>` : html`<p class="muted">${empty}</p>`;
 
 // Scoreboard strip: one tile per game of a week. stripTiles is also served alone (/d/<slug>/strip?week=N) for the
 // week dropdown; scoreStrip wraps the current week with the week select and the season label.
 export async function stripTiles(env: Env, dyn: Dynasty, week: number): Promise<Raw> {
   const [teams, games] = await Promise.all([getTeams(env.DB, dyn.id), getGames(env.DB, dyn.id, dyn.season_year, { week })]);
   const tm = teamMap(teams);
-  const row = (t: TeamRow, score: number, won: boolean, played: boolean) => html`<div class="st-row ${won ? 'won' : ''}">${teamLogo(t, 'xs')}<span class="st-abbr">${rankOf(t) ? html`<span class="st-rk">${rankOf(t)}</span>` : ''}${t.abbr}</span><span class="st-score">${played ? score : ''}</span></div>`;
+  // games still to be played carry the simulated moneyline where the score will go (worker/src/odds.ts)
+  const lo = games.some((g) => g.status < 2) ? await leagueOdds(env.DB, dyn) : null;
+  // the favourite's (minus) price leans green, the underdog's (plus) price leans red; around +/-200 both stay neutral
+  // and the colour deepens with the price, to full at 5000 (a log scale, so -600 already reads clearly)
+  const mlColor = (n: number) => { const t = Math.min(1, Math.max(0, Math.log(Math.abs(n) / 200) / Math.log(25))); const to = n < 0 ? [10, 143, 60] : [204, 0, 0]; return `rgb(${[72, 73, 74].map((c, i) => Math.round(c + (to[i]! - c) * t)).join(' ')})`; };
+  const ml = (n: number | undefined) => (n === undefined ? '' : html`<span class="st-ml" style="color:${mlColor(n)}">${n > 0 ? '+' : '−'}${Math.abs(n)}</span>`);
+  const row = (t: TeamRow, score: number, won: boolean, played: boolean, money?: number) => html`<div class="st-row ${won ? 'won' : ''}">${teamLogo(t, 'xs')}<span class="st-abbr">${rankOf(t) ? html`<span class="st-rk">${rankOf(t)}</span>` : ''}${t.abbr}</span><span class="st-score">${played ? score : ml(money)}</span></div>`;
   const tiles = games.map((g) => {
     const h = tm.get(g.home_tgid), a = tm.get(g.away_tgid);
     if (!h || !a) return html``;
-    const played = g.status >= 2;
-    return html`<a class="st-tile ${played ? 'final' : ''}" href="${gameHref(dyn.slug, g)}">${row(a, g.away_score, played && g.status === 2, played)}${row(h, g.home_score, played && g.status === 3, played)}<div class="st-status">${played ? (g.overtime ? 'Final/OT' : 'Final') : 'Preview'}</div></a>`;
+    const played = g.status >= 2; const o = played ? null : gameOdds(lo, g);
+    return html`<a class="st-tile ${played ? 'final' : ''}" href="${gameHref(dyn.slug, g)}">${row(a, g.away_score, played && g.status === 2, played, o?.awayMoney)}${row(h, g.home_score, played && g.status === 3, played, o?.homeMoney)}<div class="st-status">${played ? (g.overtime ? 'Final/OT' : 'Final') : 'Preview'}</div></a>`;
   });
   return html`${tiles.length ? tiles : html`<span class="st-empty">No games this week</span>`}`;
 }
