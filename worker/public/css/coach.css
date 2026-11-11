@@ -9,9 +9,9 @@ body { margin: 0; background: #edeef0; font: 13px/1.45 "Helvetica Neue", Helveti
   --accent: var(--red); --brand: #cc0000; --away: #a51c30; --home: #00693e; --gold: #f0d18a;
   color: var(--ink); font: 13px/1.45 "Helvetica Neue", Helvetica, Arial, "Segoe UI", sans-serif; min-height: 100vh; background: var(--page); }
 /* lighting (set on the root as data-time by the game clock): the field's own palette, untouched by the chrome */
-.ss { --sky-top: #6e9ba6; --sky-bottom: #cad2bd; --hill: #557a60; --brick: #8a6555; --roof: #3c4f50; --building-line: #283f3c; --window: #b9d0c7; --clock-face: #e4dac0; --tree: #3d6148; --tree-trunk: #554d3e; --walkway: #8c9183; --stand-base: #626e66; --rail: #bbc4b4; --seat: #87948b; --lamp: #ccd8d3; --beam-opacity: 0; --turf-far: #37774d; --turf-near: #285d3c; }
-.ss[data-time=dawn], .ss[data-time=dusk] { --sky-top: #544f72; --sky-bottom: #d09b7e; --hill: #41544f; --brick: #66524f; --roof: #303943; --building-line: #344146; --window: #e8bd72; --clock-face: #eed8aa; --tree: #2e4740; --tree-trunk: #444345; --walkway: #66716c; --stand-base: #4d5a59; --rail: #9faaa4; --seat: #647774; --lamp: #fff2cb; --beam-opacity: .07; --turf-far: #2d684b; --turf-near: #20553f; }
-.ss[data-time=night] { --sky-top: #0b182a; --sky-bottom: #2e4657; --hill: #243c3e; --brick: #37414a; --roof: #1d2d3a; --building-line: #283945; --window: #e6c17d; --clock-face: #efda9e; --tree: #1c3432; --tree-trunk: #2c383c; --walkway: #3d5253; --stand-base: #35474c; --rail: #819b9c; --seat: #486467; --lamp: #ffefbf; --beam-opacity: .12; --turf-far: #2c654b; --turf-near: #1c4939; }
+.ss { --sky-top: #6e9ba6; --sky-bottom: #cad2bd; --hill: #557a60; --brick: #8a6555; --roof: #3c4f50; --building-line: #283f3c; --window: #b9d0c7; --clock-face: #e4dac0; --tree: #3d6148; --tree-trunk: #554d3e; --walkway: #8c9183; --stand-base: #626e66; --rail: #bbc4b4; --seat: #87948b; --lamp: #ccd8d3; --beam-opacity: 0; --turf-far: #3f8a4d; --turf-near: #2c6b3a; --apron: #5d6b5f; --bank: #4c7a4f; --stand-wall: #454e4a; --pole: #5e6a6c; }
+.ss[data-time=dawn], .ss[data-time=dusk] { --sky-top: #544f72; --sky-bottom: #d09b7e; --hill: #41544f; --brick: #66524f; --roof: #303943; --building-line: #344146; --window: #e8bd72; --clock-face: #eed8aa; --tree: #2e4740; --tree-trunk: #444345; --walkway: #66716c; --stand-base: #4d5a59; --rail: #9faaa4; --seat: #647774; --lamp: #fff2cb; --beam-opacity: .07; --turf-far: #2d684b; --turf-near: #20553f;  --apron: #4a5552; --bank: #3b5a48; --stand-wall: #3a4243; --pole: #4d5759; }
+.ss[data-time=night] { --sky-top: #0b182a; --sky-bottom: #2e4657; --hill: #243c3e; --brick: #37414a; --roof: #1d2d3a; --building-line: #283945; --window: #e6c17d; --clock-face: #efda9e; --tree: #1c3432; --tree-trunk: #2c383c; --walkway: #3d5253; --stand-base: #35474c; --rail: #819b9c; --seat: #486467; --lamp: #ffefbf; --beam-opacity: .12; --turf-far: #2c654b; --turf-near: #1c4939;  --apron: #28363a; --bank: #22403a; --stand-wall: #243036; --pole: #3a484e; }
 
 /* controls: the site's .btn family (black primary, white light buttons, 2px corners) */
 .ss button, .ss select, .ss input { font: inherit; color: inherit; }
@@ -93,17 +93,15 @@ body { margin: 0; background: #edeef0; font: 13px/1.45 "Helvetica Neue", Helveti
 .ss-progress button { min-height: 30px; padding: 4px 10px; font-size: 11px; }
 
 /* field marks (unchanged from v1) */
-.f-los { stroke: #70bee9; stroke-width: 2; fill: none; }
-.f-fd { stroke: #f1cf67; stroke-width: 2; stroke-dasharray: 5 4; fill: none; }
-.f-pl circle, .f-pl rect { stroke: #fff; stroke-width: 1.5; }
-.f-pl.t0 circle, .f-pl.t0 rect { fill: var(--away); }
-.f-pl.t1 circle, .f-pl.t1 rect { fill: var(--home); }
-.f-pl .ring { fill: none !important; stroke: #f3cd69; stroke-width: 2; opacity: .85; }
-.f-pl text { fill: #fff; font-size: 8px; font-weight: 800; text-anchor: middle; stroke: #0008; stroke-width: .5; paint-order: stroke; pointer-events: none; }
-.f-ghost circle { fill: #0006; stroke: #ffffff8c; stroke-width: 1.2; stroke-dasharray: 3 2; }
-.f-ghost.t0 circle { fill: color-mix(in srgb, var(--away) 45%, transparent); }
-.f-ghost.t1 circle { fill: color-mix(in srgb, var(--home) 45%, transparent); }
-.f-ball { fill: #dc9a51; stroke: #fff; stroke-width: 1.4; }
+.f-los { stroke: #5fb8f0; fill: none; opacity: .9; }
+.f-fd { stroke: #ffd23f; fill: none; opacity: .92; }
+/* players: standing figures in their uniforms (scene.js playerMarkup); the ring lies on the turf under the ones involved */
+.f-pl .ring { fill: #f3cd6933; stroke: #f3cd69; stroke-width: 1.3; }
+.f-pl .p-num { font: 800 7.4px/1 "Arial Narrow", "Roboto Condensed", Arial, sans-serif; text-anchor: middle; paint-order: stroke; stroke: #0007; stroke-width: .7; pointer-events: none; }
+.f-ghost { pointer-events: none; }
+.f-ballwrap { filter: drop-shadow(0 .6px .5px #0006); }
+.f-shadow { fill: #000; }
+.ss-midfield-logo { pointer-events: none; }
 .f-trail { fill: none; stroke-width: 2.5; stroke-dasharray: 5 4; opacity: .8; stroke-linecap: round; }
 .f-trail.t0 { stroke: var(--away); } .f-trail.t1 { stroke: var(--home); }
 .f-flash text { fill: #fff; font-size: 15px; font-weight: 800; letter-spacing: 1px; text-anchor: middle; paint-order: stroke; stroke: #000a; stroke-width: 4; }
@@ -421,7 +419,6 @@ body { margin: 0; background: #edeef0; font: 13px/1.45 "Helvetica Neue", Helveti
 .f-posts.hit { animation: ss-post-hit .45s ease-out; }
 @keyframes ss-post-good { 0%, 35% { stroke: #fff; } 100% { stroke: #f5cf2e; } }
 @keyframes ss-post-hit { 20% { transform: translateX(-2px); } 45% { transform: translateX(2px); } 70% { transform: translateX(-1px); } }
-.f-shadow { fill: #000; }
 .f-trail.kick { stroke: #fff; stroke-dasharray: none; stroke-width: 1.6; opacity: .5; }
 @media (prefers-reduced-motion: reduce) { .f-posts, .f-posts .f-post { animation: none !important; } }
 

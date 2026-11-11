@@ -26,6 +26,7 @@ import type { Dynasty, GameRow, MemberRow } from '../db/queries.js';
 import { getMembers, getGames, getGame, getTeam, getTeams, teamMap, getPlayers, getCoaches, getDepthChart, getFormationSubs, getPendingDepthEdit, listPendingPlayerEdits, type FormationSub } from '../db/queries.js';
 import { teamLogoUrl, headshotUrl } from '../pages/common.js';
 import { syntheticRoster, autoDepthChart } from './generic.js';
+import { UNIFORMS } from '../pages/uniforms.generated.js';
 import { html, page } from '../html.js';
 import { recordLines } from '../odds.js';
 import { allowedGame, sameOrigin } from './access.js';
@@ -131,6 +132,7 @@ export async function buildInput(env: SimEnv, dyn: Dynasty, game: GameRow, owned
   const built = await Promise.all([game.away_tgid, game.home_tgid].map(async (tgid): Promise<{ team: TeamInput; bookEdits: BookEditsPair }> => {
     const [team, players, consoleChart, consoleSubs, pendingChart] = await Promise.all([getTeam(env.DB, dyn.id, tgid), getPlayers(env.DB, dyn.id, tgid), getDepthChart(env.DB, dyn.id, tgid, dyn.current_snapshot_id), getFormationSubs(env.DB, dyn.id, tgid, dyn.current_snapshot_id), getPendingDepthEdit(env.DB, dyn.id, tgid, dyn.season_year, dyn.week ?? 0)]);
     if (!team) throw fail('Team missing from the current snapshot.', 409);
+    const kit = UNIFORMS[tgid]?.[tgid === game.home_tgid ? 'home' : 'away']; // the uniform he is drawn in on the field
     // the head coach's run/pass lean for CPU play-calling (COCH sim tendency, taken as 0 run .. 100 pass; missing = balanced)
     const hc = await getCoaches(env.DB, dyn.id, tgid).then((cs) => cs.find((c) => c.position_code === 0)).catch(() => undefined);
     const lean = Number((hc as { sim_rp_off?: number } | undefined)?.sim_rp_off); const runPass = Number.isFinite(lean) && lean >= 0 && lean <= 100 ? lean : undefined;
@@ -157,7 +159,7 @@ export async function buildInput(env: SimEnv, dyn: Dynasty, game: GameRow, owned
     if (synthetic) { roster = syntheticRoster(tgid, `${dyn.id}:${dyn.season_year}`); depthChart = autoDepthChart(roster); }
     else if (!depthChart.length) depthChart = autoDepthChart(roster);
     if (!depthChart.length) throw fail(`Depth chart missing for ${team.name}; sync the dynasty before simulating.`, 409);
-    return { team: { id: tgid, name: team.name, abbr: team.abbr, logo: teamLogoUrl(team, 'lg'), offBook: books.offBook, defBook: books.defBook, depthChart, ...(fsubs ? { fsubs } : {}), players: roster, ...(synthetic ? { synthetic: true } : {}), ...(runPass !== undefined ? { runPass } : {}) }, bookEdits };
+    return { team: { id: tgid, name: team.name, abbr: team.abbr, logo: teamLogoUrl(team, 'lg'), ...(kit ? { kit } : {}), offBook: books.offBook, defBook: books.defBook, depthChart, ...(fsubs ? { fsubs } : {}), players: roster, ...(synthetic ? { synthetic: true } : {}), ...(runPass !== undefined ? { runPass } : {}) }, bookEdits };
   }));
   const [away, home] = built as [typeof built[number], typeof built[number]];
   const anyEdits = built.some((b) => b.bookEdits.off || b.bookEdits.def);

@@ -10,7 +10,9 @@ export interface PlayerInput { id: number; name: string; number: number; pos: nu
 // synthetic: the game keeps no roster for this team (generic FCS slot); the players are generated placeholders and
 // nothing about them goes back to the console (team totals only)
 // runPass: the head coach's run/pass lean for CPU play-calling (coaches.sim_rp_off, 0 run-heavy .. 100 pass-heavy; 50 balanced)
-export interface TeamInput { id: number; name: string; abbr: string; logo: string; color?: string; offBook: number; defBook: number; players: PlayerInput[]; depthChart: { pos: number; depth: number; pgid: number }[]; fsubs?: Record<string, number>; synthetic?: boolean; runPass?: number }
+// kit: the uniform the team wears in this game (main colours of its real Home or Away set; scene.js draws the players in it)
+export interface KitInput { helmet?: string; jersey?: string; pants?: string; number?: string; trim?: string }
+export interface TeamInput { id: number; name: string; abbr: string; logo: string; color?: string; kit?: KitInput; offBook: number; defBook: number; players: PlayerInput[]; depthChart: { pos: number; depth: number; pgid: number }[]; fsubs?: Record<string, number>; synthetic?: boolean; runPass?: number }
 export interface GameInput {
   dynasty: string; dynastyId: number; season: number; week: number; gameNo: number; gameId: string; snapshot: number | null; ownedTeamId: number;
   quarterSeconds: number; teams: [TeamInput, TeamInput]; backUrl: string; home: number; away: number;

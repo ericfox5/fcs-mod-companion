@@ -1,14 +1,14 @@
 // Supersim coaching mode: browser client. Vanilla ES module, no build step, no libraries; runs under
 // CSP script-src 'self' (handlers via addEventListener; innerHTML only for the static field markup with esc()).
 // Server contract: worker/src/supersim/routes.ts. Data shapes: worker/src/supersim/coach/types.ts.
-// Presentation follows the v1 Supersim client: perspective field inside a stadium (stadium.js), logo-derived team
+// Presentation follows the v1 Supersim client: the field as one projected 3D scene (scene.js: full-size field, stands, uniformed players), logo-derived team
 // colors (palette.js), per-play popup with the players involved, live sideboxes, lighting that follows the clock.
 // The play picker is a compact overlay on the near end of the field that only shows between plays.
 // Field geometry: absolute yards 0 (away goal line, near end) .. 100 (home goal line, far end); the away offense
 // drives toward the far end (dir 1), the home offense toward the viewer (dir -1). Actor paths are [t, x downfield, y right].
 import { teamColor, readableAccent } from './palette.js';
 import { celebrate } from './celebrate.js';
-import { stadiumMarkup } from './stadium.js';
+import { sceneMarkup, postsMarkup, playerMarkup, ballMarkup, coord, point, pxYd, zPx, spriteScale, MID, FIELD_W, END_NEAR, END_FAR, POST_H } from './scene.js';
 import { sv, PASS_T, FAM_LABEL, FILTERS, findPlay, fam, inFilter, artPath, setFrame, diagram } from '../playbook/art.js'; // play art and families shared with the Playbook page
 
 const root = document.getElementById('coach');
@@ -172,64 +172,56 @@ function lineup(team, set) {
 
 // ---- play art: artPath / setFrame / diagram come from ../playbook/art.js ---------------------------------------------
 
-// ---- perspective field (v1) -----------------------------------------------------------------------------------------
-// x: yards along the field (-8..108, near end at the bottom), y: yards across (0..53.3, left to right)
-const coord = (x, y) => [500 + (y - 26.65) * (760 - 3.8 * x) / 53.3, 550 - x * 4.1];
-const point = (x, y) => coord(x, y).map((n) => n.toFixed(1)).join(',');
-const depthScale = (x) => 1.18 - 0.42 * Math.min(1, Math.max(0, (x + 8) / 116)); // nearer = bigger
+// ---- the field: one projected 3D scene (scene.js) ----------------------------------------------------------------------
+// x: yards along the field (0..100 between the goal lines, the end zones run to -10 and 110; the near end is at the
+// bottom), y: yards across (0..53.3, left to right), z: yards up. coord / pxYd / zPx come from scene.js.
+const depthScale = (x) => pxYd(x) / 12; // line weights and labels: nearer = bigger
 // offense-relative (x downfield, y right) -> field yards; the home offense's right is screen-left
-const toField = (los, dir, x, y) => [los + dir * x, dir === 1 ? 26.65 + y : 26.65 - y];
+const toField = (los, dir, x, y) => [los + dir * x, dir === 1 ? MID + y : MID - y];
 // polyline through field points, subdivided so long diagonals follow the perspective
 function fieldPts(pts) { const out = []; for (let i = 0; i < pts.length; i++) { if (i) { const [x0, y0] = pts[i - 1], [x1, y1] = pts[i]; const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 5); for (let k = 1; k < n; k++) out.push(coord(x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n)); } out.push(coord(pts[i][0], pts[i][1])); } return out; }
-// goalposts on both end lines (the drawn end zones are 8 yards deep): uprights 18'6" apart, crossbar 10 ft up, uprights
-// 20 ft above it, on a padded post at the end line (where the drawn turf stops); heights use the across-field scale at that depth
-const POST_W = 3.08, BAR_H = 3.33, POST_H = 10, END_NEAR = -8, END_FAR = 108;
-const pxYd = (x) => (760 - 3.8 * x) / 53.3;
-function postsMarkup(x, id) {
-  const n = (v) => v.toFixed(1); const k = pxYd(x), gy = coord(x, 26.65)[1], lx = coord(x, 26.65 - POST_W)[0], rx = coord(x, 26.65 + POST_W)[0];
-  const bx = x, kb = pxYd(bx), by = coord(bx, 26.65)[1]; const bar = gy - BAR_H * k, top = gy - POST_H * k, w = Math.max(2.2, k * 0.2);
-  const d = `M500 ${n(by)}V${n(bar)}M${n(lx)} ${n(top)}V${n(bar)}H${n(rx)}V${n(top)}`;
-  return `<g id="${id}" class="f-posts"><path class="f-post-under" d="${d}" stroke-width="${n(w + 1.4)}"/><path class="f-post" d="${d}" stroke-width="${n(w)}"/><path class="f-post-pad" d="M500 ${n(by)}V${n(by - 1.8 * kb)}" stroke-width="${n(w * 2.4)}"/></g>`;
+// uniforms: each team's real set for this game (input.teams[i].kit: the home side's Home set, the visitors' Away set),
+// else its colour with white numbers; a visiting kit too close to the home jersey falls back to white
+const hexRgb = (c) => (/^#[0-9a-f]{6}$/i.test(c || '') ? [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)) : null);
+const farApart = (a, b) => { const x = hexRgb(a), y = hexRgb(b); return !x || !y || Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]) > 90; };
+function kitOf(side) {
+  const T = S.input?.teams || []; const k = T[side]?.kit || {}; const col = `var(${side === 0 ? '--away' : '--home'})`;
+  const kit = { jersey: k.jersey || col, helmet: k.helmet || k.jersey || col, pants: k.pants || '#e6e6e2', number: k.number || '#ffffff', trim: k.trim || k.number || '#ffffff' };
+  if (side === 0 && T[1]?.kit?.jersey && k.jersey && !farApart(k.jersey, T[1].kit.jersey)) { kit.jersey = '#f4f4f1'; kit.number = k.helmet && farApart(k.helmet, '#f4f4f1') ? k.helmet : '#1b1d20'; kit.trim = kit.number; }
+  if (kit.number && k.jersey && !farApart(kit.number, kit.jersey)) kit.number = farApart(kit.jersey, '#ffffff') ? '#ffffff' : '#1b1d20';
+  return kit;
 }
 function fieldMarkup(flip = false) {
-  const T = S.input?.teams || []; const a = T[0] || {}, hm = T[1] || {}; const nearT = flip ? a : hm, farT = flip ? hm : a;
-  let s = `<defs><linearGradient id="ss-turf" x2="0" y2="1"><stop stop-color="var(--turf-far)"/><stop offset="1" stop-color="var(--turf-near)"/></linearGradient></defs>${stadiumMarkup()}`;
-  s += `<path d="M${point(-8, 0)} L${point(108, 0)} L${point(108, 53.3)} L${point(-8, 53.3)}Z" fill="url(#ss-turf)" stroke="#86a89a" stroke-width="1.2"/>`;
-  s += `<path d="M${point(-8, 0)} L${point(0, 0)} L${point(0, 53.3)} L${point(-8, 53.3)}Z" fill="var(${flip ? '--away' : '--home'})"/><path d="M${point(100, 0)} L${point(108, 0)} L${point(108, 53.3)} L${point(100, 53.3)}Z" fill="var(${flip ? '--home' : '--away'})"/>`;
-  for (let x = 0; x <= 100; x += 5) {
-    if (x % 10 === 0 && x < 100) s += `<path d="M${point(x, 0)} L${point(x + 5, 0)} L${point(x + 5, 53.3)} L${point(x, 53.3)}Z" fill="#ffffff03"/>`;
-    s += `<path d="M${point(x, 0)} L${point(x, 53.3)}" stroke="#cbddd7" stroke-opacity="${x % 10 === 0 ? 0.5 : 0.2}" stroke-width="1"/>`;
-    if (x > 0 && x < 100 && x % 10 === 0) for (const y of [5, 48]) { const [px, py] = coord(x, y); s += `<text x="${px.toFixed(1)}" y="${(py - 4).toFixed(1)}" fill="#d8e7df" opacity=".65" text-anchor="middle" font-size="${15 - x * 0.05}" font-weight="700">${Math.min(x, 100 - x)}</text>`; }
-  }
-  for (let x = 1; x < 100; x++) for (const y of [20, 33.3]) s += `<path d="M${point(x, y)} L${point(x, y + 0.75)}" stroke="#c6d6cc" stroke-opacity=".4" stroke-width="1"/>`;
-  s += `<text x="500" y="580" text-anchor="middle" fill="white" opacity=".8" font-size="19" font-weight="800" letter-spacing="9">${esc(nearT.abbr)}</text><text x="500" y="120" text-anchor="middle" fill="white" opacity=".8" font-size="13" font-weight="800" letter-spacing="7">${esc(farT.abbr)}</text>`;
-  s += hm.logo ? `<image class="ss-midfield-logo" href="${esc(hm.logo)}" x="449" y="305" width="102" height="80" opacity=".83" preserveAspectRatio="xMidYMid meet"/>` : `<text x="500" y="350" fill="#ffffff80" text-anchor="middle" font-size="24" font-weight="900">${esc(hm.abbr)}</text>`;
+  const T = S.input?.teams || []; const team = (i) => ({ name: T[i]?.name, abbr: T[i]?.abbr, logo: T[i]?.logo, colour: T[i]?.kit && i === 1 ? T[i].kit.jersey : `var(${i === 0 ? '--away' : '--home'})` });
+  const a = team(0), hm = team(1); const nearT = flip ? a : hm, farT = flip ? hm : a;
   // the far posts sit behind the players, the near ones in front of them (the ball always draws on top)
-  s += `${postsMarkup(END_FAR, 'ss-posts-far')}<g id="ss-lines"></g><g id="ss-art"></g><g id="ss-path"></g><g id="ss-actors"></g>${postsMarkup(END_NEAR, 'ss-posts-near')}<g id="ss-ball"></g><g id="ss-flash"></g>`;
-  return s;
+  return `${sceneMarkup({ near: nearT, far: farT, home: hm, flip })}${postsMarkup(END_FAR, 'ss-posts-far', farT.colour)}<g id="ss-lines"></g><g id="ss-art"></g><g id="ss-path"></g><g id="ss-shadows"></g><g id="ss-actors"></g>${postsMarkup(END_NEAR, 'ss-posts-near', nearT.colour)}<g id="ss-ball"></g><g id="ss-flash"></g>`;
 }
-function syncFlip(flip) { if (!F.svg || F.flip === !!flip) return; F.flip = !!flip; F.svg.innerHTML = fieldMarkup(F.flip); fieldRefs(F.svg); }
+function syncFlip(flip) { const key = `${!!flip}|${(S.input?.teams || []).map((t) => `${t.id}:${t.kit?.jersey || ''}`).join('|')}`; if (!F.svg || F.sceneKey === key) return; F.sceneKey = key; F.flip = !!flip; F.svg.innerHTML = fieldMarkup(F.flip); fieldRefs(F.svg); boardScore(); }
+// the scoreboard behind the far end zone carries the score
+function boardScore() { const st = viewState?.() || S.state; if (!F.svg || !st) return; const a = F.svg.querySelector('#ss-sb-a'), hEl = F.svg.querySelector('#ss-sb-h'); if (a) a.textContent = String(st.score?.[0] ?? 0); if (hEl) hEl.textContent = String(st.score?.[1] ?? 0); }
 function fieldRefs(svg) { F.gLines = svg.querySelector('#ss-lines'); F.gArt = svg.querySelector('#ss-art'); F.gTrail = svg.querySelector('#ss-path'); F.gPlayers = svg.querySelector('#ss-actors'); F.gBall = svg.querySelector('#ss-ball'); F.gFlash = svg.querySelector('#ss-flash'); F.postsFar = svg.querySelector('#ss-posts-far'); F.postsNear = svg.querySelector('#ss-posts-near'); }
 // absolute line of scrimmage for the state (the field is flipped in even quarters)
 const absBall = (st, off, ball) => { const x = off === 0 ? ball : 100 - ball; return qFlip(st?.q) ? 100 - x : x; };
 function buildField() {
   const svg = sv('svg', { class: 'ss-field', viewBox: '0 -20 1000 640', role: 'img', 'aria-label': 'Animated field with numbered player markers and the ball' });
-  svg.innerHTML = fieldMarkup(false); F.flip = false;
+  svg.innerHTML = fieldMarkup(false); F.flip = false; F.sceneKey = null;
   F.svg = svg; fieldRefs(svg);
   return svg;
 }
-const fieldLine = (x, cls) => sv('path', { class: cls, d: `M${point(x, 0)} L${point(x, 53.3)}` });
+const fieldLine = (x, cls) => sv('path', { class: cls, d: `M${point(x, 0)} L${point(x, FIELD_W)}`, 'stroke-width': Math.max(1.6, pxYd(x) * 0.2).toFixed(1) });
 function setLines(los, fd) {
   clear(F.gLines); if (los == null) return;
   F.gLines.append(fieldLine(los, 'f-los'));
   if (fd != null && fd !== los && fd > 0 && fd < 100) F.gLines.append(fieldLine(fd, 'f-fd'));
   focusView(los);
 }
-function focusView(los) { if (!F.svg) return; cancelAnimationFrame(F.viewRaf); if (S.focus && los != null) { const cy = coord(los, 26)[1]; F.svg.setAttribute('viewBox', `80 ${Math.min(320, Math.max(50, cy - 160))} 840 320`); } else F.svg.setAttribute('viewBox', '0 -20 1000 640'); }
+// the zoomed view: a window around the line of scrimmage, tighter the further up the field it is (things are smaller there)
+function focusView(los) { if (!F.svg) return; cancelAnimationFrame(F.viewRaf); if (S.focus && los != null) { const cy = coord(los, MID)[1]; const w = 560 + 300 * (pxYd(los) / pxYd(END_NEAR)), hgt = (w * 320) / 840; F.svg.setAttribute('viewBox', `${(500 - w / 2).toFixed(0)} ${Math.min(620 - hgt, Math.max(-20, cy - hgt * 0.56)).toFixed(0)} ${w.toFixed(0)} ${hgt.toFixed(0)}`); } else F.svg.setAttribute('viewBox', '0 -20 1000 640'); }
 // kick camera: frame the hold and the goalposts the kick is going at (field aspect, at least 300 tall), easing in from
 // the current view; the next pre-snap view puts the camera back
 function kickCam(los, dir) {
-  const end = dir === 1 ? END_FAR : END_NEAR, gy = coord(end, 26.65)[1], top = gy - POST_H * pxYd(end) - 30, ly = coord(los - dir * 9, 26.65)[1];
+  const end = dir === 1 ? END_FAR : END_NEAR, gy = coord(end, MID)[1], top = gy - POST_H * zPx(end) - 30, ly = coord(los - dir * 9, MID)[1];
   const y0 = Math.min(top, ly - 60), y1 = Math.max(gy + 30, ly + 60), minH = 300 * Math.sqrt(pxYd(end) / pxYd(END_FAR)); // near things draw bigger: zoom less there
   const w = Math.min(1000, (Math.max(minH, y1 - y0) * 1000) / 640), h = (w * 640) / 1000;
   return [500 - w / 2, Math.max(-20, Math.min(620 - h, (y0 + y1) / 2 - h / 2)), w, h];
@@ -240,22 +232,36 @@ function easeView(to, dur) {
   const t0 = performance.now(); const step = (now) => { const f = Math.min(1, (now - t0) / (dur * 1000)), e = f * f * (3 - 2 * f); put(from.map((v, i) => v + (to[i] - v) * e)); if (f < 1) F.viewRaf = requestAnimationFrame(step); };
   F.viewRaf = requestAnimationFrame(step);
 }
-function place(el, abs, lat) { const [sx, sy] = coord(abs, lat); el.setAttribute('transform', `translate(${sx.toFixed(1)} ${sy.toFixed(1)}) scale(${depthScale(abs).toFixed(2)})`); }
-// offense = circle, defense = rounded square (as in v1); jersey number on top; gold ring for the players involved
+// a marker stands on the turf at (abs, lat): scaled by the projection at that depth, a little larger than life so the
+// numbers can be read; kept inside the stadium floor so nobody is ever drawn in the stands
+const SPRITE = 1.12;
+function place(el, abs, lat) { const x = Math.min(END_FAR + 1.5, Math.max(END_NEAR - 1.5, abs)), y = Math.min(FIELD_W + 4, Math.max(-4, lat)); const [sx, sy] = coord(x, y); el._sy = sy; el.setAttribute('transform', `translate(${sx.toFixed(1)} ${sy.toFixed(1)}) scale(${(spriteScale(x) * SPRITE).toFixed(3)})`); }
+// a player: a standing figure in his team's uniform with his number; a gold ring on the turf for the players involved
 function marker(side, isOff, num, opts = {}) {
-  const g = sv('g', { class: `f-pl t${side}` });
-  if (opts.ring) g.append(sv('circle', { class: 'ring', r: 15 }));
-  g.append(isOff ? sv('circle', { r: 10 }) : sv('rect', { x: -9, y: -9, width: 18, height: 18, rx: 4 }), sv('text', { y: 3.2 }, num == null ? '' : String(num)));
+  const g = sv('g', { class: `f-pl t${side}${isOff ? ' off' : ' def'}` }); g.innerHTML = playerMarkup(kitOf(side), num);
+  if (opts.ring) g.prepend(ringEl());
   if (opts.title) g.append(sv('title', {}, opts.title));
   return g;
 }
+const ringEl = () => sv('ellipse', { class: 'ring', cy: 0.3, rx: 9, ry: 3.6 });
+// nearer players draw over the ones behind them: keep the markers in depth order (far first)
+function depthSort(g) { const kids = [...g.children]; let sorted = true; for (let i = 1; i < kids.length; i++) if ((kids[i]._sy ?? 0) < (kids[i - 1]._sy ?? 0)) { sorted = false; break; } if (sorted) return; kids.sort((a, b) => (a._sy ?? 0) - (b._sy ?? 0)); for (const k of kids) g.append(k); }
 // the ring goes on a player when he gets involved (the ball reaches him, he reaches the ball carrier), never before: a
 // ring at the snap would give the play away. Whoever is left unlit gets his ring when the play is over.
 const NEAR_BALL = 1.6; // yards
-function light(actor) { if (actor.lit || !actor.role) return; actor.lit = true; actor.el.prepend(sv('circle', { class: 'ring', r: 15 })); const tt = actor.el.querySelector('title'); if (tt) tt.textContent = `${tt.textContent} — ${actor.role}`; }
+function light(actor) { if (actor.lit || !actor.role) return; actor.lit = true; actor.el.prepend(ringEl()); const tt = actor.el.querySelector('title'); if (tt) tt.textContent = `${tt.textContent} — ${actor.role}`; }
 function unlight(actor) { if (!actor.lit) return; actor.lit = false; actor.el.querySelector('.ring')?.remove(); const tt = actor.el.querySelector('title'); if (tt) tt.textContent = tt.textContent.replace(/ — .*$/, ''); }
-const ghost = (side) => sv('g', { class: `f-ghost t${side}` }, sv('circle', { r: 8 }));
-const ballEl = () => sv('g', { class: 'f-ballwrap' }, sv('ellipse', { class: 'f-ball', rx: 5.5, ry: 3.6, transform: 'rotate(-25)' }));
+const ghost = (side) => { const g = sv('g', { class: `f-ghost t${side}` }); g.innerHTML = playerMarkup(kitOf(side), null, { ghost: true }); return g; };
+const ballEl = () => { const g = sv('g', { class: 'f-ballwrap' }); g.innerHTML = ballMarkup(); return g; };
+const ballShadow = () => sv('ellipse', { class: 'f-shadow', rx: 5.6, ry: 2.2 });
+// the ball: on the turf at (fx, fy), h yards up; its shadow stays on the ground under it and fades as it climbs
+function placeBall(ball, shadow, fx, fy, h = 0, spin = 0) {
+  const [sx, sy] = coord(fx, fy), k = spriteScale(fx) * SPRITE; const lift = h * zPx(fx);
+  ball.setAttribute('transform', `translate(${sx.toFixed(1)} ${(sy - lift - 2.2 * k).toFixed(1)}) scale(${(k * (1 + Math.min(0.5, h * 0.045))).toFixed(3)})`);
+  const sp = ball.firstElementChild; if (sp) sp.setAttribute('transform', `rotate(${(-22 + spin).toFixed(0)})`);
+  if (shadow) { shadow.setAttribute('transform', `translate(${(sx + 1.6 * k + h * 0.5).toFixed(1)} ${(sy + 0.4 * k).toFixed(1)}) scale(${k.toFixed(3)})`); shadow.setAttribute('opacity', Math.max(0.1, 0.34 - h * 0.022).toFixed(2)); }
+  return [sx, sy - lift];
+}
 function fieldArt(g, book, play, set, los, dir, cls) {
   if (!book || !play || !set) return;
   (set.slots || []).forEach((s, i) => { const a = book.asg?.[play.a?.[i]]; if (!a?.p || a.p.length < 2) return; const pts = a.p.map(([px, py]) => toField(los, dir, s.y + (py || 0), s.x + (px || 0))); g.append(artPath(fieldPts(pts), a, cls, 0.75 * depthScale(pts[pts.length - 1][0]))); });
@@ -282,7 +288,8 @@ function drawPreSnap() {
     } else for (const [x, y] of mineOff ? genericO(st) : genericD(st)) put(ghost(S.you), x, y);
     for (const [x, y] of mineOff ? genericD(st) : genericO(st)) put(ghost(1 - S.you), x, y);
   }
-  const b = ballEl(); place(b, los, 26.65); F.gBall.append(b);
+  const sh = ballShadow(), b = ballEl(); F.gBall.append(sh, b); placeBall(b, sh, los, MID);
+  depthSort(F.gPlayers); boardScore();
   renderTicker();
 }
 
@@ -312,11 +319,11 @@ function startAnim(detail, animate, popup = true) {
   if (dp) fieldArt(F.gArt, defBook, dp.play, dp.set, los, dir, own(1 - off) ? 'mine' : 'theirs');
   const key = new Map((detail.people || []).map((p) => [p.id, p.role]));
   A.actors = (an.actors || []).map((a) => { const side = a.s === 'o' ? off : 1 - off; const p = player(side, a.id); const el = marker(side, a.s === 'o', a.num, { title: `${POS[a.pos] || ''} ${shortName(p)}` }); F.gPlayers.append(el); return { a, el, role: key.get(a.id) || null, lit: false }; });
-  A.shadow = an.kick ? sv('ellipse', { class: 'f-shadow', rx: 5.5, ry: 2.2, opacity: 0 }) : null; if (A.shadow) F.gBall.append(A.shadow);
+  A.shadow = ballShadow(); F.gBall.append(A.shadow);
   A.ball = ballEl(); F.gBall.append(A.ball); A.trail = sv('polyline', { class: `f-trail t${off}${an.kick ? ' kick' : ''}` }); F.gTrail.append(A.trail);
   // flight windows: throw/kick/punt until the next catch-like event (the ball arcs through the air between them)
   const ev = [...(an.events || [])].sort((x, y) => x.t - y.t); A.air = [];
-  for (let i = 0; i < ev.length; i++) if (['throw', 'kick', 'punt'].includes(ev[i].k)) { const nxt = ev.slice(i + 1).find((e) => ['catch', 'incomplete', 'interception', 'faircatch', 'touchback', 'fumble'].includes(e.k)); A.air.push([ev[i].t, nxt ? nxt.t : (an.ball?.[an.ball.length - 1]?.[0] ?? ev[i].t + 2)]); }
+  for (let i = 0; i < ev.length; i++) if (['throw', 'kick', 'punt'].includes(ev[i].k)) { const nxt = ev.slice(i + 1).find((e) => ['catch', 'incomplete', 'interception', 'faircatch', 'touchback', 'fumble'].includes(e.k)); const t1 = nxt ? nxt.t : (an.ball?.[an.ball.length - 1]?.[0] ?? ev[i].t + 2); const p0 = interp(an.ball, ev[i].t) || [0, 0], p1 = interp(an.ball, t1) || p0; A.air.push([ev[i].t, t1, Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) * (ev[i].k === 'throw' ? 1 : 1.6)]); }
   A.detail = detail; A.an = an; A.los = los; A.dir = dir; A.dur = Math.max(0.5, Number(an.dur) || 1); A.t = 0; A.last = 0; A.flashed = new Set(); A.popup = popup; A.live = !!animate;
   if (an.kick && animate && !REDUCED) easeView(kickCam(los, dir), 0.8 / (S.speed || 1));
   updateControls();
@@ -355,16 +362,18 @@ function tick(ts) {
 function drawFrame(t) {
   if (!A.an) return;
   if (A.clk && A.playing) clockText(A.clk.snap - (A.clk.snap - A.clk.end) * Math.min(1, t / A.dur), null);
-  const kp = kickAt(t); const bp = kp ? [kp.x, kp.y] : interp(A.an.ball, t) || [0, 0]; const [bxF, byF] = toField(A.los, A.dir, bp[0], bp[1]); const [bx, by0] = coord(bxF, byF);
+  const kp = kickAt(t); const bp = kp ? [kp.x, kp.y] : interp(A.an.ball, t) || [0, 0]; const [bxF, byF] = toField(A.los, A.dir, bp[0], bp[1]);
   const over = t >= A.dur - 0.05;
   for (const actor of A.actors) {
     const p = interp(actor.a.path, t); if (!p) continue; const [fx, fy] = toField(A.los, A.dir, p[0], p[1]); place(actor.el, fx, fy);
     if (actor.role && !actor.lit && (over || Math.hypot(fx - bxF, fy - byF) <= NEAR_BALL)) light(actor);
   }
-  let lift = 0; if (kp) lift = kp.h * pxYd(bxF); else for (const [t0, t1] of A.air) if (t >= t0 && t <= t1 && t1 > t0) lift = Math.sin(((t - t0) / (t1 - t0)) * Math.PI) * 42 * depthScale(bxF);
-  const by = by0 - lift; const sc = depthScale(bxF) * (kp ? 1 + Math.min(0.45, kp.h * 0.05) : lift ? 1.35 : 1);
-  A.ball.setAttribute('transform', `translate(${bx.toFixed(1)} ${by.toFixed(1)}) scale(${sc.toFixed(2)})`);
-  if (A.shadow) { A.shadow.setAttribute('transform', `translate(${bx.toFixed(1)} ${by0.toFixed(1)}) scale(${depthScale(bxF).toFixed(2)})`); A.shadow.setAttribute('opacity', kp && kp.h > 0.15 ? Math.max(0.12, 0.4 - kp.h * 0.025).toFixed(2) : '0'); }
+  depthSort(F.gPlayers);
+  // height: a kick's own arc; a pass or a punt rises with how far it travels; carried, it rides at the hip
+  let h = 0.9, spin = 0;
+  if (kp) { h = kp.h; spin = t * 900; }
+  else for (const [t0, t1, len] of A.air) if (t >= t0 && t <= t1 && t1 > t0) { const f = (t - t0) / (t1 - t0); h = 1.7 + Math.sin(f * Math.PI) * Math.min(14, Math.max(1.2, len * 0.16)); spin = t * 700; }
+  const [bx, by] = placeBall(A.ball, A.shadow, bxF, byF, h, spin);
   if (kp) A.trail.setAttribute('points', kickTrail(t));
   else { const pts = (A.an.ball || []).filter((k) => k[0] <= t).map((k) => toField(A.los, A.dir, k[1], k[2])); pts.push([bxF, byF]); A.trail.setAttribute('points', fieldPts(pts).map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')); }
   for (const e of A.an.events || []) if (e.t <= t && !A.flashed.has(e)) { A.flashed.add(e); if (t < A.dur || e.t > A.dur - 1.2) flash(FLASH[e.k] || String(e.k).toUpperCase(), bx, by); if (A.playing && t - e.t < 0.6) postFx(e.k); }
@@ -392,7 +401,7 @@ function kickAt(t) {
 // the kick's path through the air (screen points, height included) up to time t
 function kickTrail(t) {
   const k = A.an.kick; const out = (A.an.ball || []).filter((p) => p[0] <= k.t0).map((p) => coord(...toField(A.los, A.dir, p[1], p[2])));
-  for (let s = k.t0; ; s = Math.min(t, s + 0.04)) { const p = kickAt(s); if (p) { const [fx, fy] = toField(A.los, A.dir, p.x, p.y); const [sx, sy] = coord(fx, fy); out.push([sx, sy - p.h * pxYd(fx)]); } if (s >= t) break; }
+  for (let s = k.t0; ; s = Math.min(t, s + 0.04)) { const p = kickAt(s); if (p) { const [fx, fy] = toField(A.los, A.dir, p.x, p.y); out.push(coord(fx, fy, p.h)); } if (s >= t) break; }
   return out.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
 }
 // the posts the kick is going at: they flash on a make and shake when the ball hits an upright
@@ -411,7 +420,7 @@ function flash(text, x, y) {
 function finishAnim() {
   A.playing = false; cancelAnimationFrame(A.raf); A.clk = null;
   const d = A.detail, live = A.live && !!d; A.live = false; // the board shows the outcome from here (viewState: post)
-  renderScore(); renderTicker();
+  renderScore(); renderTicker(); boardScore();
   const next = () => { if (A.detail === d) { if (A.popup && d) showPopup(d); else showPicker(); } updateControls(); const done = A.done; A.done = null; if (done) done(); };
   if (live) celebrations(d).then(next, next); else next();
   updateControls();

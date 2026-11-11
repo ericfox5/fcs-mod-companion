@@ -30,6 +30,7 @@ async function load() {
   if (game) return game;
   if (!Number.isInteger(AWAY) || !Number.isInteger(HOME) || AWAY === HOME) throw fail('Pick two different teams on the Quickplay page.', 400);
   const [away, home] = await Promise.all([json(`${DATA}${AWAY}.json`), json(`${DATA}${HOME}.json`)]);
+  away.kit = away.kits?.away; home.kit = home.kits?.home; // the visitors wear their Away set, the home side its Home set
   const input = { dynasty: 'Quickplay', dynastyId: 0, season: 2026, week: 0, gameNo: 0, gameId: `quickplay-${AWAY}-${HOME}`, snapshot: null, ownedTeamId: [away, home][SIDE].id, quarterSeconds: MINUTES * 60, teams: [away, home], backUrl: `/quickplay?away=${AWAY}&home=${HOME}`, home: home.id, away: away.id };
   let st = null, version = 0;
   try { const saved = JSON.parse(sessionStorage.getItem(KEY) || 'null'); if (saved?.st?.v === 2) { st = saved.st; version = saved.version || 1; } } catch { /* start fresh */ }

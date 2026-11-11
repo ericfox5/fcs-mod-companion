@@ -7,7 +7,7 @@ import { simulateScrimmage, simulateReturn, setEnergy, type Flag, type ReturnInp
 import type { Actor, Anim, Assign, Book, Drive, GameInput, GameState, Injury, KickFlight, LogEntry, PStat, Play, PlayDetail, PlayerInput, SetDef, Side, Slot, SnapState, TStat, Decision, DecisionOption, TeamInput, TossChoice } from './types.js';
 
 export const POS = ['QB', 'HB', 'FB', 'WR', 'TE', 'LT', 'LG', 'C', 'RG', 'RT', 'LE', 'RE', 'DT', 'LLB', 'MLB', 'RLB', 'CB', 'FS', 'SS', 'K', 'P', 'KR', 'PR', 'KO', 'LS'];
-export const ENGINE_VERSION = '4.1.0';
+export const ENGINE_VERSION = '4.2.0';
 
 // ---- randomness ---------------------------------------------------------------------------------------------------
 export type Rng = () => number;

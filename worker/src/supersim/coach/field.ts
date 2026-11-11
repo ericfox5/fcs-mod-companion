@@ -14,6 +14,7 @@ export type Rng = () => number;
 export const DT = 0.05;
 export const SNAP_T = 0.8;
 const SIDE = 26.65;
+const END_ZONE = 10; // yards from a goal line to its end line
 const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
 const sig = (z: number) => 1 / (1 + Math.exp(-z));
 const gauss = (rng: Rng, m = 0, sd = 1) => { const u = Math.max(1e-9, rng()), v = rng(); return m + sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
@@ -49,7 +50,7 @@ export interface Flag { k: 'dpi' | 'dhold' | 'facemask' | 'rough' | 'back'; by: 
 // how foul-prone a player is: discipline (PDIS 0..7, 4 = average) and awareness
 export const foulRate = (p: PlayerInput) => { const d = p.ratings?.['PDIS']; return clamp(1 + (4 - clamp(Number.isFinite(d) ? (d as number) : 4, 0, 7)) / 6 + (70 - rate(p, 'PAWR')) / 120, 0.4, 2.2); };
 export // a back met behind the line on a run has room to slip the first man: real offenses lose yards on about one run in eleven
-const BACKFIELD_SLIP = 0.28;
+const BACKFIELD_SLIP = 0.5;
 const LIVE_FOUL = { holding: 0.42, dpi: 0.34, dhold: 0.08, facemask: 0.03, rough: 0.15, back: 0.05 };
 export interface ThrowInfo { t: number; x: number; y: number; air: number; cx: number; cy: number; target: Agent; result: 'catch' | 'drop' | 'pd' | 'int' | 'miss' | 'away'; by?: Agent; contested?: boolean; hurried?: boolean }
 export interface SimResult {
@@ -119,6 +120,14 @@ class Field {
     } else { const m = Math.hypot(ax, ay); if (m > a.acc) { ax *= a.acc / m; ay *= a.acc / m; } }
     a.vx += ax * DT; a.vy += ay * DT; const s2 = Math.hypot(a.vx, a.vy); if (s2 > a.top) { a.vx *= a.top / s2; a.vy *= a.top / s2; }
     a.x += a.vx * DT; a.y += a.vy * DT;
+    this.bound(a);
+  }
+  // the field has edges: nobody runs out of the back of an end zone (ten yards deep), and only the ball carrier can
+  // cross a sideline (which ends the play); everyone else pulls up at the boundary
+  bound(a: Agent) {
+    const lo = this.own - END_ZONE + 0.4, hi = (this.goal < 1e8 ? this.goal : this.own + 100) + END_ZONE - 0.4;
+    if (a.x < lo) { a.x = lo; if (a.vx < 0) a.vx = 0; } else if (a.x > hi) { a.x = hi; if (a.vx > 0) a.vx = 0; }
+    if (a !== this.carrier) { const m = SIDE - 0.4; if (a.y > m) { a.y = m; if (a.vy > 0) a.vy = 0; } else if (a.y < -m) { a.y = -m; if (a.vy < 0) a.vy = 0; } }
   }
   // follow a route: the next waypoint, then past the end either sit down in space or keep going
   runRoute(a: Agent, speed: number) {
@@ -529,7 +538,7 @@ export function simulateScrimmage(inp: ScrimmageInput): SimResult {
   // less for an underneath defender sitting in the throwing lane and for a long throw
   function openness(q: Agent, r: Agent) {
     let ax = r.x, ay = r.y, T = 0.3;
-    for (let k = 0; k < 3; k++) { const d = Math.hypot(ax - q.x, ay - q.y); T = d / (vBall * (d > 25 ? 0.88 : 1)) + 0.15; ax = r.x + r.vx * T; ay = clamp(r.y + r.vy * T, -SIDE + 0.8, SIDE - 0.8); }
+    for (let k = 0; k < 3; k++) { const d = Math.hypot(ax - q.x, ay - q.y); T = d / (vBall * (d > 25 ? 0.88 : 1)) + 0.15; ax = Math.min(F.goal + END_ZONE - 1, r.x + r.vx * T); ay = clamp(r.y + r.vy * T, -SIDE + 0.8, SIDE - 0.8); }
     let m = 6; for (const d of D) { if (d.held.length) continue; m = Math.min(m, Math.hypot(d.x - ax, d.y - ay) - d.top * Math.max(0, T - 0.25) * 0.85); }
     const L = Math.hypot(ax - q.x, ay - q.y);
     if (L > 6) for (const d of D) { if (d.held.length) continue; const f = ((d.x - q.x) * (ax - q.x) + (d.y - q.y) * (ay - q.y)) / (L * L); if (f < 0.2 || f > 0.85) continue; const off = Math.hypot(d.x - (q.x + (ax - q.x) * f), d.y - (q.y + (ay - q.y) * f)); if (off < 1.6) m -= (1.6 - off) * 1.2; }
@@ -653,7 +662,7 @@ function turnOver(F: Field, d0: Agent, t: number, bx: number) {
 // the ball arrives: the target and any defender there play it
 function catchContest(F: Field, th: ThrowInfo, rng: Rng) {
   const t = F.t; const r = th.target; const bx = th.cx, by = th.cy;
-  if (Math.abs(by) > SIDE + 0.5) { th.result = 'miss'; F.events.push({ t, k: 'incomplete' }); F.whistle('incomplete'); return; }
+  if (Math.abs(by) > SIDE + 0.5 || bx > F.goal + END_ZONE || bx < F.own - END_ZONE) { th.result = 'miss'; F.events.push({ t, k: 'incomplete' }); F.whistle('incomplete'); return; }
   const dr = Math.hypot(r.x - bx, r.y - by); const reach = 0.7 + (rate(r.p, 'SPCT', 50) / 99) * 0.5 + (rate(r.p, 'PJMP', 60) / 99) * 0.2;
   const defs = F.D.filter((d) => !d.held.length && Math.hypot(d.x - bx, d.y - by) < 1.8).sort((a, b) => Math.hypot(a.x - bx, a.y - by) - Math.hypot(b.x - bx, b.y - by));
   const d0 = defs[0]; const dd = d0 ? Math.hypot(d0.x - bx, d0.y - by) : 99; th.contested = dd < 1.3;

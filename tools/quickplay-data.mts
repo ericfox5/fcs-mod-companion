@@ -16,6 +16,7 @@ import * as N from '@ncaa/ncaa14';
 import { openDynastyFile } from '../bridge/src/od.ts';
 import { loadLogoMap, normLogoName } from '../bridge/src/logos.ts';
 import { keyRatings } from '../worker/src/pages/player-keys.ts';
+import { UNIFORMS } from '../worker/src/pages/uniforms.generated.ts';
 import type { BookIndex, TeamInput } from '../worker/src/supersim/coach/types.ts';
 import { DEFAULT_SAVE } from './supersim-real.mts';
 
@@ -43,8 +44,9 @@ for (const t of decodeTeams(file)) {
   const depthChart = chart.filter((d) => d.tgid === t.tgid && ids.has(d.pgid)).map((d) => ({ pos: d.pos, depth: d.depth, pgid: d.pgid }));
   const logoKey = (logos.teams[normLogoName(t.name)] ?? logos.teams[normLogoName(t.longName)] ?? logos.teams[normLogoName(`${t.name} ${t.mascot}`)])?.key ?? null;
   const primary = hex(t.raw, ['TBCR', 'TBCG', 'TBCB']) ?? '#1d1d1d', secondary = hex(t.raw, ['TB2R', 'TB2G', 'TB2B']) ?? '#ffffff';
-  const team: TeamInput = {
-    id: t.tgid, name: t.name, abbr: t.abbr, logo: logoKey ? `/img/logos/${logoKey.replace(/^teams[/]/, 'teams160/')}` : '', color: primary, offBook: off.id, defBook: def.id,
+  // kits: both of the team's uniform sets; the browser picks Home or Away for the game (client/quickplay.mjs)
+  const team: TeamInput & { kits?: unknown } = {
+    id: t.tgid, name: t.name, abbr: t.abbr, logo: logoKey ? `/img/logos/${logoKey.replace(/^teams[/]/, 'teams160/')}` : '', color: primary, ...(UNIFORMS[t.tgid] ? { kits: UNIFORMS[t.tgid] } : {}), offBook: off.id, defBook: def.id,
     players: ps.map((p) => ({ id: p.pgid, name: `${p.firstName} ${p.lastName}`, number: p.jersey, pos: p.pos, overall: p.overall, ratings: p.ratings, photoUrl: p.headId ? `/img/faces/${p.headId}.png` : '/img/faces/0.png' })),
     depthChart,
   };

@@ -280,3 +280,15 @@ folder and the faces folder from `~/.ncaa-bridge/config.json`). Ten teams whose 
 team's two colours. The win probability is one bar in the two teams' colours; Spread, Total and Moneyline use a heavy
 condensed italic numeral face (`/fonts/barlow-condensed-800-italic.woff2` when present, condensed system faces
 otherwise). The SuperSim and QuickPlay badges are `public/img/supersim-button.webp` and `quickplay-button.webp`.
+
+**Supersim field (2026-11-11, engine 4.2.0).** The field is one projected 3D scene drawn in SVG
+(`worker/public/js/supersim/scene.js`): a full-size college field (10-yard end zones, hash marks, numbers read from
+their sideline, six-foot border, pylons), goalposts on the end lines, a main grandstand with a press box on the home
+sideline, visitors' bleachers, a scoreboard that carries the score, a field house, light towers and trees. Everything
+is placed in field yards and heights through one perspective (`coord(x, y, z)`), so players, the ball's height and its
+shadow agree with the paint. The camera stays behind the near end zone, so when the teams change ends each quarter the
+home stand and the midfield logo swap sides. Players are standing figures in the team's real uniform colours for that
+game (`TeamInput.kit`: the home side's Home set, the visitors' Away set), drawn in depth order with shadows. In the
+engine nobody leaves the stadium floor any more: every player stops at the end lines, only the ball carrier can cross a
+sideline, the quarterback leads a receiver to a spot inside the end zone and a pass that comes down past the end line
+is incomplete.
