@@ -29,6 +29,7 @@ import { syntheticRoster, autoDepthChart } from './generic.js';
 import { UNIFORMS } from '../pages/uniforms.generated.js';
 import { html, page } from '../html.js';
 import { recordLines } from '../odds.js';
+import { skinOf } from '../pages/game.js';
 import { allowedGame, sameOrigin } from './access.js';
 import { bracketGameFor, bracketControls, finishBracketGame, type BracketGame } from './playoff-games.js';
 import { loadBook, loadIndex, teamBooks, loadTeamBook, composeEdits } from './coach/books.js';
@@ -153,7 +154,7 @@ export async function buildInput(env: SimEnv, dyn: Dynasty, game: GameRow, owned
     const [offTb, defTb] = await Promise.all([loadTeamBook(env, origin, dyn.id, team, 'off'), loadTeamBook(env, origin, dyn.id, team, 'def')]);
     const bookEdits: BookEditsPair = { off: offTb.custom ? offTb.edits : null, def: defTb.custom ? defTb.edits : null };
     const eligible = players.filter((p) => p.redshirt !== 1);
-    let roster: PlayerInput[] = eligible.map((p) => ({ id: p.pgid, name: `${p.first_name} ${p.last_name}`, number: p.jersey, photoUrl: headshotUrl(p), pos: p.pos, overall: p.overall, ratings: JSON.parse(p.ratings_json || '{}') }));
+    let roster: PlayerInput[] = eligible.map((p) => ({ id: p.pgid, name: `${p.first_name} ${p.last_name}`, number: p.jersey, photoUrl: headshotUrl(p), skin: skinOf(p.head_id), pos: p.pos, overall: p.overall, ratings: JSON.parse(p.ratings_json || '{}') }));
     // the game keeps no roster (and no depth chart) for the generic FCS slots; Supersim plays them with placeholders
     const synthetic = roster.length === 0;
     if (synthetic) { roster = syntheticRoster(tgid, `${dyn.id}:${dyn.season_year}`); depthChart = autoDepthChart(roster); }
@@ -194,7 +195,9 @@ async function booksFor(env: SimEnv, origin: string, input: SimInput, st: GameSt
   return { off: o, def: d };
 }
 
-const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'";
+// 'wasm-unsafe-eval' and blob: are for the 3D figure on celebration cards (js/hero3d.js): its mesh decoder is a small
+// WebAssembly module and the model's textures are read through blob: URLs made in the page; nothing else is loosened
+const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' blob:; font-src 'self'; base-uri 'none'; frame-ancestors 'none'";
 // rest: the path parts after `resource` (/supersim/<week>/<game_no> -> resource '<week>', rest ['<game_no>'];
 // /supersim/watch/<week>/<game_no> -> resource 'watch', rest ['<week>', '<game_no>'])
 export async function handleSupersim(req: Request, env: SimEnv, dyn: Dynasty, resource: string | undefined, acting: MemberRow | null, rest: string[] = []): Promise<Response> {

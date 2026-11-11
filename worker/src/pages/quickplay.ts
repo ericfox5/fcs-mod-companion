@@ -42,7 +42,9 @@ const board = (away: QuickTeam, home: QuickTeam): Raw => oddsBox(asRow(away), as
 
 const pick = (idx: QuickIndex, v: string | null) => { const n = Number(v); return v !== null && Number.isInteger(n) ? idx.teams.find((t) => t.id === n) : undefined; };
 const playHref = (away: QuickTeam, home: QuickTeam, side: string, q: number) => `/quickplay/play?away=${away.id}&home=${home.id}&side=${side}&q=${q}`;
-const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'";
+// 'wasm-unsafe-eval' and blob: are for the 3D figure on celebration cards (js/hero3d.js): its mesh decoder is a small
+// WebAssembly module and the model's textures are read through blob: URLs made in the page; nothing else is loosened
+const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' blob:; font-src 'self'; base-uri 'none'; frame-ancestors 'none'";
 
 export async function quickplay(req: Request, env: Env, parts: string[]): Promise<Response> {
   const url = new URL(req.url); const idx = await quickIndex(env, url.origin);
@@ -64,7 +66,7 @@ export async function quickplay(req: Request, env: Env, parts: string[]): Promis
   const home = h ?? ranked.find((t) => t.id !== a?.id)!; const away = a && a.id !== home.id ? a : ranked.find((t) => t.id !== home.id)!;
   const confs = [...new Set(idx.teams.map((t) => t.conf || 'Other'))].sort();
   const select = (name: string, cur: QuickTeam, label: string) => html`<label class="qp-pick"><span class="qp-lbl">${label}</span>
-    <span class="qp-sel">${teamLogo(asRow(cur), 'md')}<select name="${name}" aria-label="${label} team">${confs.map((c) => html`<optgroup label="${c}">${idx.teams.filter((t) => (t.conf || 'Other') === c).map((t) => html`<option value="${t.id}" ${t.id === cur.id ? 'selected' : ''} data-logo="${t.logoKey ?? ''}">${t.name} (${t.overall})</option>`)}</optgroup>`)}</select></span></label>`;
+    <span class="qp-sel"><span class="qp-native">${teamLogo(asRow(cur), 'md')}</span><select name="${name}" aria-label="${label} team">${confs.map((c) => html`<optgroup label="${c}">${idx.teams.filter((t) => (t.conf || 'Other') === c).map((t) => html`<option value="${t.id}" ${t.id === cur.id ? 'selected' : ''} data-logo="${t.logoKey ?? ''}" data-name="${t.name}" data-abbr="${t.abbr}" data-ovr="${t.overall}">${t.name} (${t.overall})</option>`)}</optgroup>`)}</select></span></label>`;
   const body = html`<div class="quickplay">
     <header class="qp-head"><img class="qp-mark" src="/img/quickplay-button.webp" alt="SuperSim QuickPlay" width="900" height="181">
       <p class="lede">Pick any two 2026 FCS teams and play the game in Supersim: call every snap from the real playbooks, or let the CPU play it out. No account, nothing saved.</p></header>

@@ -140,14 +140,15 @@ export function sceneMarkup({ near, far, home, flip = false }) {
   // ---- the turf: base colour, mowing stripes every five yards, grain, the sun from the home side, darker edges ----
   s += `<g class="ss-turf">${quad([[END_NEAR - 4, -5], [END_FAR + 4, -5], [END_FAR + 4, FIELD_W + 5], [END_NEAR - 4, FIELD_W + 5]], 'fill="url(#ss-turf)"')}`;
   for (let x = 0; x < 100; x += 5) s += quad([[x, 0], [x + 5, 0], [x + 5, FIELD_W], [x, FIELD_W]], `fill="${(x / 5) % 2 ? '#000' : '#fff'}" opacity="${(x / 5) % 2 ? 0.07 : 0.045}"`);
-  // end zones in the defending team's colour, its name across them (read from the camera's end)
-  const zone = (x0, x1, team) => {
+  // end zones in the defending team's colour, its name across them: each name is painted with the tops of its letters
+  // toward its own end line, so the far one reads from the camera and the near one is upside down to it
+  const zone = (x0, x1, team, nearEnd) => {
     let z = quad([[x0, 0], [x1, 0], [x1, FIELD_W], [x0, FIELD_W]], `fill="${team?.colour || '#335'}"`) + quad([[x0, 0], [x1, 0], [x1, FIELD_W], [x0, FIELD_W]], 'fill="#000" opacity=".12"');
     const label = (team?.name || team?.abbr || '').toUpperCase(); const words = label.length <= 16 ? label : (team?.abbr || '').toUpperCase(); const size = Math.min(6.4, 60 / Math.max(6, words.length));
-    z += `<text transform="${flat((x0 + x1) / 2 - 0.36 * size, MID, [0, 1], [-1, 0])}" text-anchor="middle" font-size="${n1(size)}" font-weight="900" letter-spacing="${n1(size * 0.14)}" fill="#fff" fill-opacity=".92" stroke="#000" stroke-opacity=".35" stroke-width=".25" paint-order="stroke">${esc(words)}</text>`;
+    z += `<text transform="${nearEnd ? flat((x0 + x1) / 2 + 0.36 * size, MID, [0, -1], [1, 0]) : flat((x0 + x1) / 2 - 0.36 * size, MID, [0, 1], [-1, 0])}" text-anchor="middle" font-size="${n1(size)}" font-weight="900" letter-spacing="${n1(size * 0.14)}" fill="#fff" fill-opacity=".92" stroke="#000" stroke-opacity=".35" stroke-width=".25" paint-order="stroke">${esc(words)}</text>`;
     return z;
   };
-  s += zone(END_NEAR, 0, near) + zone(100, END_FAR, far);
+  s += zone(END_NEAR, 0, near, true) + zone(100, END_FAR, far, false);
   if (g) s += `<g clip-path="url(#ss-fieldclip)"><rect x="-100" y="100" width="1200" height="560" fill="url(#ss-grain)"/></g>`;
   // ---- paint: the six-foot border, goal lines, yard lines, hash marks, numbers ----
   const white = 'fill="#f7f8f4"';
@@ -178,18 +179,30 @@ export function sceneMarkup({ near, far, home, flip = false }) {
 }
 
 // ---- players and the ball (sprites: 10 units to the yard, the origin on the ground under him) ----------------------------
-/** A standing player seen from the end-zone camera: his shadow, pants, jersey with shoulder pads and number, helmet.
+const BODY = 'M-6.3 -15.6Q-6.3 -18.9 -3 -18.9H3Q6.3 -18.9 6.3 -15.6L5 -12.6L4.1 -8.9Q3.9 -8 2.9 -8H-2.9Q-3.9 -8 -4.1 -8.9L-5 -12.6Z';
+/** A standing player seen from the end-zone camera: his shadow, shoes and socks, pants, arms, a jersey with shoulder
+ *  pads, sleeve stripes and his number, and his helmet. view 'front': he faces the camera (facemask, the face behind
+ *  it); 'back': he faces up the field (the stripe down the helmet, the name bar above the number).
  *  kit: { helmet, jersey, pants, number, trim } (CSS colours). ghost: an anonymous, see-through figure. */
-export function playerMarkup(kit, num, { ghost = false } = {}) {
+export function playerMarkup(kit, num, { ghost = false, view = 'back' } = {}) {
   const k = kit || {}; const jersey = k.jersey || '#496caa', helmet = k.helmet || jersey, pants = k.pants || '#e6e6e2', ink = k.number || '#fff', trim = k.trim || ink;
-  if (ghost) return `<ellipse cx="2" cy=".4" rx="6" ry="2.3" fill="#000" opacity=".22"/><g opacity=".5"><rect x="-3" y="-8" width="6" height="8" rx="1.6" fill="${pants}"/><path d="M-5.6 -15.2Q-5.6 -18 -2.6 -18H2.6Q5.6 -18 5.6 -15.2V-9.6Q5.6 -7.4 3.4 -7.4H-3.4Q-5.6 -7.4 -5.6 -9.6Z" fill="${jersey}" stroke="#fff" stroke-opacity=".7" stroke-width=".7" stroke-dasharray="2 1.4"/><circle cy="-21" r="3.5" fill="${helmet}"/></g>`;
-  return `<ellipse class="p-shadow" cx="2.6" cy=".5" rx="6.6" ry="2.5" fill="#000" opacity=".3"/>
-    <rect x="-3.1" y="-8.4" width="6.2" height="8.4" rx="1.7" fill="${pants}"/><path d="M0 -6V0" stroke="#000" stroke-opacity=".25" stroke-width=".7"/><rect x="-3.1" y="-1.9" width="6.2" height="1.9" rx=".9" fill="#1b1d20"/>
-    <path class="p-jersey" d="M-5.9 -15.3Q-5.9 -18.3 -2.7 -18.3H2.7Q5.9 -18.3 5.9 -15.3V-9.5Q5.9 -7.2 3.5 -7.2H-3.5Q-5.9 -7.2 -5.9 -9.5Z" fill="${jersey}" stroke="#0b0c0d" stroke-opacity=".55" stroke-width=".6"/>
-    <path d="M-5.9 -13.2H-4.4M4.4 -13.2H5.9" stroke="${trim}" stroke-width="1.1"/>
-    <path d="M-5.9 -15.3Q-5.9 -18.3 -2.7 -18.3H2.7Q5.9 -18.3 5.9 -15.3V-9.5Q5.9 -7.2 3.5 -7.2H-3.5Q-5.9 -7.2 -5.9 -9.5Z" fill="url(#ss-body)"/>
-    <text class="p-num" y="-9.4" fill="${ink}">${num == null ? '' : esc(num)}</text>
-    <circle cy="-21.3" r="3.7" fill="${helmet}" stroke="#0b0c0d" stroke-opacity=".5" stroke-width=".5"/><circle cy="-21.3" r="3.7" fill="url(#ss-helm)"/><path d="M-2.2 -19.2Q0 -18 2.2 -19.2" fill="none" stroke="#d9dde0" stroke-width=".7"/>`;
+  if (ghost) return `<ellipse cx="2" cy=".4" rx="6" ry="2.3" fill="#000" opacity=".22"/><g opacity=".5"><rect x="-3.3" y="-8.6" width="2.9" height="8.6" rx="1.2" fill="${pants}"/><rect x=".4" y="-8.6" width="2.9" height="8.6" rx="1.2" fill="${pants}"/><path d="${BODY}" fill="${jersey}" stroke="#fff" stroke-opacity=".75" stroke-width=".7" stroke-dasharray="2 1.4"/><circle cy="-22" r="3.6" fill="${helmet}"/></g>`;
+  const front = view === 'front';
+  const leg = (x, cls) => `<g class="p-leg ${cls}"><rect x="${x}" y="-9" width="3" height="6.8" rx="1.2" fill="${pants}"/><rect x="${x}" y="-3.4" width="3" height="1.9" fill="#f3f3f0"/><rect x="${x - 0.2}" y="-1.7" width="3.4" height="1.7" rx=".8" fill="#17191c"/></g>`;
+  const arm = (sx) => `<g transform="scale(${sx} 1)"><rect x="5.3" y="-16.4" width="2.3" height="4" rx="1.1" fill="${jersey}" stroke="#0b0c0d" stroke-opacity=".4" stroke-width=".4"/><rect x="5.5" y="-12.7" width="1.9" height="3.6" rx=".9" fill="#b98d6b"/><rect x="5.4" y="-9.6" width="2.1" height="1.9" rx=".9" fill="${trim}"/><path d="M5.3 -13.7H7.6" stroke="${trim}" stroke-width=".8"/></g>`;
+  const head = front
+    ? `<circle cy="-22" r="3.75" fill="${helmet}" stroke="#0b0c0d" stroke-opacity=".5" stroke-width=".5"/><path d="M-2.3 -21.6Q0 -23 2.3 -21.6V-19.6Q0 -18.3 -2.3 -19.6Z" fill="#2a1d16"/><circle cy="-22" r="3.75" fill="url(#ss-helm)"/><path d="M-2.6 -21Q0 -19.9 2.6 -21M-2.5 -19.8Q0 -18.5 2.5 -19.8M0 -21.3V-18.6" fill="none" stroke="#d6dadd" stroke-width=".6"/>`
+    : `<circle cy="-22" r="3.75" fill="${helmet}" stroke="#0b0c0d" stroke-opacity=".5" stroke-width=".5"/><path d="M0 -25.7V-18.4" stroke="${trim}" stroke-width="1" stroke-opacity=".9"/><circle cy="-22" r="3.75" fill="url(#ss-helm)"/>`;
+  return `<ellipse class="p-shadow" cx="2.8" cy=".5" rx="7" ry="2.6" fill="#000" opacity=".3"/>
+    ${leg(-3.3, 'l')}${leg(0.3, 'r')}${arm(1)}${arm(-1)}
+    <path d="M-1.6 -19.4H1.6V-18H-1.6Z" fill="#b98d6b"/>
+    <path class="p-jersey" d="${BODY}" fill="${jersey}" stroke="#0b0c0d" stroke-opacity=".55" stroke-width=".6"/>
+    <path d="M-6.2 -15.2H-3.9M3.9 -15.2H6.2" stroke="${trim}" stroke-width=".9"/>${front ? `<path d="M-1.9 -18.9Q0 -17.3 1.9 -18.9" fill="none" stroke="${trim}" stroke-width=".8"/>` : `<path d="M-2.6 -17.3H2.6" stroke="${ink}" stroke-opacity=".75" stroke-width=".8"/>`}
+    <path d="M-4.2 -8.6H4.2" stroke="${pants}" stroke-width="1"/>
+    <path d="${BODY}" fill="url(#ss-body)"/>
+    <text class="p-num" y="-9.9" fill="${ink}">${num == null ? '' : esc(num)}</text>
+    ${head}`;
 }
-/** The ball: a shaded prolate ball with its stripes and laces (drawn about twice life size so it can be followed). */
-export const ballMarkup = () => `<g class="f-ballspin"><ellipse rx="6.2" ry="3.7" fill="url(#ss-ballg)" stroke="#2b1608" stroke-width=".5"/><path d="M-3.9 -2.8Q-3.1 0 -3.9 2.8M3.9 -2.8Q3.1 0 3.9 2.8" fill="none" stroke="#f4f1ea" stroke-width=".9"/><path d="M-1.8 -1.2H1.8M-1.2 -1.9V-.5M0 -1.9V-.5M1.2 -1.9V-.5" stroke="#f4f1ea" stroke-width=".55"/><ellipse cx="-1.4" cy="-1.6" rx="3" ry="1.1" fill="#fff" opacity=".18"/></g>`;
+/** The ball: a shaded prolate ball with its stripes and laces, a little over twice life size so it can be followed,
+ *  with a pale edge that keeps it off the turf. */
+export const ballMarkup = () => `<g class="f-ballspin"><ellipse rx="4.5" ry="2.75" fill="#fff" opacity=".55"/><ellipse rx="4" ry="2.3" fill="url(#ss-ballg)" stroke="#2b1608" stroke-width=".4"/><path d="M-2.6 -1.75Q-2.05 0 -2.6 1.75M2.6 -1.75Q2.05 0 2.6 1.75" fill="none" stroke="#f4f1ea" stroke-width=".7"/><path d="M-1.3 -.75H1.3M-.85 -1.25V-.25M0 -1.25V-.25M.85 -1.25V-.25" stroke="#f4f1ea" stroke-width=".42"/><ellipse cx="-.9" cy="-1" rx="2" ry=".7" fill="#fff" opacity=".2"/></g>`;

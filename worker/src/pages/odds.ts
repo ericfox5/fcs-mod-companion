@@ -130,10 +130,12 @@ export function oddsBox(away: TeamRow, home: TeamRow, o: Odds, slug = '', stars:
   // meet at the split (it eases out from the middle on load)
   const tug = html`<div class="ob-wp" role="img" aria-label="Win probability: ${away.abbr} ${pct(o.awayWin)}, ${home.abbr} ${pct(o.homeWin)}" style="--s:${(o.awayWin * 100).toFixed(1)}%;--ca:${ca};--ch:${ch}">
     <span class="ob-tug-end a">${pct(o.awayWin)}</span><div class="ob-wpbar"></div><span class="ob-tug-end h">${pct(o.homeWin)}</span></div>`;
-  const moneyRow = (t: TeamRow, n: number, p: number, isFav: boolean) => html`<div class="ob-ml ${isFav ? 'fav' : ''}" style="--tc:${onLight(t)}">${teamLogo(t, 'xs')}<span class="ob-ab">${t.abbr}</span><span class="ob-num ob-price ${n > 0 ? 'dog' : 'fav'}">${money(n)}</span><span class="ob-imp">${pct(p)}</span></div>`;
+  const moneyRow = (t: TeamRow, n: number, p: number, isFav: boolean) => html`<div class="ob-ml ${isFav ? 'fav' : ''}" style="--tc:${onLight(t)}">${teamLogo(t, 'xs')}<span class="ob-ab">${t.abbr}</span><span class="ob-num ob-price ${n > 0 ? 'dog' : 'fav'}">${money(n)}</span></div>`;
   // the total runs hot: yellow for a low-scoring game, through orange, to red for a shootout (30 to 70 points)
   const heat = Math.min(1, Math.max(0, (o.total - 30) / 40)); const mix = (a: number[], b: number[], f: number) => a.map((v, i) => Math.round(v + (b[i]! - v) * f));
   const heatRgb = heat < 0.5 ? mix([255, 214, 10], [255, 138, 0], heat * 2) : mix([255, 138, 0], [255, 45, 32], (heat - 0.5) * 2); const heatCol = `rgb(${heatRgb.join(' ')})`;
+  // the number itself, on white: the same run in deeper tones (gold, burnt orange, red)
+  const inkRgb = heat < 0.5 ? mix([201, 148, 0], [224, 100, 0], heat * 2) : mix([224, 100, 0], [208, 2, 27], (heat - 0.5) * 2); const heatInk = `rgb(${inkRgb.join(' ')})`;
   // the spread on a ruler: pick'em in the middle, a touchdown per tick, the marker on the favourite's side
   const lean = Math.max(-1, Math.min(1, -o.spread / 28)); const mark = (50 + lean * 50).toFixed(1); const favCol = fav ? onLight(fav) : '#1d1d1d';
   const maxEdge = Math.max(8, ...o.edges.map((e) => e.by));
@@ -154,7 +156,7 @@ export function oddsBox(away: TeamRow, home: TeamRow, o: Odds, slug = '', stars:
           <div class="ob-ruler"><span>${away.abbr}</span><div class="ob-rule"><i></i><b></b></div><span>${home.abbr}</span></div>
         </div></div>
       <div class="ob-tile"><span class="ob-k">Total</span>
-        <div class="ob-total" style="--heat:${heatCol};--m:${(heat * 100).toFixed(1)}%">
+        <div class="ob-total" style="--heat:${heatCol};--heat-ink:${heatInk};--m:${(heat * 100).toFixed(1)}%">
           <div class="ob-v"><span class="ob-ou"><i>O</i><i>U</i></span><span class="ob-num">${o.total.toFixed(1)}</span></div>
           <div class="ob-heat"><b></b></div>
         </div></div>

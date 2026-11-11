@@ -5,7 +5,8 @@
 export type { Book, Formation, SetDef, Slot, Play, Assign, BookIndex } from '@ncaa/ncaa14';
 
 // ---- game input (rosters) ----
-export interface PlayerInput { id: number; name: string; number: number; pos: number; overall: number; ratings: Record<string, number>; photoUrl?: string }
+// skin: the skin colour of his in-game head (for his 3D figure on a celebration card)
+export interface PlayerInput { id: number; name: string; number: number; pos: number; overall: number; ratings: Record<string, number>; photoUrl?: string; skin?: string }
 // fsubs: formation subs from the site's depth chart page, "<side>:<set id>:<slot>" -> pgid (a player for one slot of one set)
 // synthetic: the game keeps no roster for this team (generic FCS slot); the players are generated placeholders and
 // nothing about them goes back to the console (team totals only)

@@ -1024,3 +1024,27 @@ ul.plain { list-style: none; margin: 0; padding: 0; } ul.plain li { padding: 3px
 .box.closing { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 9px 12px; }
 .closing .cl-tag { background: var(--red); color: #fff; font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; padding: 3px 8px; border-radius: 2px; }
 .closing .cl-line { font-size: 14px; } .closing .cl-res { font-weight: 700; } .closing .cl-note { margin-left: auto; font-size: 11px; }
+
+/* the Quickplay team picker (js/quickplay-pick.js): a button with the team's logo and name over the native select, and a
+   searchable list of every team with logos, grouped by conference */
+.qp-sel { position: relative; }
+.qp-sel.enhanced { padding: 0; border: 0; background: none; }
+.qp-sel.enhanced select, .qp-sel.enhanced .qp-native { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.qp-combo { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 8px 10px; background: var(--card); border: 1px solid var(--line); border-radius: 3px; font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+.qp-combo:hover { border-color: #b9bcc0; } .qp-combo[aria-expanded=true], .qp-combo:focus-visible { border-color: var(--ink); outline: 0; box-shadow: 0 0 0 2px #1d1d1d22; }
+.qp-cur-logo { width: 32px; height: 32px; object-fit: contain; flex: none; }
+.qp-cur { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.qp-cur-name { font-size: 16px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qp-cur-meta { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qp-caret { color: var(--ink-3); font-size: 12px; }
+.qp-panel { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); background: var(--card); border: 1px solid var(--ink); border-radius: 3px; box-shadow: 0 12px 30px #0003; overflow: hidden; }
+.qp-search { display: block; width: 100%; box-sizing: border-box; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--line); font: inherit; font-size: 14px; outline: 0; background: #fafafa; }
+.qp-list { max-height: min(340px, 50vh); overflow-y: auto; overscroll-behavior: contain; }
+.qp-group { position: sticky; top: 0; z-index: 1; padding: 5px 12px; background: var(--black, #111); color: #fff; font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+.qp-opt { display: flex; align-items: center; gap: 9px; padding: 6px 12px; cursor: pointer; border-bottom: 1px solid var(--line-soft); font-size: 14px; }
+.qp-opt img { width: 22px; height: 22px; object-fit: contain; flex: none; }
+.qp-opt-name { flex: 1; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qp-opt-abbr { font-size: 11px; color: var(--ink-3); } .qp-opt-ovr { min-width: 22px; text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
+.qp-opt:hover, .qp-opt.active { background: var(--row-hover); } .qp-opt.active { box-shadow: inset 3px 0 0 var(--red); }
+.qp-opt.cur .qp-opt-name::after { content: " ✓"; color: var(--red); }
+.qp-none { padding: 14px 12px; color: var(--ink-3); }

@@ -46,7 +46,8 @@ function confetti(canvas, colors, seconds) {
   return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', size); };
 }
 
-// opts: { kind, sub, points, team: { name, abbr, logo }, color, player?: { name, photoUrl, role, line }, score: [away, home], abbrs: [a, h], final?: boolean, ms? }
+// opts: { kind, sub, points, team: { name, abbr, logo }, color, player?: { name, photoUrl, role, line }, score: [away, home], abbrs: [a, h], final?: boolean, ms?,
+//         hero?: { kit: { helmet, jersey, pants, trim, number }, number, skin, primary, set } }  (the player as a flexing 3D figure)
 export function celebrate(host, opts) {
   return new Promise((resolve) => {
     if (!host) { resolve(); return; }
@@ -63,6 +64,14 @@ export function celebrate(host, opts) {
       if (pl.photoUrl) { const img = el('img', { src: pl.photoUrl, alt: pl.name, decoding: 'async' }); img.addEventListener('error', () => img.remove()); ph.append(img); }
       playerRow = el('div', { class: 'ss-cel-player' }, ph, el('div', { class: 'ss-cel-name' }, el('b', {}, pl.name), el('small', {}, [pl.role, pl.line].filter(Boolean).join(' · '))));
     }
+    // the scorer as a 3D figure in his uniform, flexing (js/hero3d.js, the model from the game previews): loaded when the
+    // first celebration needs it; the card shows without it where WebGL or the file is missing
+    const hr = opts.hero; let heroEl = null;
+    if (hr && !REDUCED) {
+      const k = hr.kit || {}; const hex = (v) => (/^#[0-9a-f]{6}$/i.test(v || '') ? v : '');
+      heroEl = el('div', { class: 'ob-hero ss-cel-hero', 'aria-hidden': 'true', 'data-anim': 'flex', 'data-set': hr.set || 'home', 'data-primary': hex(hr.primary) || hex(color), 'data-secondary': '#ffffff', 'data-helmet': hex(k.helmet), 'data-jersey': hex(k.jersey), 'data-pants': hex(k.pants), 'data-trim': hex(k.trim), 'data-number-color': hex(k.number), 'data-number': hr.number ?? '', 'data-skin': hex(hr.skin) });
+      import('/js/hero3d.js').then(() => window.mountHeroes?.(box)).catch(() => heroEl.remove());
+    }
     const sc = opts.score || [0, 0], ab = opts.abbrs || ['', ''];
     const card = el('div', { class: 'ss-cel-card' },
       opts.final ? el('div', { class: 'ss-cel-eyebrow' }, 'FINAL') : null,
@@ -72,14 +81,15 @@ export function celebrate(host, opts) {
       playerRow,
       el('div', { class: 'ss-cel-score' }, el('span', {}, `${ab[0]} ${sc[0]}`), el('i', {}, '–'), el('span', {}, `${sc[1]} ${ab[1]}`)),
       el('small', { class: 'ss-cel-hint' }, 'Tap to continue'));
-    box.append(el('div', { class: 'ss-cel-rays', 'aria-hidden': 'true' }), canvas, card);
+    box.append(el('div', { class: 'ss-cel-rays', 'aria-hidden': 'true' }), canvas, heroEl ? el('div', { class: 'ss-cel-stage' }, heroEl, card) : card);
+    if (heroEl) box.classList.add('with-hero');
     host.append(box);
     let stop = () => {};
     if (!REDUCED) stop = confetti(canvas, [color, mix(color, '#ffffff', 0.45), '#ffffff', '#f0d18a', mix(color, '#000000', 0.25)], opts.final ? 4.6 : 3);
     let done = false;
-    const close = () => { if (done) return; done = true; clearTimeout(timer); document.removeEventListener('keydown', onKey); box.classList.add('out'); setTimeout(() => { stop(); box.remove(); resolve(); }, REDUCED ? 0 : 260); };
+    const close = () => { if (done) return; done = true; clearTimeout(timer); document.removeEventListener('keydown', onKey); box.classList.add('out'); setTimeout(() => { stop(); box.remove(); if (heroEl) window.mountHeroes?.(document.createElement('div')); /* releases his WebGL context */ resolve(); }, REDUCED ? 0 : 260); };
     const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); close(); } };
     box.addEventListener('click', close); document.addEventListener('keydown', onKey);
-    const timer = setTimeout(close, opts.ms ?? (opts.final ? 5200 : 3400));
+    const timer = setTimeout(close, opts.ms ?? (opts.final ? 5200 : heroEl ? 4400 : 3400));
   });
 }

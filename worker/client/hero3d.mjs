@@ -9,8 +9,9 @@
 //
 // Markup (pages/odds.ts): <div class="ob-hero" data-primary="#7a1f2b" data-secondary="#c0c0c0" data-set="home" data-helmet="#b2b3b2"
 //   data-jersey="#4a1d29" data-pants="#aba5a5" data-trim="" data-number-color="#f0f1f0" data-number="12" data-skin="#a1816d">
-// Exports mountHeroes(root) for pages that swap the board in later (Quickplay).
-import { AnimationMixer, CanvasTexture, Clock, Color, DirectionalLight, HemisphereLight, PerspectiveCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderer, Box3, LoopRepeat } from 'three';
+// data-anim="flex": the figure flexes instead of standing easy (the scorer on a Supersim celebration card).
+// Exports mountHeroes(root) for pages that add figures later (Quickplay's board, Supersim celebrations).
+import { AnimationMixer, CanvasTexture, Clock, Color, DirectionalLight, HemisphereLight, PerspectiveCamera, Quaternion, Scene, SRGBColorSpace, Vector3, WebGLRenderer, Box3, LoopRepeat } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
@@ -60,6 +61,21 @@ function dress(root, el) {
   });
 }
 
+// A celebration laid over the idle clip (data-anim="flex"): a double-biceps flex. The upper arms go out level with the
+// shoulders (the rig's rest pose), the forearms bend up past vertical and pump, and he leans back with his chin up.
+// Returns the per-frame function.
+function flexPose(root) {
+  const find = (re) => { let hit = null; root.traverse((o) => { if (!hit && re.test(o.name)) hit = o; }); return hit; };
+  const B = { la: find(/^mixamorig_?LeftArm_\d+$/), lf: find(/^mixamorig_?LeftForeArm_\d+$/), ra: find(/^mixamorig_?RightArm_\d+$/), rf: find(/^mixamorig_?RightForeArm_\d+$/), sp: find(/^mixamorig_?Spine1_\d+$/), hd: find(/^mixamorig_?Head_\d+$/) };
+  const X = new Vector3(1, 0, 0), Z = new Vector3(0, 0, 1); const q = new Quaternion();
+  return (t) => {
+    const pump = 0.5 + 0.5 * Math.sin(t * 6.5), bend = 1.7 + 0.32 * pump, lift = 0.1 + 0.08 * pump; // radians
+    if (B.la) B.la.quaternion.setFromAxisAngle(Z, lift); if (B.ra) B.ra.quaternion.setFromAxisAngle(Z, -lift);
+    if (B.lf) B.lf.quaternion.setFromAxisAngle(X, -bend); if (B.rf) B.rf.quaternion.setFromAxisAngle(X, -bend);
+    if (B.sp) B.sp.quaternion.multiply(q.setFromAxisAngle(X, -0.1 - 0.05 * pump)); if (B.hd) B.hd.quaternion.multiply(q.setFromAxisAngle(X, -0.14));
+  };
+}
+
 let modelP = null;
 const loadModel = () => (modelP ??= new Promise((resolve, reject) => { const l = new GLTFLoader(); l.setMeshoptDecoder(MeshoptDecoder); l.load(MODEL, resolve, undefined, reject); }));
 
@@ -83,7 +99,8 @@ async function mount(el, index) {
   const clock = new Clock(); let visible = true, raf = 0;
   let turn = index * Math.PI; const base = root.rotation.y;
   // the clip is a standing idle (he looks around and shifts his weight); a slow turn from side to side shows the number and the back
-  const frame = () => { raf = 0; if (!visible) return; const dt = Math.min(0.1, clock.getDelta()); mixer.update(dt); turn += dt * 0.5; root.rotation.y = base + Math.sin(turn) * 0.55; renderer.render(scene, cam); if (!still) raf = requestAnimationFrame(frame); };
+  const flex = el.dataset.anim === 'flex' ? flexPose(root) : null; let ft = 0;
+  const frame = () => { raf = 0; if (!visible) return; const dt = Math.min(0.1, clock.getDelta()); mixer.update(dt); turn += dt * 0.5; if (flex) { ft += dt; flex(ft); root.rotation.y = base + Math.sin(ft * 1.3) * 0.22; } else root.rotation.y = base + Math.sin(turn) * 0.55; renderer.render(scene, cam); if (!still) raf = requestAnimationFrame(frame); };
   const io = new IntersectionObserver((es) => { visible = es.some((e) => e.isIntersecting) && !document.hidden; if (visible && !raf) { clock.getDelta(); raf = requestAnimationFrame(frame); } }); io.observe(el);
   const onVis = () => { visible = !document.hidden && el.isConnected; if (visible && !raf) { clock.getDelta(); raf = requestAnimationFrame(frame); } }; document.addEventListener('visibilitychange', onVis);
   frame();

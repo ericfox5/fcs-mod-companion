@@ -238,7 +238,7 @@ const SPRITE = 1.12;
 function place(el, abs, lat) { const x = Math.min(END_FAR + 1.5, Math.max(END_NEAR - 1.5, abs)), y = Math.min(FIELD_W + 4, Math.max(-4, lat)); const [sx, sy] = coord(x, y); el._sy = sy; el.setAttribute('transform', `translate(${sx.toFixed(1)} ${sy.toFixed(1)}) scale(${(spriteScale(x) * SPRITE).toFixed(3)})`); }
 // a player: a standing figure in his team's uniform with his number; a gold ring on the turf for the players involved
 function marker(side, isOff, num, opts = {}) {
-  const g = sv('g', { class: `f-pl t${side}${isOff ? ' off' : ' def'}` }); g.innerHTML = playerMarkup(kitOf(side), num);
+  const g = sv('g', { class: `f-pl t${side}${isOff ? ' off' : ' def'}` }); g.innerHTML = playerMarkup(kitOf(side), num, { view: opts.view || 'back' });
   if (opts.ring) g.prepend(ringEl());
   if (opts.title) g.append(sv('title', {}, opts.title));
   return g;
@@ -253,11 +253,13 @@ function light(actor) { if (actor.lit || !actor.role) return; actor.lit = true; 
 function unlight(actor) { if (!actor.lit) return; actor.lit = false; actor.el.querySelector('.ring')?.remove(); const tt = actor.el.querySelector('title'); if (tt) tt.textContent = tt.textContent.replace(/ — .*$/, ''); }
 const ghost = (side) => { const g = sv('g', { class: `f-ghost t${side}` }); g.innerHTML = playerMarkup(kitOf(side), null, { ghost: true }); return g; };
 const ballEl = () => { const g = sv('g', { class: 'f-ballwrap' }); g.innerHTML = ballMarkup(); return g; };
-const ballShadow = () => sv('ellipse', { class: 'f-shadow', rx: 5.6, ry: 2.2 });
+const ballShadow = () => sv('ellipse', { class: 'f-shadow', rx: 4, ry: 1.6 });
+// which way a player looks: the offense up the field it is attacking (dir 1 = away from the camera), the defense back at it
+const viewOf = (isOff, dir) => ((isOff ? dir : -dir) === 1 ? 'back' : 'front');
 // the ball: on the turf at (fx, fy), h yards up; its shadow stays on the ground under it and fades as it climbs
 function placeBall(ball, shadow, fx, fy, h = 0, spin = 0) {
   const [sx, sy] = coord(fx, fy), k = spriteScale(fx) * SPRITE; const lift = h * zPx(fx);
-  ball.setAttribute('transform', `translate(${sx.toFixed(1)} ${(sy - lift - 2.2 * k).toFixed(1)}) scale(${(k * (1 + Math.min(0.5, h * 0.045))).toFixed(3)})`);
+  ball.setAttribute('transform', `translate(${sx.toFixed(1)} ${(sy - lift - 1.4 * k).toFixed(1)}) scale(${(k * (1 + Math.min(0.6, h * 0.05))).toFixed(3)})`);
   const sp = ball.firstElementChild; if (sp) sp.setAttribute('transform', `rotate(${(-22 + spin).toFixed(0)})`);
   if (shadow) { shadow.setAttribute('transform', `translate(${(sx + 1.6 * k + h * 0.5).toFixed(1)} ${(sy + 0.4 * k).toFixed(1)}) scale(${k.toFixed(3)})`); shadow.setAttribute('opacity', Math.max(0.1, 0.34 - h * 0.022).toFixed(2)); }
   return [sx, sy - lift];
@@ -284,7 +286,7 @@ function drawPreSnap() {
     if (sel) {
       fieldArt(F.gArt, sel.book, sel.play, sel.set, los, dir, 'mine');
       const ps = lineup(team, sel.set);
-      (sel.set.slots || []).forEach((s, i) => put(marker(S.you, mineOff, ps[i]?.number, { title: `${POS[s.pos] || ''} ${shortName(ps[i])}` }), s.y, s.x));
+      (sel.set.slots || []).forEach((s, i) => put(marker(S.you, mineOff, ps[i]?.number, { title: `${POS[s.pos] || ''} ${shortName(ps[i])}`, view: viewOf(mineOff, dir) }), s.y, s.x));
     } else for (const [x, y] of mineOff ? genericO(st) : genericD(st)) put(ghost(S.you), x, y);
     for (const [x, y] of mineOff ? genericD(st) : genericO(st)) put(ghost(1 - S.you), x, y);
   }
@@ -318,7 +320,7 @@ function startAnim(detail, animate, popup = true) {
   if (op) fieldArt(F.gArt, offBook, op.play, op.set, los, dir, own(off) ? 'mine' : 'theirs');
   if (dp) fieldArt(F.gArt, defBook, dp.play, dp.set, los, dir, own(1 - off) ? 'mine' : 'theirs');
   const key = new Map((detail.people || []).map((p) => [p.id, p.role]));
-  A.actors = (an.actors || []).map((a) => { const side = a.s === 'o' ? off : 1 - off; const p = player(side, a.id); const el = marker(side, a.s === 'o', a.num, { title: `${POS[a.pos] || ''} ${shortName(p)}` }); F.gPlayers.append(el); return { a, el, role: key.get(a.id) || null, lit: false }; });
+  A.actors = (an.actors || []).map((a) => { const side = a.s === 'o' ? off : 1 - off; const p = player(side, a.id); const el = marker(side, a.s === 'o', a.num, { title: `${POS[a.pos] || ''} ${shortName(p)}`, view: viewOf(a.s === 'o', dir) }); F.gPlayers.append(el); return { a, el, role: key.get(a.id) || null, lit: false }; });
   A.shadow = ballShadow(); F.gBall.append(A.shadow);
   A.ball = ballEl(); F.gBall.append(A.ball); A.trail = sv('polyline', { class: `f-trail t${off}${an.kick ? ' kick' : ''}` }); F.gTrail.append(A.trail);
   // flight windows: throw/kick/punt until the next catch-like event (the ball arcs through the air between them)
@@ -366,6 +368,7 @@ function drawFrame(t) {
   const over = t >= A.dur - 0.05;
   for (const actor of A.actors) {
     const p = interp(actor.a.path, t); if (!p) continue; const [fx, fy] = toField(A.los, A.dir, p[0], p[1]); place(actor.el, fx, fy);
+    const moved = actor.px == null ? 0 : Math.hypot(p[0] - actor.px, p[1] - actor.py); actor.px = p[0]; actor.py = p[1]; const run = A.playing && moved > 0.012; if (run !== actor.run) { actor.run = run; actor.el.classList.toggle('run', run); }
     if (actor.role && !actor.lit && (over || Math.hypot(fx - bxF, fy - byF) <= NEAR_BALL)) light(actor);
   }
   depthSort(F.gPlayers);
@@ -441,8 +444,10 @@ function scoreCelebration(d) {
     : who?.role === 'INTERCEPTION' ? 'interception return' : who?.role === 'RETURNER' ? (d.kind === 'kickoff' ? 'kickoff return' : 'punt return')
     : who?.role === 'RECEIVER' ? `${yds}-yard catch${qbp ? ` from ${shortName(qbp)}` : ''}` : `${yds}-yard run`;
   const head = kind === 'td' ? (d.headline && d.headline !== 'TOUCHDOWN' ? d.headline : 'TOUCHDOWN') : kind === 'fg' ? 'FIELD GOAL' : kind === 'safety' ? 'SAFETY' : '2-POINT CONVERSION';
-  return { kind: `${head}!`, sub: `${what} · +${kind === 'td' ? 6 : kind === 'fg' ? 3 : 2} ${T[side].abbr}`, team: T[side], color: teamCol(side), score: d.score, abbrs: [T[0].abbr, T[1].abbr], player: pl ? { name: pl.name, photoUrl: pl.photoUrl, role: [pl.number != null ? `#${pl.number}` : '', posName(pl)].filter(Boolean).join(' '), line: T[side].abbr } : null };
+  return { kind: `${head}!`, sub: `${what} · +${kind === 'td' ? 6 : kind === 'fg' ? 3 : 2} ${T[side].abbr}`, team: T[side], color: teamCol(side), score: d.score, abbrs: [T[0].abbr, T[1].abbr], player: pl ? { name: pl.name, photoUrl: pl.photoUrl, role: [pl.number != null ? `#${pl.number}` : '', posName(pl)].filter(Boolean).join(' '), line: T[side].abbr } : null, hero: pl ? heroOf(side, pl) : null };
 }
+// the player as the 3D figure on a celebration card: his uniform for this game, his number and his skin tone
+const heroOf = (side, pl) => ({ kit: kitOf(side), number: pl.number, skin: pl.skin, primary: teamCol(side), set: side === 1 ? 'home' : 'away' });
 // the winner's player of the game, from the box score: passing, rushing, receiving and defense weighed together
 function playerOfGame(st, side) {
   let best = null, bs = -1;
@@ -463,6 +468,7 @@ function winCelebration(st) {
   return { final: true, kind: w === S.you ? 'VICTORY!' : `${T[w].abbr} WIN`, sub: `${T[w].name} win${ot}`, team: T[w], color: teamCol(w), score: st.score, abbrs: [T[0].abbr, T[1].abbr], player: playerOfGame(st, w) };
 }
 async function celebrations(d) {
+  if (S.skipAll && !S.state?.final) return; // skipping to the final: no stops on the way
   if (!E.arena || S.celebrated === d.n) return; S.celebrated = d.n;
   const sc = scoreCelebration(d); if (sc) await celebrate(E.arena, sc);
   const st = S.state; if (st?.final && st.winner != null && st.n === d.n) await celebrate(E.arena, winCelebration(st));
@@ -622,9 +628,9 @@ async function snap() {
   } catch (e) { toast(e.message, { retry: snap }); }
   finally { S.hold = null; S.busy = false; renderSide(); renderTabs(); updateControls(); showPicker(); startHud(); }
 }
-async function auto(mode) {
+async function auto(mode, quiet = false) {
   if (S.busy || S.waiting || !S.state || S.state.final) return;
-  if (mode === 'final' && !window.confirm('Simulate the rest of the game? The CPU calls your plays from here and the result is final.')) return;
+  if (mode === 'final' && !quiet && !window.confirm('Simulate the rest of the game? The CPU calls your plays from here and the result is final.')) return;
   stopHud(); S.busy = true; S.autoRun = mode; S.stopAuto = false; hidePopup(); hidePicker(); updateControls();
   const st0 = S.state, q0 = st0.q, drives0 = st0.drives?.length || 0, off0 = actingOff(st0); let plays = 0;
   const chunk = mode === 'next' ? 1 : mode === 'drive' ? 6 : 10; // snaps per request: every snap is a full field simulation (about 3 ms of CPU)
@@ -661,7 +667,13 @@ async function startGame() {
   if (QWATCH) watchOut();
 }
 // Quickplay, CPU against CPU: drive after drive, every play animated, until the final or the Stop button
-async function watchOut() { while (S.state && !S.state.final && !S.busy) { await auto('drive'); if (S.stopAuto) break; } }
+async function watchOut() { while (S.state && !S.state.final && !S.busy) { await auto('drive'); if (S.skipAll) { await auto('final', true); break; } if (S.stopAuto) break; } }
+// the Skip button of a watched game, at any time: stop showing plays and simulate straight through to the final
+async function skipGame() {
+  if (!S.state || S.state.final || S.skipAll) return; S.skipAll = true; updateControls();
+  if (S.busy) { S.stopAuto = true; skipAnim(); E.arena?.querySelector(':scope > .ss-celebrate')?.click(); hidePopup(); return; } // the watch loop takes it from here
+  hidePopup(); await auto('final', true);
+}
 // human opponent: poll until the other sideline's call lands
 function startPoll() {
   stopPoll(); stopHud(); S.waiting = true; renderPicker();
@@ -776,7 +788,7 @@ function ensureShell() {
   const arena = E.arena = h('div', { class: 'ss-arena' }, F.svg || buildField(), E.picker, E.pickerBar, E.side[0], E.side[1], E.stadiumTime, E.progress, E.popup, (E.subs = h('section', { class: 'ss-subs', 'aria-label': 'Substitutions', hidden: true })));
   E.down = h('span', { class: 'ss-down' }); E.call = h('span', { class: 'ss-call' }); E.gain = h('span', { class: 'ss-gain' });
   E.speed = h('select', { 'aria-label': 'Playback speed', onchange: (e) => { S.speed = Number(e.target.value) || 1; } }, [1, 2, 4].map((s) => h('option', { value: s, selected: S.speed === s || null }, `${s}× speed`)));
-  E.replay = h('button', { type: 'button', onclick: replay }, '↺ Replay'); E.skip = h('button', { type: 'button', onclick: skipAnim }, 'Skip ⇥');
+  E.replay = h('button', { type: 'button', onclick: replay }, '↺ Replay'); E.skip = h('button', { type: 'button', onclick: QWATCH ? skipGame : skipAnim, title: QWATCH ? 'Simulate the rest of the game now' : 'Skip this animation' }, QWATCH ? 'Skip to final ⇥' : 'Skip ⇥');
   E.focus = h('button', { type: 'button', 'aria-pressed': 'false', onclick: () => { S.focus = !S.focus; E.focus.setAttribute('aria-pressed', String(S.focus)); E.focus.textContent = S.focus ? 'Full field' : 'Focus play'; focusView(A.los ?? (S.state ? absBall(S.state, actingOff(S.state), S.state.ball) : null)); } }, 'Focus play');
   const stage = h('section', { class: 'ss-stage', 'aria-label': 'Football game' }, E.score, arena, h('div', { class: 'ss-ticker' }, E.down, E.call, E.gain), h('div', { class: 'ss-controls' }, E.speed, E.replay, E.skip, E.focus, h('span', { class: 'ss-legend' }, h('i', { class: 'los' }), 'Scrimmage ', h('i', { class: 'fd' }), 'First down')));
   E.panel = h('section', { class: 'ss-panel ss-collapsible' });
@@ -1025,7 +1037,7 @@ function updateControls() {
   E.tempoBtns?.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tempo === S.tempo)));
   if (E.simBtn) E.simBtn.disabled = S.busy || S.waiting;
   if (E.subsBtn) E.subsBtn.disabled = S.busy;
-  if (E.replay) E.replay.disabled = !A.an || S.busy; if (E.skip) E.skip.disabled = !A.playing;
+  if (E.replay) E.replay.disabled = !A.an || S.busy; if (E.skip) E.skip.disabled = QWATCH ? !st || st.final || !!S.skipAll : !A.playing;
   root.classList.toggle('busy', S.busy);
 }
 

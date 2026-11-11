@@ -59,9 +59,9 @@
 .ob-rule { position: relative; flex: 1; height: 10px; background: repeating-linear-gradient(90deg, #b9bcc0 0 1px, transparent 1px 12.5%), linear-gradient(var(--line), var(--line)) center / 100% 2px no-repeat; border-right: 1px solid #b9bcc0; }
 .ob-rule i { position: absolute; top: 3px; height: 4px; left: min(50%, var(--m)); width: max(calc(var(--m) - 50%), calc(50% - var(--m))); background: var(--tc); animation: ob-grow .8s .2s both; transform-origin: center; }
 .ob-rule b { position: absolute; top: -3px; left: var(--m); width: 0; height: 0; margin-left: -5px; border: 5px solid transparent; border-top: 8px solid var(--tc); animation: ob-mark .9s cubic-bezier(.2, .8, .2, 1) both; }
-/* total: the number runs from yellow through orange to red as it climbs (a black keyline keeps yellow readable on
-   white), with the same scale underneath */
-.ob-total .ob-num { color: var(--heat); -webkit-text-stroke: 4px #111; paint-order: stroke fill; padding: 0 3px; letter-spacing: .5px; }
+/* total: the number runs from gold through orange to red as it climbs (deeper tones than the scale underneath, so it
+   reads on white with no outline) */
+.ob-total .ob-num { color: var(--heat-ink); }
 .ob-heat { position: relative; height: 6px; margin-top: 10px; border-radius: 3px; background: linear-gradient(90deg, #ffd60a, #ff8a00 50%, #ff2d20); }
 .ob-heat b { position: absolute; top: -3px; left: var(--m); width: 4px; height: 12px; margin-left: -2px; background: #111; border-radius: 1px; box-shadow: 0 0 0 1px #fff; animation: ob-heat 1s cubic-bezier(.2, .8, .2, 1) both; }
 .ob-ou { display: inline-flex; flex-direction: column; gap: 2px; flex: none; }

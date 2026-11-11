@@ -17,6 +17,7 @@ import { openDynastyFile } from '../bridge/src/od.ts';
 import { loadLogoMap, normLogoName } from '../bridge/src/logos.ts';
 import { keyRatings } from '../worker/src/pages/player-keys.ts';
 import { UNIFORMS } from '../worker/src/pages/uniforms.generated.ts';
+import { FACE_SKIN } from '../worker/src/pages/face-skin.generated.ts';
 import type { BookIndex, TeamInput } from '../worker/src/supersim/coach/types.ts';
 import { DEFAULT_SAVE } from './supersim-real.mts';
 
@@ -47,7 +48,7 @@ for (const t of decodeTeams(file)) {
   // kits: both of the team's uniform sets; the browser picks Home or Away for the game (client/quickplay.mjs)
   const team: TeamInput & { kits?: unknown } = {
     id: t.tgid, name: t.name, abbr: t.abbr, logo: logoKey ? `/img/logos/${logoKey.replace(/^teams[/]/, 'teams160/')}` : '', color: primary, ...(UNIFORMS[t.tgid] ? { kits: UNIFORMS[t.tgid] } : {}), offBook: off.id, defBook: def.id,
-    players: ps.map((p) => ({ id: p.pgid, name: `${p.firstName} ${p.lastName}`, number: p.jersey, pos: p.pos, overall: p.overall, ratings: p.ratings, photoUrl: p.headId ? `/img/faces/${p.headId}.png` : '/img/faces/0.png' })),
+    players: ps.map((p) => ({ id: p.pgid, name: `${p.firstName} ${p.lastName}`, number: p.jersey, pos: p.pos, overall: p.overall, ratings: p.ratings, photoUrl: p.headId ? `/img/faces/${p.headId}.png` : '/img/faces/0.png', ...(FACE_SKIN.get(p.headId ?? -1) ? { skin: FACE_SKIN.get(p.headId ?? -1) } : {}) })),
     depthChart,
   };
   const json = JSON.stringify(team); writeFileSync(join(OUT, `${t.tgid}.json`), json); bytesOut += json.length;
