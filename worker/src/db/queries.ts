@@ -220,6 +220,10 @@ export const getMembersWithTeams = (db: D1Database, d: number) =>
 export const countAccounts = async (db: D1Database, d: number): Promise<number> => Number((await db.prepare('SELECT COUNT(*) AS n FROM account_members WHERE dynasty_id = ?').bind(d).first<{ n: number }>())?.n ?? 0);
 export const listAccounts = (db: D1Database, d: number) => all<AccountSummary>(db.prepare('SELECT a.id, l.blaze_id, a.username, a.created_at FROM account_members l JOIN accounts a ON a.id = l.account_id WHERE l.dynasty_id = ? ORDER BY a.username').bind(d));
 export const getAccountByUsername = (db: D1Database, username: string) => db.prepare('SELECT * FROM accounts WHERE username = ?').bind(username).first<AccountRow>();
+export const insertAccount = async (db: D1Database, username: string, passHash: string, salt: string): Promise<number> =>
+  Number((await db.prepare('INSERT INTO accounts (username, pass_hash, salt, blaze_id) VALUES (?,?,?,NULL)').bind(username, passHash, salt).run()).meta.last_row_id);
+export const setAccountPassword = (db: D1Database, id: number, passHash: string, salt: string) => db.prepare('UPDATE accounts SET pass_hash = ?, salt = ? WHERE id = ?').bind(passHash, salt, id).run();
+export const deleteOtherSessions = (db: D1Database, accountId: number, keepHash: string) => db.prepare('DELETE FROM sessions WHERE account_id = ? AND token_hash <> ?').bind(accountId, keepHash).run();
 export const getAccountById = (db: D1Database, id: number) => db.prepare('SELECT * FROM accounts WHERE id = ?').bind(id).first<AccountRow>();
 export const getAccountForMember = (db: D1Database, d: number, blazeId: number) =>
   db.prepare('SELECT a.id, l.blaze_id, a.username, a.created_at FROM account_members l JOIN accounts a ON a.id = l.account_id WHERE l.dynasty_id = ? AND l.blaze_id = ?').bind(d, blazeId).first<AccountSummary>();
@@ -234,6 +238,8 @@ export const linkMember = (db: D1Database, accountId: number, d: number, blazeId
 // left; api/bridge.ts runs them after each member sync, so a new online dynasty recognises its creator and joiners at once.
 export const linkPersonaStatements = (db: D1Database, d: number) => [
   db.prepare('INSERT OR IGNORE INTO account_members (account_id, dynasty_id, blaze_id) SELECT a.id, m.dynasty_id, m.blaze_id FROM od_members m JOIN accounts a ON a.blaze_id = m.blaze_id WHERE m.dynasty_id = ? AND m.web_only = 0').bind(d),
+  // a league identity (migration 0030) whose account already stood for another console persona: its league user id is a member here
+  db.prepare('INSERT OR IGNORE INTO account_members (account_id, dynasty_id, blaze_id) SELECT p.account_id, m.dynasty_id, m.blaze_id FROM od_members m JOIN league_players p ON p.user_id = m.blaze_id WHERE m.dynasty_id = ? AND m.web_only = 0').bind(d),
   db.prepare('DELETE FROM account_members WHERE dynasty_id = ? AND blaze_id > 0 AND blaze_id NOT IN (SELECT blaze_id FROM od_members WHERE dynasty_id = ?)').bind(d, d),
 ];
 // An account that owns a console persona is linked wherever that persona is a member.
@@ -297,16 +303,22 @@ export async function addWebMember(db: D1Database, d: number, persona: string, t
   return id;
 }
 export const setWebMemberTeam = (db: D1Database, d: number, blazeId: number, tgid: number) => db.prepare('UPDATE od_members SET tgid = ? WHERE dynasty_id = ? AND blaze_id = ? AND web_only = 1').bind(tgid, d, blazeId).run();
-// Removes the member with its account link, open invites and ready flags; past Supersim results stay. The account itself
-// goes too when it was only this web player's (no console persona, no other dynasty), with its sign-ins.
-export const removeWebMember = (db: D1Database, d: number, blazeId: number) => db.batch([
+// Removes the member with its account link, open invites and ready flags; past Supersim results stay. The account that
+// was linked to this web player goes too, with its sign-ins, when it was only this web player's: it took this member's
+// invite, owns no console persona, has no league identity and is in no other dynasty. No other account is touched (since
+// open sign-up, an account with no dynasty yet is an ordinary thing, not a leftover).
+export async function removeWebMember(db: D1Database, d: number, blazeId: number) {
+  const linked = (await db.prepare('SELECT account_id FROM account_members WHERE dynasty_id = ? AND blaze_id = ?').bind(d, blazeId).first<{ account_id: number }>())?.account_id ?? 0;
+  return db.batch([
   db.prepare('DELETE FROM account_members WHERE dynasty_id = ? AND blaze_id = ?').bind(d, blazeId),
-  db.prepare('DELETE FROM accounts WHERE blaze_id IS NULL AND id NOT IN (SELECT account_id FROM account_members)'),
+  db.prepare(`DELETE FROM accounts WHERE id = ? AND blaze_id IS NULL AND id NOT IN (SELECT account_id FROM account_members) AND id NOT IN (SELECT account_id FROM league_user_ids)
+    AND id IN (SELECT used_by_account_id FROM invites WHERE dynasty_id = ? AND blaze_id = ? AND used_by_account_id IS NOT NULL)`).bind(linked, d, blazeId),
   db.prepare('DELETE FROM sessions WHERE account_id NOT IN (SELECT id FROM accounts)'),
   db.prepare('DELETE FROM invites WHERE dynasty_id = ? AND blaze_id = ? AND used_at IS NULL').bind(d, blazeId),
   db.prepare('DELETE FROM member_ready WHERE dynasty_id = ? AND blaze_id = ?').bind(d, blazeId),
   db.prepare('DELETE FROM od_members WHERE dynasty_id = ? AND blaze_id = ? AND web_only = 1').bind(d, blazeId),
-]);
+  ]);
+}
 export interface ReadyRow { blaze_id: number; ready_at: string }
 export const listReady = (db: D1Database, d: number, fileId: number) => all<ReadyRow>(db.prepare('SELECT blaze_id, ready_at FROM member_ready WHERE dynasty_id = ? AND file_id = ?').bind(d, fileId));
 export const setReady = (db: D1Database, d: number, blazeId: number, fileId: number, year: number, week: number, on: boolean) => on

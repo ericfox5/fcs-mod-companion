@@ -25,8 +25,31 @@
   "vars": {
     "SITE_NAME": "NCAA Online Dynasty FCS",
     "BASE_YEAR": "2013",
-    "SUPERSIM_ENABLED": "true"
-    // Secret (never in this file): BRIDGE_TOKEN -> wrangler secret put BRIDGE_TOKEN
+    "SUPERSIM_ENABLED": "true",
+    // Open sign-up + public league server. "false" keeps /signup closed (invite links keep working); set "true" to open it.
+    "OPEN_SIGNUP": "false",
+    "LEAGUE_SERVER_HOST": "play.fcs-mod.online",
+    "SETUP_DOWNLOAD_URL": "https://github.com/ericfox5/fcs-mod-companion/releases/latest",
+    // Who may turn league members off on /admin/members. Use ADMIN_ACCOUNT_IDS: sign in, open /account, read the
+    // "account number" at the bottom of the page and put it here ("1" or "1,7"). A number belongs to one account for
+    // good, so this can never point at somebody else. ADMIN_USERNAMES (comma-separated usernames) still works for
+    // accounts that already exist, but leave it empty if you can: a name listed here can never be registered by
+    // anyone (nor can look-alikes of it), so create the account BEFORE you list its name, never after.
+    "ADMIN_ACCOUNT_IDS": "",
+    "ADMIN_USERNAMES": "",
+    // Sign-ups per day. Past SIGNUP_DAILY_CAP the site counts as busy and gets careful instead of closing: with
+    // Turnstile on, that check does the work; with it off, each network (an IPv4 address, an IPv6 /48) may create
+    // 1 account a day instead of 3. Only at SIGNUP_HARD_CAP does sign-up pause for everyone until the next day.
+    "SIGNUP_DAILY_CAP": "200",
+    "SIGNUP_HARD_CAP": "2000",
+    // "" leaves the "are you a person" check off (sign-up and invite links then rely on the limits above).
+    "TURNSTILE_SITE_KEY": ""
+    // Secrets (never in this file):
+    //   BRIDGE_TOKEN          wrangler secret put BRIDGE_TOKEN          the whole bridge API (imports, invites, member list ...)
+    //   REGISTRY_TOKEN        wrangler secret put REGISTRY_TOKEN        optional; ONLY reads GET /api/bridge/league-registry (the
+    //                         member list). Give this one, not BRIDGE_TOKEN, to the public league server; it sends it the same
+    //                         way, "Authorization: Bearer <token>". Until it is set, the league server keeps using BRIDGE_TOKEN.
+    //   TURNSTILE_SECRET_KEY  wrangler secret put TURNSTILE_SECRET_KEY  only together with TURNSTILE_SITE_KEY
   },
   "observability": { "enabled": true }
 }

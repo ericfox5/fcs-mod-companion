@@ -5,12 +5,18 @@
 // invite" finds it, instead of getting an invite. The commissioner also adds web players (migration 0014): members
 // without a console who coach their team's games in Supersim here; each gets an invite at once. Any member marks Ready
 // for the advance (POST /d/<slug>/ready); the home page shows who is ready.
+// Limits (security.ts): a dynasty holds at most WEB_PLAYERS_MAX web players and OPEN_INVITES_MAX unused invites, and
+// one commissioner account can add so many web players and create so many invites a day. A web player's display name
+// passes the reserved-name check and may not copy an in-game name (league.ts).
 import type { PageCtx } from '../index.js';
 import { html, type Raw } from '../html.js';
 import { box } from '../layout.js';
 import type { MemberRow, TeamRow } from '../db/queries.js';
 import { getTeams, teamMap, listAccounts, listOpenInvites, insertInvite, deleteOpenInvite, getAccountForMember, getAccountForPersona, linkMember, addWebMember, setWebMemberTeam, removeWebMember, setReady } from '../db/queries.js';
 import { redirect, sameOrigin, normalizeCode, joinUrl, newInviteCode, safeBack } from '../session.js';
+import { LIMITS, WEB_PLAYERS_MAX, OPEN_INVITES_MAX, rateHit } from '../security.js';
+import { displayNameProblem, displayNameTaken, nameKey } from '../league.js';
+import { imitatesAdmin } from '../account-rules.js';
 import { authPage } from './login.js';
 import { teamLogo, teamLink } from './common.js';
 
@@ -43,7 +49,7 @@ export async function membersPage(ctx: PageCtx): Promise<Response> {
     : q.get('removed') ? html`<p class="flash">Web player removed.</p>`
     : q.get('err') ? html`<p class="flash err">${q.get('err')}</p>` : html``;
   const whoami = account
-    ? html`<div class="muted whoami">Signed in as <b>${account.username}</b>${member ? html` (${member.persona})` : ''}. <form class="inline" method="post" action="${base}/logout"><input type="hidden" name="back" value="${base}/members"><button class="btn light sm">Sign out</button></form></div>`
+    ? html`<div class="muted whoami">Signed in as <b>${account.username}</b>${member ? html` (${member.persona})` : ''}. <a href="/account">Your account and join code</a> <form class="inline" method="post" action="${base}/logout"><input type="hidden" name="back" value="${base}/members"><button class="btn light sm">Sign out</button></form></div>`
     : html`<p class="muted">${locked ? html`Members with an account can <a href="${base}/login?back=${enc(`${base}/members`)}">sign in</a>; an invite link from the commissioner creates one. One account covers every dynasty you are in.` : html`No account linked yet. The site can be edited by picking a persona in the top bar until the first account is linked; a console persona with a site account is linked when the league server syncs the members (or <a href="${base}/login?back=${enc(`${base}/members`)}">sign in</a> here), and a brand-new league's first account comes from an invite issued on the league server (<code>ncaa-bridge od invite --did ${dyn.od_id ?? 'N'} --persona NAME</code>).`}</p>`;
 
   const rows = members.map((m) => {
@@ -76,7 +82,7 @@ export async function membersPage(ctx: PageCtx): Promise<Response> {
   const webBox: Raw = commish && dyn.od_id !== null
     ? box('Add a web player', html`<form class="wform" method="post" action="${base}/members/web">
         <div class="fields">
-          <div><label for="wp-name">Name</label><input id="wp-name" type="text" name="persona" maxlength="24" minlength="2" required placeholder="How the league knows them"></div>
+          <div><label for="wp-name">Name</label><input id="wp-name" type="text" name="persona" maxlength="24" minlength="2" pattern="[A-Za-z0-9][A-Za-z0-9 _.'\\-]{1,23}" title="2 to 24 letters, numbers, spaces and _ . ' -" required placeholder="How the league knows them"></div>
           <div><label for="wp-team">Team</label>${teamSelect('tgid', teams, members, null, 'wp-team')}</div>
         </div>
         <div class="actions"><button class="btn">Add and create invite</button></div>
@@ -90,6 +96,11 @@ export async function membersPage(ctx: PageCtx): Promise<Response> {
 
 const deny = (ctx: PageCtx, msg = 'Only a signed-in commissioner can manage invites.') => redirect(`/d/${ctx.dyn.slug}/members?err=${enc(msg)}`);
 const crossSite = (ctx: PageCtx) => !ctx.req || !sameOrigin(ctx.req, ctx.url);
+// Room for one more invite: the dynasty's open invites are under the cap and this commissioner is within the day's allowance.
+async function inviteRoom(ctx: PageCtx, accountId: number): Promise<string | null> {
+  if ((await listOpenInvites(ctx.env.DB, ctx.dyn.id)).length >= OPEN_INVITES_MAX) return `This dynasty already has ${OPEN_INVITES_MAX} open invites. Revoke the ones nobody is going to use first.`;
+  return (await rateHit(ctx.env.DB, LIMITS.inviteIssue, String(accountId))) ? null : 'You have created a lot of invites today. Please wait until tomorrow to create more.';
+}
 
 // POST /d/<slug>/members/invite  (blaze_id): a new invite for a member without an account.
 export async function inviteAction(ctx: PageCtx, form: FormData): Promise<Response> {
@@ -104,6 +115,8 @@ export async function inviteAction(ctx: PageCtx, form: FormData): Promise<Respon
     const owner = await getAccountForPersona(env.DB, blazeId);
     if (owner) { await linkMember(env.DB, owner.id, dyn.id, blazeId); return redirect(`/d/${dyn.slug}/members?linked=${enc(m.persona)}`); }
   }
+  const full = await inviteRoom(ctx, account.id);
+  if (full) return deny(ctx, full);
   const note = String(form.get('note') ?? '').trim().slice(0, 120) || `invited by ${account.username}`;
   await insertInvite(env.DB, newInviteCode(), dyn.id, blazeId, account.id, note);
   return redirect(`/d/${dyn.slug}/members?invited=1`);
@@ -134,10 +147,17 @@ export async function addWebMemberAction(ctx: PageCtx, form: FormData): Promise<
   if (crossSite(ctx)) return deny(ctx, 'The form came from another site; try again from this page.');
   if (dyn.od_id === null) return deny(ctx, 'Web players need an online dynasty.');
   const persona = String(form.get('persona') ?? '').replace(/\s+/g, ' ').trim().slice(0, 24);
-  if (persona.length < 2) return deny(ctx, 'Give the web player a name (2-24 characters).');
-  if (members.some((m) => m.persona.toLowerCase() === persona.toLowerCase())) return deny(ctx, `There is already a member called ${persona}.`);
+  const bad = displayNameProblem(persona);
+  if (bad === 'format') return deny(ctx, "Give the web player a name of 2 to 24 characters: letters, numbers, spaces and _ . ' - only, starting with a letter or number.");
+  if (bad === 'reserved' || (await imitatesAdmin(env, env.DB, persona))) return deny(ctx, 'That name is reserved. Please pick another one.');
+  if (members.some((m) => nameKey(m.persona) === nameKey(persona))) return deny(ctx, `There is already a member called ${persona}.`);
+  if (await displayNameTaken(env.DB, persona)) return deny(ctx, `${persona} is somebody's in-game name. Pick a display name that cannot be mistaken for it.`);
+  if (members.filter((m) => m.web_only === 1).length >= WEB_PLAYERS_MAX) return deny(ctx, `A dynasty can have at most ${WEB_PLAYERS_MAX} web players.`);
   const team = await freeTeam(ctx, form.get('tgid'), null);
   if (typeof team === 'string') return deny(ctx, team);
+  if (!(await rateHit(env.DB, LIMITS.webPlayerAdd, String(account.id)))) return deny(ctx, 'You have added a lot of web players today. Please wait until tomorrow to add more.');
+  const full = await inviteRoom(ctx, account.id);
+  if (full) return deny(ctx, full);
   const id = await addWebMember(env.DB, dyn.id, persona, team.tgid);
   await insertInvite(env.DB, newInviteCode(), dyn.id, id, account.id, `web player (${team.name}), invited by ${account.username}`);
   return redirect(`/d/${dyn.slug}/members?webadded=1`);
@@ -161,7 +181,7 @@ export async function webMemberAction(ctx: PageCtx, rawId: string, form: FormDat
 // The flag belongs to the dynasty file the league is on, so the advance (a new file) clears everyone's.
 export async function readyAction(ctx: PageCtx, form: FormData): Promise<Response> {
   const { env, dyn, member } = ctx;
-  const back = safeBack(form.get('back'), `/d/${dyn.slug}`);
+  const back = safeBack(form.get('back'), `/d/${dyn.slug}`, ctx.url.origin);
   const to = (err?: string) => redirect(err ? `${back}${back.includes('?') ? '&' : '?'}err=${enc(err)}#members` : `${back}#members`);
   if (crossSite(ctx)) return to('The form came from another site; try again from this page.');
   if (!member) return to(ctx.locked ? 'Sign in to mark yourself ready.' : 'Pick who you are in the top bar first.');

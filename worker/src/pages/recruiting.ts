@@ -3,7 +3,7 @@ import { html, type Raw } from '../html.js';
 import { layout, box } from '../layout.js';
 import { getTeams, getTeam, getRecruits, getBoard, getUserTeams, getGames, teamMap, getWebBoard, upsertWebBoard, deleteWebBoard, type BoardRow, type RecruitRow, type TeamRow, type WebBoardRow, getCommittedPrsis, listPendingRecruitEditPrsis, getLatestOverhaulRequest } from '../db/queries.js';
 import { getTeamVisits, getWebVisits, upsertWebVisits, deleteWebVisits, type VisitRow } from '../db/visits.js';
-import { redirect } from '../session.js';
+import { redirect, safeBack } from '../session.js';
 import { teamLink, teamLogo, pos, heightFt, headshot, interestStack, weekLabel } from './common.js';
 import { classBox, isCommissioner } from './recruit-edit.js';
 
@@ -209,8 +209,7 @@ export async function boardAction(ctx: PageCtx, form: FormData): Promise<Respons
   const { env, dyn, member } = ctx;
   const db = env.DB, d = dyn.id, y = dyn.season_year, week = dyn.week ?? 0;
   const tgid = num(form.get('tgid'), -1);
-  const backTo = String(form.get('back') ?? '');
-  const base = backTo.startsWith('/') ? backTo : `/d/${dyn.slug}/recruiting?team=${tgid}`;
+  const base = safeBack(form.get('back'), `/d/${dyn.slug}/recruiting?team=${tgid}`, ctx.url.origin); // a path on this site only
   const back = (extra: string) => redirect(base + (base.includes('?') ? '&' : '?') + extra.replace(/^&/, ''));
   if (member?.web_only === 1) return back(`err=${encodeURIComponent('The console CPU recruits for a web player team.')}`);
   if (!member || member.tgid !== tgid) return back(`err=${encodeURIComponent('You can only edit your own board.')}`);
