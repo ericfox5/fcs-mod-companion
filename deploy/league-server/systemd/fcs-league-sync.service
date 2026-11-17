@@ -32,7 +32,11 @@ RestartSteps=5
 RestartMaxDelaySec=120
 TimeoutStopSec=15
 LimitNOFILE=16384
-MemoryMax=1G
+# Importing one dynasty built on the 90-player roster peaks at about 820 MB. Node's own default heap limit on a 2 GB
+# server is about 512 MB: with that the import died ("heap out of memory"), the service restarted and died again, and
+# the dynasty never reached the site (seen 2026-11-17). So Node gets 1100 MB of heap and the service 1400 MB in all.
+Environment=NODE_OPTIONS=--max-old-space-size=1100
+MemoryMax=1400M
 TasksMax=256
 
 # ---- sandbox: writes site edits for consoles (private/web-edits) and its own state (its home); reads the rest ----
