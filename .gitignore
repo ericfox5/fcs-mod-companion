@@ -48,3 +48,5 @@ installer/dist/
 worker/public/data/quickplay/
 # the 3D player model on the odds board: a third-party Sketchfab model (see tools/hero-model.md); add your own copy locally
 worker/public/data/models/
+# TypeScript build records: machine-specific, and a stale one makes tsc skip files on another machine
+*.tsbuildinfo

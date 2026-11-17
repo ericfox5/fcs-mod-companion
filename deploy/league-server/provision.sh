@@ -176,8 +176,12 @@ if [ -n "$TARBALL" ] || [ -n "$GIT_URL" ]; then
   ( cd "$NEW" && npm ci --ignore-scripts --no-audit --no-fund \
       --workspace bridge --workspace packages/tdb --workspace packages/ncaa14 --include-workspace-root )
   say "Building the save-file codec the server uses"
-  ( cd "$NEW" && npx --no-install tsc -b packages/tdb )
-  [ -f "$NEW/packages/tdb/dist/index.js" ] || die "packages/tdb/dist/index.js was not built"
+  # --force and no leftover *.tsbuildinfo: a stale build record makes tsc skip files it believes are already built
+  find "$NEW/packages" "$NEW/bridge" -maxdepth 2 -name '*.tsbuildinfo' -delete 2>/dev/null || true
+  ( cd "$NEW" && npx --no-install tsc -b --force packages/tdb )
+  for f in index table reader writer; do
+    [ -f "$NEW/packages/tdb/dist/$f.js" ] || die "packages/tdb/dist/$f.js was not built"
+  done
   [ -f "$NEW/node_modules/tsx/dist/cli.mjs" ] || die "tsx is missing after npm ci"
 
   # certificates shipped inside the tarball are moved out of the app folder
