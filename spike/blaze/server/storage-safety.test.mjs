@@ -528,7 +528,7 @@ test('cloud server end to end: caps on by default, error reply on refusal, hashe
   const blazePort = await freePort(), lockerPort = await freePort();
   const env = serverEnv(dir, {
     NCAA_CLOUD: '1', NCAA_PUBLIC_HOST: '127.0.0.1', NCAA_BIND: '127.0.0.1', NCAA_SITE_URL: site.url, NCAA_BRIDGE_TOKEN: TOKEN,
-    NCAA_BLAZE_PORT: String(blazePort), NCAA_LOCKER_PORT: String(lockerPort), NCAA_TABLE_MAX_ROWS: '100', NCAA_STATE_BUDGET_MB: '64',
+    NCAA_BLAZE_PORT: String(blazePort), NCAA_LOCKER_PORT: String(lockerPort), NCAA_TABLE_MAX_ROWS: '100', NCAA_STATE_BUDGET_MB: '64', NCAA_DYNASTY_ID_BASE: '1', // this test names dynasty 1; the cloud default is 1000
   });
   const tableUpdate = (did, table, n, from = 0) => (w) => {
     w.int('DYID', did); w.list('ROWS', T.STRUCT, rowsOf(n, 7, from), (x, r) => { x.intList('SINT', r); x.push(0); });
