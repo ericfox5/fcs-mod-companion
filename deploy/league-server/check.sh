@@ -11,7 +11,7 @@ ok()   { printf '  ok    %s\n' "$*"; }
 fail() { printf '  FAIL  %s\n' "$*"; bad=1; }
 
 echo "Services"
-for s in redirector blaze qos sync; do
+for s in redirector blaze qos dns sync; do
   if systemctl is-active --quiet "fcs-league-$s.service"; then ok "fcs-league-$s is running"; else fail "fcs-league-$s is NOT running   (journalctl -u fcs-league-$s -n 30)"; fi
 done
 if systemctl is-active --quiet fcs-league-backup.timer; then ok "daily backup timer is on"; else fail "daily backup timer is off"; fi
@@ -73,7 +73,7 @@ if [ "$(id -u)" -eq 0 ] && [ -f "$ETC_DIR/registry.env" ] && [ -f "$ETC_DIR/brid
   unset reg full
 fi
 # each service runs as its own user
-for pair in blaze:fcs-blaze redirector:fcs-redirector qos:fcs-qos sync:fcs-sync; do
+for pair in blaze:fcs-blaze redirector:fcs-redirector qos:fcs-qos dns:fcs-dns sync:fcs-sync; do
   s=${pair%%:*}; want=${pair##*:}; got=$(systemctl show -p User --value "fcs-league-$s.service" 2>/dev/null)
   if [ "$got" = "$want" ]; then ok "fcs-league-$s runs as $want"; else fail "fcs-league-$s runs as \"$got\", expected $want (run provision.sh again)"; fi
 done

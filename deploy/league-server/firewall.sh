@@ -10,6 +10,7 @@
 #   17502/udp     QoS ping/bandwidth probes
 #   17500/udp     QoS firewall probe 1
 #   17501/udp     QoS firewall probe 2
+#   53/udp        name service for real consoles (a PS3 set to use this server as its DNS), unless NCAA_DNS=off
 #   17504/tcp     in-game Dynasty Wire (Sports World), unless NCAA_EASW=off in /etc/fcs-league/league.env
 #                 (on, 1, true or yes: the same words the server takes; anything that is not on or off is an error
 #                 here and in the server, never a silent "off")
@@ -34,7 +35,9 @@ QOS=$(setting NCAA_QOS_PORT 17502)
 FW1=$(setting NCAA_QOS_FW1 17500)
 FW2=$(setting NCAA_QOS_FW2 17501)
 EASW=$(setting NCAA_EASW on)
-for p in "$REDIRECTOR" "$BLAZE" "$LOCKER" "$EASW_PORT" "$QOS" "$FW1" "$FW2"; do
+DNS_PORT=$(setting NCAA_DNS_PORT 53)
+DNS=$(setting NCAA_DNS on)
+for p in "$REDIRECTOR" "$BLAZE" "$LOCKER" "$EASW_PORT" "$QOS" "$FW1" "$FW2" "$DNS_PORT"; do
   case "$p" in ''|*[!0-9]*) echo "bad port number in $ENV_FILE: $p" >&2; exit 1 ;; esac
 done
 
@@ -64,5 +67,10 @@ if [ "$EASW_ON" -eq 1 ]; then
 else
   ufw delete allow "$EASW_PORT/tcp" >/dev/null 2>&1 || true
 fi
+case "$(printf '%s' "$DNS" | tr 'A-Z' 'a-z' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')" in
+  on|1|true|yes) ufw allow "$DNS_PORT/udp" comment 'FCS league console name service' ;;
+  off|0|false|no|'') ufw delete allow "$DNS_PORT/udp" >/dev/null 2>&1 || true ;;
+  *) echo "NCAA_DNS in $ENV_FILE must be on or off, found: $DNS" >&2; exit 1 ;;
+esac
 ufw --force enable
 ufw status verbose

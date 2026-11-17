@@ -37,6 +37,7 @@ BACKUP_DIR=/var/backups/fcs-league
 U_BLAZE=fcs-blaze
 U_REDIRECTOR=fcs-redirector
 U_QOS=fcs-qos
+U_DNS=fcs-dns
 U_SYNC=fcs-sync
 DATA_GROUP=fcsleague
 MIN_NODE_MAJOR=22
@@ -116,7 +117,7 @@ note "node $(node -v), npm $(npm -v)"
 # ---- 2. service user and folders ---------------------------------------------------------------------------------
 say "Creating the service users and folders"
 getent group "$DATA_GROUP" >/dev/null 2>&1 || groupadd --system "$DATA_GROUP"
-for u in "$U_BLAZE" "$U_REDIRECTOR" "$U_QOS" "$U_SYNC"; do
+for u in "$U_BLAZE" "$U_REDIRECTOR" "$U_QOS" "$U_DNS" "$U_SYNC"; do
   id "$u" >/dev/null 2>&1 || useradd --system --user-group --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin "$u"
 done
 usermod -a -G "$DATA_GROUP" "$U_BLAZE"
@@ -310,10 +311,10 @@ fi
 say "Installing the services"
 install -m 0644 -o root -g root "$DEPLOY"/systemd/fcs-league*.service "$DEPLOY"/systemd/fcs-league*.timer "$DEPLOY"/systemd/fcs-league.target /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable fcs-league.target fcs-league-redirector.service fcs-league-blaze.service fcs-league-qos.service fcs-league-sync.service fcs-league-backup.timer >/dev/null
+systemctl enable fcs-league.target fcs-league-redirector.service fcs-league-blaze.service fcs-league-qos.service fcs-league-dns.service fcs-league-sync.service fcs-league-backup.timer >/dev/null
 systemctl start fcs-league-backup.timer
 if [ "$START" -eq 1 ]; then
-  systemctl restart fcs-league.target fcs-league-redirector.service fcs-league-blaze.service fcs-league-qos.service fcs-league-sync.service
+  systemctl restart fcs-league.target fcs-league-redirector.service fcs-league-blaze.service fcs-league-qos.service fcs-league-dns.service fcs-league-sync.service
   sleep 4
   say "Status"
   bash "$DEPLOY/check.sh" || true

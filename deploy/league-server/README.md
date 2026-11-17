@@ -52,6 +52,7 @@ Copy what it prints. Give it to the site as the secret named `REGISTRY_TOKEN` (f
    | 17503 | TCP | Locker. Dynasty and team files. |
    | 17502 | TCP and UDP | QoS. Connection checks. |
    | 17500, 17501 | UDP | QoS firewall checks. |
+   | 53 | UDP | Name service for real PS3 consoles (see "Real consoles" below). Not needed for RPCS3 members. |
 
    And port 17504 TCP for the in-game Dynasty Wire (on by default). Nothing else.
 
@@ -565,3 +566,28 @@ To turn it off: set `NCAA_BLAZE_TLS=off` and run the same restart command. Membe
 8. **The registry token has to exist on the site.** Until you set `REGISTRY_TOKEN` there, the game service uses the bridge token for the member list. `check.sh` reminds you.
 9. **Not yet seen on a console:** what the game shows when a save is refused because someone else is saving; the Break Lock button; a member becoming commissioner after the commissioner leaves; a dynasty being deleted when its last member leaves; a removed member trying to rejoin; joining a full dynasty; and the password prompt for a dynasty with a password. The server side of each is tested.
 10. **Inviting a removed member back** uses the game's invite-by-name. If that screen turns out not to work, remove their entry from `removed` in that dynasty in `dynasties.json` (server stopped).
+
+## Real consoles
+
+A member on RPCS3 needs nothing from this section. A real PS3 has no setting that says "send the game's server name
+to the league", so the league server answers that question itself: it runs a small name service on UDP port 53
+(`fcs-league-dns`). A PS3 member sets the console to ask this server for names:
+
+1. On the PS3: Settings, Network Settings, Internet Connection Settings, Custom.
+2. Leave everything as it is until **DNS Setting**, choose **Manual**.
+3. Primary DNS: this server's IPv4 address. Secondary DNS: `8.8.8.8` (used only if this server does not answer).
+4. Finish and save. The connection test's "PlayStation Network" line does not matter.
+
+What the service does: every name under `ea.com` gets this server's address, so the game reaches the league and
+never EA. Any other name is looked up here and one address is passed on, so the rest of the console keeps working.
+
+What it will not do, because a public service that answers small questions with big answers gets abused: it answers
+only plain address questions, a reply is never more than 16 bytes longer than the question, and each address gets a
+limited number of replies per ten seconds. `NCAA_DNS_FORWARD=off` in `league.env` makes it answer only the `ea.com`
+names; `NCAA_DNS=off` closes the port (then also `systemctl disable --now fcs-league-dns`).
+
+The console also needs a game program built for that member (their league identity is inside it); that is still done
+by hand, see `docs/online-member-setup.md`.
+
+Check it from any PC: `nslookup gosredirector.ea.com <this server's address>` must print this server's address.
+Open UDP 53 in the cloud provider's firewall as well. Not yet seen working from a console.

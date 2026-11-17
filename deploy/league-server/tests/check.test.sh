@@ -48,7 +48,7 @@ setup() { # setup CLOUD_LINE: a healthy server, with league.env's NCAA_CLOUD lin
   chmod 600 "$FCS_ETC_DIR/bridge.env" "$FCS_ETC_DIR/registry.env"
   for s in blaze redirector qos; do printf '2026-11-15T00:00:00.000Z [%s] capture file: (off)\n2026-11-15T00:00:00.001Z [%s] mode: cloud (member list required, limits on)\n' "$s" "$s" > "$FAKE/$s.log"; done
   printf '2026-11-15T00:00:01.000Z [registry] registry updated from the site: 3 player(s), 0 disabled\n' >> "$FAKE/blaze.log"
-  for pair in blaze:fcs-blaze redirector:fcs-redirector qos:fcs-qos sync:fcs-sync; do printf '%s\n' "${pair##*:}" > "$FAKE/${pair%%:*}.user"; done
+  for pair in blaze:fcs-blaze redirector:fcs-redirector qos:fcs-qos dns:fcs-dns sync:fcs-sync; do printf '%s\n' "${pair##*:}" > "$FAKE/${pair%%:*}.user"; done
 }
 run() { out=$(bash "$CHECK" 2>&1); }
 has() { grep -qF -- "$1" <<<"$out"; }
@@ -59,7 +59,7 @@ has "ok    NCAA_CLOUD is on in" || fail "the setting was not accepted: $out"
 for s in blaze redirector qos; do has "ok    fcs-league-$s started in cloud mode" || fail "no cloud-mode confirmation for $s: $out"; done
 ok "three services report cloud mode"
 has "ok    the game service has its own read-only registry token" || fail "registry token line missing: $out"
-for u in fcs-blaze fcs-redirector fcs-qos fcs-sync; do has "runs as $u" || fail "no user line for $u: $out"; done
+for u in fcs-blaze fcs-redirector fcs-qos fcs-dns fcs-sync; do has "runs as $u" || fail "no user line for $u: $out"; done
 ok "each service runs as its own user, and the game service has the registry token"
 if grep -q -- 'secret-value' <<<"$out"; then fail "a token value was printed"; fi
 ok "no token value is ever printed"
