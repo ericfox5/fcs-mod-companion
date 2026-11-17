@@ -1,0 +1,59 @@
+[Unit]
+Description=FCS league server: redirector (the first address a console asks; sends it to Blaze)
+Documentation=file:///opt/fcs-league/app/deploy/league-server/README.md
+After=network-online.target
+Wants=network-online.target
+PartOf=fcs-league.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# Its own user: it shares nothing with the other league services.
+User=fcs-redirector
+Group=fcs-redirector
+WorkingDirectory=/opt/fcs-league/app/spike/blaze/server
+EnvironmentFile=/etc/fcs-league/league.env
+Environment=NODE_ENV=production
+Environment=HOME=/var/lib/fcs-league
+ExecStart=/usr/bin/node redirector.mjs
+# Always comes back by itself. Whatever stops it (a crash, the memory limit below, a settings mistake) it is started
+# again: after 5 seconds, then with longer pauses up to one minute if it keeps stopping. There is no "too many
+# restarts" lockout (StartLimitIntervalSec=0 above), so a bad hour never leaves the league down until somebody logs
+# in to the server. "systemctl stop" still stops it. A settings mistake shows as one "cannot start" line a minute.
+Restart=always
+RestartSec=5
+RestartSteps=5
+RestartMaxDelaySec=60
+TimeoutStopSec=10
+LimitNOFILE=65536
+MemoryMax=512M
+TasksMax=128
+
+# ---- sandbox: needs no data folder at all ----
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0027
+
+[Install]
+WantedBy=fcs-league.target

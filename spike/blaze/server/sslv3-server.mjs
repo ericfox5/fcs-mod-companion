@@ -38,7 +38,11 @@ export class Sslv3ServerSocket extends EventEmitter {
     return data;
   }
   onRecord(type, ver, frag) {
-    if (type === REC.HANDSHAKE) { this.hsBuf = Buffer.concat([this.hsBuf, frag]); this.processHandshake(); }
+    if (type === REC.HANDSHAKE) {
+      // a handshake message announces its own length (up to 16 MB): a real ClientHello / ClientKeyExchange is far under 64 KB
+      if (this.hsBuf.length + frag.length > 65536) throw new Error('handshake message too large');
+      this.hsBuf = Buffer.concat([this.hsBuf, frag]); this.processHandshake();
+    }
     else if (type === REC.CCS) { this.clientSecure = true; this.clientSeq = 0; this.log('hs', 'client ChangeCipherSpec'); }
     else if (type === REC.ALERT) { this.log('alert', `client alert level ${frag[0]} description ${frag[1]}`); this.emit('alert', frag[0], frag[1]); }
     else if (type === REC.APP) this.emit('data', frag);
@@ -57,6 +61,7 @@ export class Sslv3ServerSocket extends EventEmitter {
     }
   }
   onClientHello(b) {
+    if (this.clientRandom) throw new Error('second ClientHello'); // no renegotiation: each one costs an RSA operation
     const ver = b.readUInt16BE(0); this.clientRandom = Buffer.from(b.subarray(2, 34));
     let p = 34; const sidLen = b[p]; p += 1 + sidLen; const csLen = b.readUInt16BE(p); p += 2;
     const suites = []; for (let i = 0; i < csLen; i += 2) suites.push(b.readUInt16BE(p + i));
@@ -73,6 +78,7 @@ export class Sslv3ServerSocket extends EventEmitter {
     this.log('hs', `ServerHello(${suite.name}) + Certificate(${this.certDer.length} bytes) + ServerHelloDone sent`);
   }
   onClientKeyExchange(b) {
+    if (!this.suite || this.master) throw new Error('unexpected ClientKeyExchange');
     const keyLen = crypto.createPublicKey(this.key).asymmetricKeyDetails.modulusLength / 8;
     let enc = b;
     if (b.length === keyLen + 2 && b.readUInt16BE(0) === keyLen) enc = b.subarray(2);
@@ -107,7 +113,7 @@ export class Sslv3ServerSocket extends EventEmitter {
     this.socket.write(Buffer.concat([Buffer.from([type, 3, 0, frag.length >> 8, frag.length & 255]), frag]));
   }
   sendAlert(level, desc) { this.sendRecord(REC.ALERT, Buffer.from([level, desc])); }
-  write(data) { for (let i = 0; i < data.length; i += 16384) this.sendRecord(REC.APP, data.subarray(i, i + 16384)); }
+  write(data) { if (this.socket.destroyed || !this.secure) return; for (let i = 0; i < data.length; i += 16384) this.sendRecord(REC.APP, data.subarray(i, i + 16384)); }
   end() { try { this.sendAlert(1, 0); } catch {} this.socket.end(); }
 }
 

@@ -15,10 +15,13 @@ import { fileURLToPath } from 'node:url';
 import { T } from './tdf.mjs';
 import { log } from './log.mjs';
 import { noteConsoleOverride } from './supersim.mjs';
-import { GAME_FILTER, LAYOUTS as GAME_LAYOUTS, loadGameData, saveGameData, gameTableRows } from './gamedata.mjs';
-import { latestContent, publishContent, setDownloadHook, readContentBlob, replaceContentBlob } from './locker.mjs';
-import { completeTeamPackage } from './team-package.mjs';
-import { isPublicDynasty, canSeeInSearch, matchesDynastyQuery, mayJoinDynasty } from './league-auth.mjs';
+import { GAME_FILTER, LAYOUTS as GAME_LAYOUTS, loadGameData, saveGameData, removeGameData, gameDataFolder, gameTableRows } from './gamedata.mjs';
+import { latestContent, publishContent, setDownloadHook, readContentBlob, replaceContentBlob, maxGroupId } from './locker.mjs';
+import { completeTeamPackage, PackageTooLarge } from './team-package.mjs';
+import { isPublicDynasty, canSeeInSearch, matchesDynastyQuery, mayJoinDynasty, protectDynastyPassword, membersOf, commissionerOf, activeUpdate, lockIdleSeconds, hasPassword, passwordProven, passwordMatches } from './league-auth.mjs';
+import { isCloud } from './cloud-config.mjs';
+import { loadJsonState, saveJsonState, writeFileAtomic, maxNumericName, damagedHint, fatalState } from './state-file.mjs';
+import { stateBudget, StorageRefused, fileSize, treeSize } from './storage-budget.mjs';
 
 export const DOD = 2148;
 export const DOD_COMMANDS = {
@@ -49,10 +52,48 @@ const PRIVATE = process.env.NCAA_PRIVATE
   ? path.resolve(process.env.NCAA_PRIVATE)
   : path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'private');
 const STORE_FILE = path.join(PRIVATE, 'dynasties.json');
-const load = () => { try { return JSON.parse(fs.readFileSync(STORE_FILE, 'utf8')); } catch { return { nextId: 1, dynasties: {} }; } };
-const store = load();
-const save = () => { try { fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2)); } catch { /* best effort */ } };
+// Written in one step (temp file + fsync + rename) and the copy it replaces is kept as dynasties.json.bak, so a crash
+// or a full disk mid-write cannot leave half a file. If the file is truncated or damaged at start, that previous copy
+// is loaded and the log says so (state-file.mjs). Name and format are unchanged: the site sync reads this file.
+const stateLog = (m) => log('dod', m);
+const validStore = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && !!v.dynasties && typeof v.dynasties === 'object' && !Array.isArray(v.dynasties);
+const loaded = loadJsonState(STORE_FILE, { validate: validStore, log: stateLog, what: 'the dynasty store (dynasties.json)' });
+// A public server never starts an empty league over data that is still on disk (new dynasties would reuse old ids).
+if (loaded.source === 'unreadable' && isCloud()) fatalState('dod', STORE_FILE);
+const store = loaded.value ?? { nextId: 1, dynasties: {} };
+let lastSaveError = 0;
+const save = () => {
+  try { saveJsonState(STORE_FILE, store, { pretty: 2, backup: true, log: stateLog }); }
+  catch (e) { if (Date.now() - lastSaveError > 60000) { lastSaveError = Date.now(); log('dod', `WARNING: dynasty store write failed (${e.code ?? e.message}); the previous file is intact, changes are in memory only until a write succeeds`); } }
+};
 log('dod', `dynasty store ${STORE_FILE} (${Object.keys(store.dynasties).length} dynasties)`);
+// Records written by older servers, made safe to read:
+//   - a dynasty whose members all left has an empty member list (or none). It is kept on disk, but nobody is shown
+//     it and nobody can join it (league-auth.mjs), and nothing below may assume a first member exists;
+//   - an update lock left in the file belongs to a connection that is gone: no session can still hold it;
+//   - createdBy (who made the dynasty: the per-player limit counts these) is filled in from the commissioner.
+{
+  let repaired = 0, locks = 0, empty = 0;
+  for (const [k, d] of Object.entries(store.dynasties)) {
+    if (!d || typeof d !== 'object' || Array.isArray(d)) { delete store.dynasties[k]; repaired++; log('dod', `dynasty entry ${k} is not a record: dropped`); continue; }
+    if (!Array.isArray(d.members)) { d.members = []; repaired++; }
+    else if (d.members.some((m) => !m || typeof m !== 'object')) { d.members = d.members.filter((m) => m && typeof m === 'object'); repaired++; }
+    if (!d.request || typeof d.request !== 'object' || Array.isArray(d.request)) { d.request = {}; repaired++; }
+    if (d.id === undefined) { d.id = Number(k) || 0; repaired++; }
+    if (d.update) { d.update = null; locks++; }
+    if (d.createdBy === undefined) { d.createdBy = commissionerOf(d)?.blazeId ?? 0; repaired++; }
+    if (!d.members.length) empty++;
+  }
+  if (locks) log('dod', `${locks} update lock(s) left by an earlier run cleared`);
+  if (empty) log('dod', `${empty} dynast${empty === 1 ? 'y has' : 'ies have'} no members: kept on disk, not listed and not joinable`);
+  if (repaired || locks) save();
+}
+// Dynasty passwords are kept as a salted scrypt hash (league-auth.mjs). A store written by an older server has them as
+// text in request.PASS: converted here, once. The second save pushes the old text out of dynasties.json.bak as well.
+{
+  const converted = Object.values(store.dynasties).filter((d) => d && typeof d === 'object' && protectDynastyPassword(d)).length;
+  if (converted) { save(); save(); log('dod', `${converted} dynasty password(s) converted from plain text to a salted hash`); }
+}
 
 // Uploaded results (d.games) and game data (d.gameData) are keyed by week, so they hold one season: d.gamesYear. When
 // the dynasty's year moves on they go to d.seasons[<year>]. Before this (2026-11-02), last season's week-1 final
@@ -83,9 +124,138 @@ const items = (v) => (v && Array.isArray(v.items) ? v.items : []);
 // (SINT/TINT ints, INTV for INTC, STRV for STRC, BINY hex blobs for BINC). PACK numbers the chunks of one table.
 export const name4 = (n) => { const b = Buffer.alloc(4); b.writeUInt32BE((Number(n) >>> 0)); return b.toString('latin1').split('').reverse().join('').replace(/[^\x20-\x7e]/g, '?'); };
 const TABLE_DIR = path.join(PRIVATE, 'dynasty-tables');
-const tableFile = (did, name) => path.join(TABLE_DIR, String(did), `${name}.json`);
+// A table name comes off the wire (4 packed characters) and becomes a file name: nothing that can leave the folder.
+export const safeName = (name) => String(name).replace(/[^A-Za-z0-9_ ?-]/g, '_');
+const tableFile = (did, name) => path.join(TABLE_DIR, String(Number(did) || 0), `${safeName(name)}.json`);
 const loadTable = (did, name) => { try { return JSON.parse(fs.readFileSync(tableFile(did, name), 'utf8')); } catch { return null; } };
-const saveTable = (did, t) => { fs.mkdirSync(path.dirname(tableFile(did, t.table)), { recursive: true }); fs.writeFileSync(tableFile(did, t.table), JSON.stringify(t)); };
+const MEMBER_DIR = path.join(PRIVATE, 'dynasty-member-tables');
+// One table file, written in one step (the site sync reads these while the server runs). No .bak for tables: the
+// console sends a table again with its next save. Returns the size written.
+function writeTable(file, text) {
+  const before = fileSize(file), size = Buffer.byteLength(text);
+  writeFileAtomic(file, text);
+  stateBudget.recordWrite(file, size, before);
+  return size - before;
+}
+if (loaded.source !== 'file') {
+  // Not the newest store (first start, a recovery, or a lost file): ids of dynasties whose tables, game data or
+  // Locker files are still on disk are never given to a new dynasty.
+  const ids = Object.keys(store.dynasties).map((k) => Number(k) || 0);
+  const floor = Math.max(0, ...ids, maxNumericName(TABLE_DIR), maxNumericName(MEMBER_DIR), maxNumericName(path.join(PRIVATE, 'game-data')), maxNumericName(path.join(PRIVATE, 'web-edits')), maxGroupId(), (loaded.source === 'none' ? 0 : damagedHint(STORE_FILE, 'nextId')) - 1) + 1;
+  if (!Number.isSafeInteger(store.nextId) || store.nextId < floor) { if (floor > 1) log('dod', `next dynasty id moved from ${store.nextId} to ${floor}: data of dynasties with lower ids is on disk`); store.nextId = floor; }
+}
+// NCAA_DYNASTY_ID_BASE: the lowest id a NEW dynasty gets. The site keys a mirrored dynasty by this id, so two league
+// servers that feed one site (a PC and the cloud server) must not hand out the same numbers. A PC starts at 1; the
+// cloud server starts at 1000 unless told otherwise. Existing dynasties keep their ids.
+const ID_BASE = (() => {
+  const raw = (process.env.NCAA_DYNASTY_ID_BASE ?? '').trim();
+  if (raw === '') return isCloud() ? 1000 : 1;
+  if (!/^[1-9][0-9]{0,8}$/.test(raw)) { console.error(`[dod] cannot start: NCAA_DYNASTY_ID_BASE must be a whole number from 1 to 999999999, found: ${raw}`); process.exit(78); }
+  return Number(raw);
+})();
+if (!Number.isSafeInteger(store.nextId) || store.nextId < ID_BASE) { log('dod', `new dynasties are numbered from ${ID_BASE} (NCAA_DYNASTY_ID_BASE)`); store.nextId = ID_BASE; }
+export const nextDynastyId = () => store.nextId;
+// ---- storage limits (cloud mode; blaze.mjs passes cloud-config limits()). null = no caps, as on a local PC. ----
+let limits = null;
+export const configureDodLimits = (l) => { limits = l; };
+// DYNASTYONDEMAND_ERR_DYNASTY_DATA_IS_LOCKED: one of the few error codes whose number is known (NOTES run 16). Sent
+// when an upload is refused for a storage limit, so the console is told the save did not happen.
+export const DOD_ERR_REFUSED = 63;
+const memberBytes = new Map(); // user id -> bytes of their own table files, all dynasties together
+function memberTableBytes(uid) {
+  if (!memberBytes.has(uid)) {
+    let bytes = 0;
+    try { for (const did of fs.readdirSync(MEMBER_DIR)) bytes += stateBudget.folderUsage(path.join(MEMBER_DIR, did, String(uid))).bytes; } catch { /* none yet */ }
+    if (memberBytes.size >= 50000) memberBytes.delete(memberBytes.keys().next().value);
+    memberBytes.set(uid, bytes);
+  }
+  return memberBytes.get(uid);
+}
+const recordBytes = (d) => { try { return Buffer.byteLength(JSON.stringify(d)); } catch { return Infinity; } }; // not storable at all: over any limit
+// With limits on, deleting a dynasty frees its tables and game data (otherwise create, fill, delete in a loop would
+// fill the disk). Its Locker files follow the Locker's own rules (trash, then removed). The daily backup still has it.
+function dropDynastyFiles(did) {
+  const id = Number(did); if (!Number.isSafeInteger(id) || id <= 0) return;
+  let freed = 0;
+  for (const dir of [path.join(TABLE_DIR, String(id)), path.join(MEMBER_DIR, String(id)), gameDataFolder(id)]) {
+    const bytes = treeSize(dir).bytes;
+    try { fs.rmSync(dir, { recursive: true, force: true }); stateBudget.recordTreeRemoved(dir, bytes); freed += bytes; } catch (e) { log('dod', `DID ${id}: could not remove ${dir}: ${e.message}`); }
+  }
+  memberBytes.clear(); teamCache.delete(id); coachCache.delete(id); scheduleCache.delete(id); pendingGames.delete(id);
+  log('dod', `DID ${id} deleted: ${freed} bytes of tables and game data removed`);
+}
+// A dynasty is deleted: by its commissioner (deleteDynasty), or because its last member left. Same clean-up either
+// way: with limits on its tables and game data are freed (the daily backup still has them); on a local PC they stay
+// on disk and the record itself is kept in private/deleted-dynasties/<id>.json, so a mistake can be undone by hand.
+function removeDynasty(did, why) {
+  const d = store.dynasties[did]; if (!d) return false;
+  if (!limits) { try { writeFileAtomic(path.join(PRIVATE, 'deleted-dynasties', `${Number(did) || 0}.json`), JSON.stringify({ deletedAt: now(), why, dynasty: d }, null, 1)); } catch (e) { log('dod', `DID ${did}: could not keep a copy of the deleted record: ${e.message}`); } }
+  delete store.dynasties[did]; lockSessions.delete(d.id); pendingGames.delete(d.id);
+  log('dod', `DID ${did} deleted (${why})`);
+  save();
+  if (limits) dropDynastyFiles(did);
+  return true;
+}
+// ---- the update lock ----
+// StartDynastyUpdate takes it, EndDynastyUpdate gives it back. It also ends when its holder stops using it for
+// NCAA_UPDATE_LOCK_SECONDS (league-auth.mjs activeUpdate), when the holder's connection ends (blaze.mjs calls
+// releaseSessionLocks), when the holder leaves or is removed, when the commissioner sends BreakLock, and when the
+// server starts. A member who starts an update and walks away can no longer block the dynasty.
+const lockSessions = new Map(); // dynasty id -> the session that holds its lock (this process only)
+function clearLock(d, why) {
+  if (!d?.update) return false;
+  const by = d.update.byUser;
+  d.update = null; lockSessions.delete(d.id); pendingGames.delete(d.id);
+  log('dod', `DID ${d.id}: update lock of user ${by ?? '?'} cleared (${why})`);
+  return true;
+}
+export function releaseSessionLocks(session) {
+  if (!session) return 0;
+  let n = 0;
+  for (const [did, holder] of lockSessions) {
+    if (holder !== session) continue;
+    const d = store.dynasties[did];
+    if (d && clearLock(d, 'its holder disconnected')) n++; else lockSessions.delete(did);
+  }
+  if (n) save();
+  return n;
+}
+export function expireUpdateLocks() {
+  let n = 0;
+  for (const d of Object.values(store.dynasties)) if (d?.update && !activeUpdate(d) && clearLock(d, `not used for more than ${lockIdleSeconds()} seconds`)) n++;
+  if (n) save();
+  return n;
+}
+{ const t = setInterval(() => { try { expireUpdateLocks(); } catch (e) { log('dod', `lock sweep failed: ${e.message}`); } }, 30000); t.unref?.(); }
+// How many dynasties this player created and that still exist (the per-player limit, blaze.mjs). Counted by the
+// stored creator, so handing a dynasty to someone else (create, let a friend join, leave) does not free a slot.
+export const dynastiesCreatedBy = (userId) => Object.values(store.dynasties).filter((d) => d?.createdBy === userId).length;
+// What is kept of a createDynasty request: the members of CreateDynastyRequest the server uses (plus PRIV), each
+// with a cap. Anything else a client adds is dropped. (TDF maxima: ABBR 7, DESC 66, NAME 22, PASS 14 characters.)
+const REQUEST_STRINGS = { ABBR: 16, DESC: 128, NAME: 64, PASS: 64 };
+const REQUEST_INTS = ['CBID', 'DNF', 'DSKL', 'FATG', 'HFAE', 'ICTK', 'INJU', 'MHUM', 'OSKL', 'PDLC', 'PLCL', 'PRIV', 'QTQB', 'QTR', 'SSOW', 'USKL', 'WTHR'];
+export function cleanDynastyRequest(body) {
+  const r = {};
+  for (const [k, max] of Object.entries(REQUEST_STRINGS)) if (body?.[k] !== undefined && body[k] !== null && typeof body[k] !== 'object') r[k] = String(body[k]).slice(0, max);
+  for (const k of REQUEST_INTS) if (body?.[k] !== undefined) { const n = num(body[k]); r[k] = Number.isSafeInteger(n) ? n : 0; }
+  return r;
+}
+function checkTableLimits({ table, file, rows, size, memberScope, game, incoming }) {
+  const L = limits, usage = stateBudget.folderUsage(path.dirname(file)), name = path.basename(file);
+  const before = usage.sizes.get(name) ?? 0, isNew = !usage.sizes.has(name);
+  if (rows > L.tableMaxRows) throw new StorageRefused(`table ${table} would have ${rows} rows; the limit is ${L.tableMaxRows} (NCAA_TABLE_MAX_ROWS)`);
+  if (game && (game.rows ?? 0) + incoming > L.tableMaxRows) throw new StorageRefused(`one uploaded game would have more than ${L.tableMaxRows} rows (NCAA_TABLE_MAX_ROWS)`);
+  if (size <= before) return; // a write that does not grow the file is never refused
+  if (size > L.tableMaxBytes) throw new StorageRefused(`table ${table} would be ${size} bytes; the limit is ${L.tableMaxBytes} (NCAA_TABLE_MAX_MB)`);
+  if (memberScope) {
+    if (isNew && usage.count >= L.memberMaxTables) throw new StorageRefused(`the member already has ${usage.count} table files in this dynasty; the limit is ${L.memberMaxTables} (NCAA_MEMBER_MAX_TABLES)`);
+    if (memberTableBytes(memberScope) - before + size > L.memberTablesBytes) throw new StorageRefused(`the member's own tables would pass ${L.memberTablesBytes} bytes (NCAA_MEMBER_TABLES_MB)`);
+  } else {
+    if (isNew && usage.count >= L.dynastyMaxTables) throw new StorageRefused(`the dynasty already has ${usage.count} table files; the limit is ${L.dynastyMaxTables} (NCAA_DYNASTY_MAX_TABLES)`);
+    if (usage.bytes - before + size > L.dynastyTablesBytes) throw new StorageRefused(`the dynasty's tables would pass ${L.dynastyTablesBytes} bytes (NCAA_DYNASTY_TABLES_MB)`);
+  }
+  if (!stateBudget.fits(size - before)) throw new StorageRefused('the league storage budget is full (NCAA_STATE_BUDGET_MB)', { budget: true });
+}
 const COLUMN_LISTS = [['SINT', 'SINT'], ['TINT', 'TINT'], ['INTC', 'INTV'], ['STRC', 'STRV'], ['BINC', 'BINY']];
 // ---- web edits: private/web-edits/<did>/<TABLE>.json ({table, columns{SINT,TINT,INTC,STRC,BINC}, rows, meta}) written by
 // the site/bridge; served back to the console through GetTableUpdate (the advance pulls the per-user Z tables filtered by
@@ -111,7 +281,7 @@ setDownloadHook((c) => {
   d.consoleLoadedCid = c.cid; save();
   log('dod', `DID ${d.id}: a console downloaded dynasty file ${c.cid}${d.patch?.cid === c.cid ? ' (the copy with site edits)' : ''}`);
 });
-const loadWebEdits = (did, table) => { try { return JSON.parse(fs.readFileSync(path.join(WEB_DIR, String(did), `${table}.json`), 'utf8')); } catch { return null; } };
+const loadWebEdits = (did, table) => { try { return JSON.parse(fs.readFileSync(path.join(WEB_DIR, String(Number(did) || 0), `${safeName(table)}.json`), 'utf8')); } catch { return null; } };
 // Site edits the change tables cannot carry (a transfer for a player with no TRAN row: TRAZ only merges into existing
 // rows) come as a copy of the console's dynasty file with them written in: DYNASTY.patch.bin + DYNASTY.patch.json
 // {base, key, size, changes}, built by the bridge (bridge/src/dynasty-patch.ts). When it was built from the console's
@@ -187,13 +357,26 @@ function registerConsoleGame(d, body, user) {
   const ginf = pg?.tables.GINF?.[0];
   if (!ginf) return log('dod', `DID ${d.id}: game upload without GINF, no game data kept`);
   const team = num(body.TMID) || pg.rtid || num(pg.result?.TMID);
-  const member = d.members.find(m => m.blazeId === user.blazeId);
+  const member = membersOf(d).find(m => m.blazeId === user.blazeId);
   if (d.update?.byUser && (!member || member.team !== team || ![num(ginf.GATG),num(ginf.GHTG)].includes(team)))
     return log('dod', `DID ${d.id}: rejected game data with mismatched member/team`);
   const week = pg.result ? num(pg.result.GMWK) : num(body.NWWK, d.week ?? 0);
-  const id = d.nextGameDataId ?? 900001; d.nextGameDataId = id + 1;
-  saveGameData(d.id, id, { source: 'console', by: user.blazeId, ghid: pg.ghid, week, team, sgnm: num(ginf.SGNM), createdAt: now(), columns: pg.columns, tables: pg.tables });
   const wk = String(week);
+  const text = JSON.stringify({ source: 'console', by: user.blazeId, ghid: pg.ghid, week, team, sgnm: num(ginf.SGNM), createdAt: now(), columns: pg.columns, tables: pg.tables });
+  const replaced = (d.gameData?.[wk] ?? []).filter((x) => x.team === team);
+  if (limits) {
+    // an uploaded game is small (about 40 KB); anything else is not a game. Refused data is not kept: the advance
+    // then simulates that game, as it would without an upload.
+    const size = Buffer.byteLength(text), files = stateBudget.folderUsage(gameDataFolder(d.id)).count - replaced.length;
+    const why = size > limits.gameDataMaxBytes ? `it is ${size} bytes; the limit is ${limits.gameDataMaxBytes} (NCAA_GAME_DATA_MAX_KB)`
+      : files >= limits.dynastyMaxGameFiles ? `the dynasty already keeps ${files} uploaded games (NCAA_DYNASTY_MAX_GAME_FILES)`
+      : !d.gameData?.[wk] && Object.keys(d.gameData ?? {}).length >= 64 ? 'the dynasty already has game data for 64 different weeks'
+      : !stateBudget.fits(size) ? 'the league storage budget is full (NCAA_STATE_BUDGET_MB)' : '';
+    if (why) { if (why.includes('budget')) stateBudget.refused(`game data from user ${user.blazeId} for dynasty ${d.id}`); return log('dod', `REFUSED (storage limit): game data from user ${user.blazeId} for DID ${d.id} week ${week}: ${why}`); }
+  }
+  const id = d.nextGameDataId ?? 900001; d.nextGameDataId = id + 1;
+  saveGameData(d.id, id, text);
+  if (limits) for (const x of replaced) removeGameData(d.id, x.id); // nothing lists the replaced upload any more
   (d.gameData ??= {})[wk] = [...(d.gameData[wk] ?? []).filter((x) => x.team !== team), { team, id, source: 'console' }];
   log('dod', `DID ${d.id}: console game week ${week} ${ginf.GATG}@${ginf.GHTG} ${ginf.GASC}-${ginf.GHSC} (GQTR ${ginf.GQTR}) kept as game data ${id} for team ${team}`);
 }
@@ -203,39 +386,44 @@ function registerConsoleGame(d, body, user) {
 // file the console is on, which can only be wrong after an offseason cut).
 function fixTeamPackage(d, team, cid) {
   try {
-    const pkg = readContentBlob(cid); if (!pkg) return;
+    const pkg = readContentBlob(cid); if (!pkg) return true;
     const onCid = d.patch && d.consoleLoadedCid === d.patch.cid ? d.patch.cid : (d.consoleFileId ?? d.fileId ?? 0);
-    const dyn = onCid ? readContentBlob(onCid) : null; if (!dyn) { log('dod', `DID ${d.id}: team package ${cid} not checked (no dynasty file ${onCid})`); return; }
+    const dyn = onCid ? readContentBlob(onCid) : null; if (!dyn) { log('dod', `DID ${d.id}: team package ${cid} not checked (no dynasty file ${onCid})`); return true; }
     const push = d.rosterPush?.[team]; const ids = push?.pgids ?? null;
     const r = completeTeamPackage(pkg, dyn, team, ids);
-    if (!r) return;
+    if (!r) return true;
     replaceContentBlob(cid, r.blob);
     log('dod', `DID ${d.id}: team package ${cid} (team ${team}) completed from dynasty file ${onCid}${ids ? ` and the ${ids.length}-row roster push` : ' (no roster push: every row of the team)'}: PLAY ${r.before} -> ${r.after} of ${r.max}${r.missing.length ? `, ${r.missing.length} did not fit: ${r.missing.join(' ')}` : ''}`);
-  } catch (e) { log('dod', `DID ${d.id}: team package ${cid} fix failed: ${e.stack ?? e.message}`); }
+    return true;
+  } catch (e) {
+    // not a team package at all: a small upload that unpacks to far more than any real one. It is not used.
+    if (e instanceof PackageTooLarge) { log('dod', `REFUSED (oversized upload): DID ${d.id}: file ${cid} sent as the team package of team ${team}: ${e.message}. It is not used as that team's package.`); return false; }
+    log('dod', `DID ${d.id}: team package ${cid} fix failed: ${e.stack ?? e.message}`);
+    return true;
+  }
 }
-function applyTableUpdate(d, body, memberScope = null) {
+// Nothing is changed (on disk, in the dynasty record or in the update session) until the new table has passed the
+// storage limits: a refused chunk (StorageRefused) leaves everything as it was.
+function applyTableUpdate(d, body, memberScope = null, memberTeam = 0) {
   const table = name4(body.TABL);
   const upd = d.update ?? { updt: 0, touched: [] };
   // Authenticated non-commissioner uploads must never replace shared league tables.
   // Their canonical .team file is still published normally; retain their table snapshot separately.
-  const scopedFile = memberScope ? path.join(PRIVATE,'dynasty-member-tables',String(d.id),String(memberScope),`${table}.json`) : null;
+  const scopedFile = memberScope ? path.join(MEMBER_DIR, String(d.id), String(Number(memberScope) || 0), `${safeName(table)}.json`) : null;
+  const file = scopedFile ?? tableFile(d.id, table);
   let previous = null;
   if (scopedFile) { try { previous = JSON.parse(fs.readFileSync(scopedFile,'utf8')); } catch { /* first snapshot */ } }
   const t = (scopedFile ? previous : loadTable(d.id, table)) ?? { table, columns: {}, rows: [], meta: {} };
   const filtCol = body.FILT && body.FILT.COLM ? name4(body.FILT.COLM) : null;
-  if (!upd.touched.includes(table)) { // first chunk of this table in this update session: replace (full) or drop the filtered rows (partial)
+  const first = !upd.touched.includes(table);
+  if (first) { // first chunk of this table in this update session: replace (full) or drop the filtered rows (partial)
     if (upd.updt === 2) { const ghid = num(body.GHID); t.rows = t.rows.filter((r) => !(ghid && r.GHID === ghid) && !(filtCol && r[filtCol] === num(body.FILT.VALU) && r.GHID === ghid)); } // game stats: one game's rows (GHID) replace the same game's earlier rows
     else if (upd.updt === 0 || !filtCol) t.rows = [];
     else t.rows = t.rows.filter((r) => r[filtCol] !== num(body.FILT.VALU));
-    upd.touched.push(table);
   }
   for (const [listTag] of COLUMN_LISTS) if (body[listTag]) t.columns[listTag] = items(body[listTag]).map(name4);
   t.meta = { type: num(body.TYPE), flty: num(body.FLTY), rtid: num(body.RTID), ghid: num(body.GHID), filter: filtCol ? { column: filtCol, value: num(body.FILT.VALU) } : null, updatedAt: now() };
   const game = upd.updt === 2 ? pendingGames.get(d.id) : null; // console game upload: keep this game's rows as sent
-  if (game) {
-    game.ghid ||= num(body.GHID); game.rtid ||= num(body.RTID); game.tables[table] ??= [];
-    game.columns[table] ??= Object.fromEntries(COLUMN_LISTS.filter(([tag]) => body[tag]).map(([tag]) => [tag, items(body[tag]).map(name4)]));
-  }
   let added = 0;
   const pushed = [];
   for (const r of items(body.ROWS)) {
@@ -244,29 +432,52 @@ function applyTableUpdate(d, body, memberScope = null) {
       const cols = t.columns[listTag] ?? [], vals = items(r[valueTag]);
       vals.forEach((v, i) => { row[cols[i] ?? `${listTag}${i}`] = typeof v === 'bigint' ? Number(v) : v; });
     }
-    t.rows.push(row); if (game) game.tables[table].push({ ...row }); added++; pushed.push(row);
+    t.rows.push(row); added++; pushed.push(row);
+  }
+  const text = JSON.stringify(t);
+  if (limits) checkTableLimits({ table, file, rows: t.rows.length, size: Buffer.byteLength(text), memberScope, game, incoming: pushed.length });
+  // ---- accepted: from here on the update is applied ----
+  if (first) upd.touched.push(table);
+  if (game) {
+    game.ghid ||= num(body.GHID); game.rtid ||= num(body.RTID); game.tables[table] ??= [];
+    game.columns[table] ??= Object.fromEntries(COLUMN_LISTS.filter(([tag]) => body[tag]).map(([tag]) => [tag, items(body[tag]).map(name4)]));
+    for (const row of pushed) game.tables[table].push({ ...row });
+    game.rows = (game.rows ?? 0) + pushed.length;
   }
   // the user's team rows (UPDT 1) name every PLAY row the console still has: kept in memory for the team package fix
   if (table === 'PLYZ' && upd.updt === 1) {
     const byTeam = d.rosterPush ?? (d.rosterPush = {});
     const at = upd.startedAt ?? now();
-    for (const row of pushed) { const tg = num(row.TGID); if (!tg) continue; const e = byTeam[tg] && byTeam[tg].at === at ? byTeam[tg] : (byTeam[tg] = { at, pgids: [] }); e.pgids.push(num(row.PGID)); }
+    for (const row of pushed) {
+      const tg = num(row.TGID); if (!tg) continue;
+      // a signed-in member who is not the commissioner names rows of their OWN team only (the list decides which
+      // rows of a team package are kept: fixTeamPackage); the commissioner's console pushes every user team
+      if (memberScope && tg !== memberTeam) continue;
+      // with limits on: real team ids only, and no list longer than any roster
+      if (limits && (tg < 1 || tg >= 1023 || !Number.isInteger(tg))) continue;
+      const e = byTeam[tg] && byTeam[tg].at === at ? byTeam[tg] : (byTeam[tg] = { at, pgids: [] });
+      if (limits && e.pgids.length >= 2000) continue;
+      e.pgids.push(num(row.PGID));
+    }
   }
-  if (scopedFile) { fs.mkdirSync(path.dirname(scopedFile),{recursive:true}); fs.writeFileSync(scopedFile,JSON.stringify(t)); }
-  else saveTable(d.id, t);
+  const grew = writeTable(file, text);
+  if (scopedFile && memberBytes.has(memberScope)) memberBytes.set(memberScope, Math.max(0, memberBytes.get(memberScope) + grew));
   if (table === 'TEAM') teamCache.delete(d.id);
   if (table === 'COCH' || table === 'COCZ') coachCache.delete(d.id);
   if (table === 'SCHD') scheduleCache.delete(d.id);
   if (!scopedFile) (d.tables ??= {})[table] = { rows: t.rows.length, updatedAt: t.meta.updatedAt };
+  upd.lastAt = now(); // the lock is in use
   d.update = upd;
   return { table, added, total: t.rows.length, pack: num(body.PACK), filter: t.meta.filter };
 }
 
 // Blaze::DynastyOnDemand::DynastyUser {BZID, NCID, NUCL, PERS, PRID, TMOT map}
 function dynastyUser(w, u) {
-  w.int('BZID', u.blazeId); w.int('NCID', u.ncId ?? 0); w.int('NUCL', u.nucleusId ?? u.blazeId); w.str('PERS', u.persona);
-  w.int('PRID', u.personaId ?? u.blazeId); w.intMap('TMOT', []);
+  const id = num(u?.blazeId);
+  w.int('BZID', id); w.int('NCID', num(u?.ncId)); w.int('NUCL', num(u?.nucleusId, id)); w.str('PERS', str(u?.persona));
+  w.int('PRID', num(u?.personaId, id)); w.intMap('TMOT', []);
 }
+const NOBODY = Object.freeze({ blazeId: 0, persona: '' }); // the commissioner of a dynasty nobody is in
 // Blaze::DynastyOnDemand::MemberStats (31 small ints)
 function memberStats(w) {
   for (const tag of ['CLOS', 'CPA', 'CPF', 'CRNK', 'CTIE', 'CWIN', 'DLOS', 'DPA', 'DPF', 'DRNK', 'DTIE', 'DWIN', 'HLOS', 'HTIE', 'HWIN', 'LOSS', 'NLOS', 'NTIE', 'NWIN', 'PA', 'PF', 'PNTS', 'POST', 'RANK', 'RLOS', 'RTIE', 'RWIN', 'STK', 'STKT', 'TIES', 'WINS']) w.int(tag, 0);
@@ -275,7 +486,7 @@ function memberStats(w) {
 function memberInfo(w, d, m) {
   const tr = m.team && m.team !== 1023 ? teamRow(d.id, m.team) : null;
   w.int('BZID', m.blazeId); w.int('COCH', memberCoach(d, m)); w.int('CONF', num(tr?.CGID, m.conf ?? 0)); w.int('DID', d.id); w.int('DIV', m.div ?? 0); w.int('ICPU', 0);
-  w.int('ISCM', m.commissioner ? 1 : 0); w.int('ISON', 1); w.str('PERS', m.persona); w.struct('STAT', memberStats); w.int('STUS', 0); w.int('TEAM', m.team ?? 0); w.str('TMNM', m.teamName ?? str(tr?.TDNA));
+  w.int('ISCM', m.commissioner ? 1 : 0); w.int('ISON', 1); w.str('PERS', str(m.persona)); w.struct('STAT', memberStats); w.int('STUS', 0); w.int('TEAM', m.team ?? 0); w.str('TMNM', m.teamName ?? str(tr?.TDNA));
 }
 // Blaze::DynastyOnDemand::Dynasty (39 members, tag order). C2B = map<coach id, persona> and T2B = map<team id, persona>
 // (string values): the client's converter at 0x2f4278 walks C2B, finds the T2B entry whose persona string matches, and
@@ -284,35 +495,35 @@ const personaMap = (tag, w, entries) => w.map(tag, T.INT, T.STRING, entries, (x,
 // The shared dynasty file names the commissioner's coach and team (DEID). A joiner fails the restart check
 // against that file, so their copy lives on member.dynastyFileId and is the only FID/DFID they are shown.
 const memberFileId = (d, viewerId) => {
-  const own = viewerId == null ? 0 : d?.members.find((m) => m.blazeId === viewerId)?.dynastyFileId;
+  const own = viewerId == null ? 0 : membersOf(d).find((m) => m.blazeId === viewerId)?.dynastyFileId;
   return own || d?.fileId || 0;
 };
 // Check 3 (0x33d084) counts DYUS rows built from the persona maps and compares that count, then each row's team,
 // with the status T2B pairs (count at versionMgr+0x198). Those maps have to list every placed member or the
 // member list drops anyone left out. The team-file list is separate: a joiner is only handed their own file.
-const placedMembers = (d) => (d?.members ?? []).filter((m) => m.team && m.team !== 1023);
+const placedMembers = (d) => membersOf(d).filter((m) => m.team && m.team !== 1023);
 const shownMembers = (d, viewer) => {
   const placed = placedMembers(d);
   if (viewer && !viewer.commissioner) return placed.filter((m) => m.blazeId === viewer.blazeId);
   return placed;
 };
-function dynasty(w, d, viewerId) {
-  const r = d.request;
+// hideFiles: the search listing of a dynasty with a password, for someone who is not in it and has not given the
+// password in this session, carries no file id (FID 0).
+function dynasty(w, d, viewerId, { hideFiles = false } = {}) {
+  const r = d.request ?? {};
   // The load's first getDynasty is what the restart check counts. A joiner's open team file is the current
   // database then, and that file only has their team, so the check can resolve only that one row. Later
   // replies list every placed member, which is what the in-game member list shows.
   const roster = placedMembers(d);
   const placed = d.limitRoster ? roster.filter((m) => m.blazeId === viewerId) : roster;
   const pub = isPublicDynasty(d);
-  const storedPass = str(r.PASS);
-  const showPass = viewerId === undefined || d.members.some((m) => m.blazeId === viewerId);
-  const viewer = viewerId == null ? null : d.members.find((m) => m.blazeId === viewerId) ?? null;
-  w.str('ABBR', str(r.ABBR)); w.int('ACTV', 1); personaMap('C2B', w, placed.map((m) => [memberCoach(d, m), m.persona])); w.int('CENS', 0); w.int('CHMP', 0); w.int('CHUM', 0);
-  w.struct('CMSH', (x) => dynastyUser(x, d.members[0])); w.int('CRTM', d.createdAt); w.str('DESC', str(r.DESC)); w.int('DID', d.id); w.int('DNF', num(r.DNF)); w.int('DSKL', num(r.DSKL));
-  w.int('FATG', num(r.FATG)); w.int('FID', memberFileId(d, viewerId)); w.int('HFAE', num(r.HFAE)); w.int('HIDN', pub ? 0 : 1); w.int('ICTK', num(r.ICTK)); w.int('INJU', num(r.INJU)); w.int('JOIN', pub ? 1 : 0);
-  w.int('MEM', viewer && !viewer.commissioner ? placed.length : d.members.length); w.int('MHUM', num(r.MHUM, 12)); w.str('NAME', str(r.NAME)); w.int('ONLN', 1); w.int('OSKL', num(r.OSKL)); w.str('PASS', showPass ? storedPass : ''); w.int('PDLC', num(r.PDLC));
+  const viewer = viewerId == null ? null : membersOf(d).find((m) => m.blazeId === viewerId) ?? null;
+  w.str('ABBR', str(r.ABBR)); w.int('ACTV', 1); personaMap('C2B', w, placed.map((m) => [memberCoach(d, m), str(m.persona)])); w.int('CENS', 0); w.int('CHMP', 0); w.int('CHUM', 0);
+  w.struct('CMSH', (x) => dynastyUser(x, commissionerOf(d) ?? NOBODY)); w.int('CRTM', num(d.createdAt)); w.str('DESC', str(r.DESC)); w.int('DID', d.id); w.int('DNF', num(r.DNF)); w.int('DSKL', num(r.DSKL));
+  w.int('FATG', num(r.FATG)); w.int('FID', hideFiles ? 0 : memberFileId(d, viewerId)); w.int('HFAE', num(r.HFAE)); w.int('HIDN', pub ? 0 : 1); w.int('ICTK', num(r.ICTK)); w.int('INJU', num(r.INJU)); w.int('JOIN', pub ? 1 : 0);
+  w.int('MEM', viewer && !viewer.commissioner ? placed.length : membersOf(d).length); w.int('MHUM', num(r.MHUM, 12)); w.str('NAME', str(r.NAME)); w.int('ONLN', 1); w.int('OSKL', num(r.OSKL)); w.str('PASS', ''); /* only a hash is stored (league-auth.mjs): nobody is sent a password */ w.int('PDLC', num(r.PDLC));
   w.int('PLCL', num(r.PLCL)); w.int('QTQB', num(r.QTQB)); w.int('QTR', num(r.QTR, 5)); w.int('RSTR', 0); w.int('SEAS', d.season ?? 1); w.str('SINF', ''); w.int('STTE', d.state ?? 0); // server-side state = what the last completed update reported (NWST); echoing the console's own mid-advance STAT back (run 31) loops the restart check
-  personaMap('T2B', w, placed.map((m) => [m.team, m.persona])); w.int('USKL', num(r.USKL)); w.int('VERS', 0); w.int('VIS', pub ? 1 : 0); w.int('WEEK', d.week ?? 0); w.int('WTHR', num(r.WTHR));
+  personaMap('T2B', w, placed.map((m) => [m.team, str(m.persona)])); w.int('USKL', num(r.USKL)); w.int('VERS', 0); w.int('VIS', pub ? 1 : 0); w.int('WEEK', d.week ?? 0); w.int('WTHR', num(r.WTHR));
 }
 const teamRecord = (tr) => (w) => { w.int('LOSS', num(tr?.TSLO)); w.int('WINS', num(tr?.TSWI)); }; // TEAM.TSWI/TSLO as of the last push
 // Blaze::DynastyOnDemand::ContinueDynastyInfo: one hub card per dynasty the user belongs to
@@ -345,7 +556,7 @@ function continueDynastyInfo(w, d, m) {
 // (blaze id -> NCID, presumably); left empty for now.
 // The coaching carousel's shared state: the newest .contract package a console uploaded since the dynasty's last advance
 // (an older one belongs to a finished carousel). See the CFID note in dynastyStatus and case 91.
-const contractFile = (d) => latestContent({ group: d.id, suffix: '.contract', since: d.fileSavedAt ?? 0, owners: d.members.map((m) => m.blazeId) });
+const contractFile = (d) => latestContent({ group: d.id, suffix: '.contract', since: d.fileSavedAt ?? 0, owners: membersOf(d).map((m) => m.blazeId) });
 
 function dynastyStatus(w, d, me, allTeams, cfid) {
   // TEAM = DynastyFileInfo per team. The load (request TMID = the caller's team) needs the team file id there: with 0 the
@@ -361,7 +572,7 @@ function dynastyStatus(w, d, me, allTeams, cfid) {
   // CFID (the own change package) is withheld, which is what the step-1 crash was actually reading (run 32).
   const shown = shownMembers(d, me);
   // A joiner must not be handed the other member's team file. The commissioner still sees every file, as before.
-  const withFiles = (me && !me.commissioner ? shown : d.members).filter((m) => m.teamFileId);
+  const withFiles = (me && !me.commissioner ? shown : membersOf(d)).filter((m) => m.teamFileId);
   // Check 2 looks the signed-in blaze id up in T2B and compares it with select TGID from DEID, which
   // returns 1023 here. The real id must stay out of the map. Check 3 resolves each DYUS row through
   // B2N; with no registration that blaze id is 0, so one pair of 0 -> the joiner's team matches the
@@ -392,19 +603,34 @@ function dynastyStatus(w, d, me, allTeams, cfid) {
 function gameResultsData(w, g) { w.int('ATID', g.ATID ?? 0); w.int('ATSC', g.ATSC ?? 0); w.int('CRCT', g.CRCT ?? 0); w.int('GMWK', g.GMWK ?? 0); w.int('HTID', g.HTID ?? 0); w.int('HTSC', g.HTSC ?? 0); w.int('OTFL', g.OTFL ?? 0); w.int('STCT', g.STCT ?? 0); }
 const ok = (w) => w.int('ENUM', 0); // DynastyOnDemandResponse
 
-export function handleDod({ p, body, session, reply }) {
+export function handleDod({ p, body, session, reply, replyError = null }) {
   const name = DOD_COMMANDS[p.command] ?? `cmd${p.command}`;
   const user = { blazeId: session?.userId ?? 0, persona: session?.onlineId ?? 'Player', ncId: ncidOf(session?.userId ?? 0) };
   const did = num(body.DID ?? body.DYID ?? body.DYNI, 0);
-  const d = store.dynasties[did];
-  const me = d?.members.find((x) => x.blazeId === user.blazeId);
+  const d = Object.hasOwn(store.dynasties, did) ? store.dynasties[did] : undefined;
+  const me = membersOf(d).find((x) => x.blazeId === user.blazeId);
   const note = (extra = '') => `(DynastyOnDemand ${name}${extra})`;
+  if (d?.update && !activeUpdate(d) && clearLock(d, `not used for more than ${lockIdleSeconds()} seconds`)) save();
+  // A storage limit was reached: one clear line in the log, and the console is told the request failed (an error
+  // reply, so it does not believe something was saved that was not). why never contains member-supplied text.
+  const refuse = (why, budget = false) => {
+    log('dod', `REFUSED (storage limit): ${name} for DID ${did} by user ${user.blazeId}: ${why}`);
+    if (budget) stateBudget.refused(`${name} for dynasty ${did} by user ${user.blazeId}`);
+    return replyError ? replyError(DOD_ERR_REFUSED, note(': refused, storage limit')) : reply(undefined, p.command === 12 ? (w) => w.str('MSG', '') : ok, note(': refused, storage limit'));
+  };
+  // Backstop for everything kept inside dynasties.json: a dynasty whose entry has outgrown its limit takes no more.
+  if (limits && d && [6, 12, 24, 80, 84, 91].includes(p.command)) {
+    const size = recordBytes(d);
+    if (size > limits.dynastyRecordBytes) return refuse(`the dynasty's entry in dynasties.json is ${size} bytes; the limit is ${limits.dynastyRecordBytes} (NCAA_DYNASTY_RECORD_KB)`);
+  }
   switch (p.command) {
     case 2: { // createDynasty -> CreateDynastyResponse {DID}
+      if (limits && recordBytes(body) > 16384) return refuse('the createDynasty request is larger than 16 KB');
       const id = store.nextId++;
-      store.dynasties[id] = { id, request: body, createdAt: now(), members: [{ ...user, commissioner: true, coach: 0, team: 0 }], season: 1, week: 0, year: 0, state: 0, fileId: 0, tables: {} };
+      store.dynasties[id] = { id, request: cleanDynastyRequest(body), createdAt: now(), createdBy: user.blazeId, members: [{ ...user, commissioner: true, coach: 0, team: 0 }], season: 1, week: 0, year: 0, state: 0, fileId: 0, tables: {} };
+      protectDynastyPassword(store.dynasties[id]); // the password is hashed before the dynasty is ever written
       save();
-      return reply(undefined, (w) => w.int('DID', id), note(`: "${body.NAME}" -> DID ${id}`));
+      return reply(undefined, (w) => w.int('DID', id), note(`: "${store.dynasties[id].request.NAME ?? ''}" -> DID ${id}`));
     }
     case 5: // getDynasty {DID} -> Dynasty (a load: any advance flag from an aborted advance is cleared)
       if (!d) return reply(undefined, ok, note(`: unknown DID ${did}, generic response`));
@@ -419,7 +645,7 @@ export function handleDod({ p, body, session, reply }) {
     case 9: // getInvitations -> GetInvitationsResponse {DYNS list<Dynasty>, INVS list<Invitation>}
       return reply(undefined, (w) => { w.list('DYNS', T.STRUCT, [], () => {}); w.list('INVS', T.STRUCT, [], () => {}); }, note(': none'));
     case 13: { // getContinueDynastyInfoForUser -> GetContinueDynastyInfoResponse {DNFO list<ContinueDynastyInfo>, NCID}
-      const mine = Object.values(store.dynasties).filter((x) => x.members.some((m) => m.blazeId === user.blazeId));
+      const mine = Object.values(store.dynasties).filter((x) => membersOf(x).some((m) => m.blazeId === user.blazeId));
       for (const x of mine) { x.hubAt = now(); x.rosterExpanded = false; x.limitRoster = false; } if (mine.length) save(); // the console is at the hub: its next getDynasty is a fresh load (refreshPatch)
       const myNcid = user.ncId;
       return reply(undefined, (w) => { w.list('DNFO', T.STRUCT, mine, (x, dd) => { continueDynastyInfo(x, dd, dd.members.find((m) => m.blazeId === user.blazeId)); x.push(0); }); w.int('NCID', myNcid); }, note(`: ${mine.length} dynasties for ${user.persona}, NCID ${myNcid}`));
@@ -430,27 +656,38 @@ export function handleDod({ p, body, session, reply }) {
       const list = Object.values(store.dynasties).filter((x) =>
         canSeeInSearch(x, session, user.blazeId) && matchesDynastyQuery(x, body))
         .slice(0, Math.min(50, Math.max(1, num(body.MAXR, 50))));
-      return reply(undefined, (w) => w.list('DLST', T.STRUCT, list, (x,dd) => { dynasty(x, dd, user.blazeId); x.push(0); }), note(`: ${list.length} results [${list.map((x) => str(x.request?.NAME)).join(', ')}]`));
+      // a dynasty with a password: its file id goes only to members and to someone who gave the password
+      const hide = (dd) => !!session?.leagueAuthenticated && hasPassword(dd) && !membersOf(dd).some((m) => m.blazeId === user.blazeId) && !passwordProven(dd, session);
+      return reply(undefined, (w) => w.list('DLST', T.STRUCT, list, (x,dd) => { dynasty(x, dd, user.blazeId, { hideFiles: hide(dd) }); x.push(0); }), note(`: ${list.length} results [${list.map((x) => str(x.request?.NAME)).join(', ')}]`));
     }
     case 26: { // GetDynastyUserInfo {BZID, DYID} -> DynastyUserInfoResponse {DUIF list<DynastyUserInfo{AUTO, BZID, LDCL, LLOG, NCID, OFFP, PERS}>}
       // BZID 0 asks for the whole dynasty. A specific id asks for that member; answering with someone else first
       // makes the caller treat the commissioner's identity as its own and leave.
       const want = num(body.BZID);
-      const list = (d?.members ?? []).filter((m) => !want || m.blazeId === want);
-      return reply(undefined, (w) => w.list('DUIF', T.STRUCT, list, (x, m) => { x.int('AUTO', 0); x.int('BZID', m.blazeId); x.int('LDCL', 0); x.int('LLOG', now()); x.int('NCID', m.ncId ?? 0); x.str('OFFP', ''); x.str('PERS', m.persona); x.push(0); }), note(`: ${list.length} member(s) for BZID ${want || 'all'}`));
+      const list = membersOf(d).filter((m) => !want || m.blazeId === want);
+      return reply(undefined, (w) => w.list('DUIF', T.STRUCT, list, (x, m) => { x.int('AUTO', 0); x.int('BZID', m.blazeId); x.int('LDCL', 0); x.int('LLOG', now()); x.int('NCID', m.ncId ?? 0); x.str('OFFP', ''); x.str('PERS', str(m.persona)); x.push(0); }), note(`: ${list.length} member(s) for BZID ${want || 'all'}`));
     }
     case 69: case 70: return reply(undefined, (w) => w.list('NLST', T.STRUCT, [], () => {}), note(': none')); // DynastyNotificationResponse
     case 93: return reply(undefined, (w) => w.list('TLST', T.STRUCT, [], () => {}), note(': no sync tables')); // GetSyncTablesResponse
     case 56: // StartDynastyUpdate {DYID, UPDT} -> begins a table push (UPDT 1 = user's team rows, 0 = whole dynasty)
       if (d) {
-        d.update = { updt: num(body.UPDT), byUser: user.blazeId, startedAt: now(), touched: [] }; save();
+        // In registry mode only a commissioner gets here over someone else's live lock (league-auth.mjs): the
+        // member's unfinished update is dropped and the commissioner's takes its place.
+        if (d.update && d.update.byUser !== user.blazeId) log('dod', `DID ${d.id}: update of user ${d.update.byUser ?? '?'} replaced by one from user ${user.blazeId}${me?.commissioner ? ' (the commissioner)' : ''}`);
+        d.update = { updt: num(body.UPDT), byUser: user.blazeId, startedAt: now(), lastAt: now(), touched: [] };
+        if (session) lockSessions.set(d.id, session); else lockSessions.delete(d.id);
+        save();
         if (num(body.UPDT) === 2) pendingGames.set(d.id, { tables: {}, columns: {}, ghid: 0, rtid: 0, result: null }); else pendingGames.delete(d.id);
       }
       return reply(undefined, ok, note(`: DID ${did} UPDT ${body.UPDT}`));
     case 12: { // sendTableUpdate (DodTableUpdate) -> DodTableUpdateResponse {MSG}
       if (!d) return reply(undefined, (w) => w.str('MSG', ''), note(`: unknown DID ${did}`));
       let r;
-      try { r = applyTableUpdate(d, body, session?.leagueAuthenticated && !me?.commissioner ? user.blazeId : null); } catch (e) { log('dod', `table update failed: ${e.stack ?? e.message}`); return reply(undefined, (w) => w.str('MSG', ''), note(': store error')); }
+      try { r = applyTableUpdate(d, body, session?.leagueAuthenticated && !me?.commissioner ? user.blazeId : null, me?.team ?? 0); }
+      catch (e) {
+        if (e instanceof StorageRefused) return refuse(e.reason, e.budget);
+        log('dod', `table update failed: ${e.stack ?? e.message}`); return reply(undefined, (w) => w.str('MSG', ''), note(': store error'));
+      }
       save();
       return reply(undefined, (w) => w.str('MSG', ''), note(`: ${r.table} pack ${r.pack} +${r.added} rows (${r.total} total${r.filter ? `, ${r.filter.column}=${r.filter.value}` : ''})`));
     }
@@ -459,7 +696,7 @@ export function handleDod({ p, body, session, reply }) {
         if (num(body.UPDT) === 1) {
           const team = num(body.TMID);
           const m = team > 0 && team < 1023 ? (me ?? d.members.find((x) => x.team === team)) : null;
-          if (m) { m.team = team; m.teamFileId = num(body.FID, m.teamFileId ?? 0); if (num(body.FID)) fixTeamPackage(d, team, num(body.FID)); }
+          if (m) { const prevFile = m.teamFileId ?? 0; m.team = team; m.teamFileId = num(body.FID, prevFile); if (num(body.FID) && !fixTeamPackage(d, team, num(body.FID))) m.teamFileId = prevFile; }
         }
         else if (num(body.UPDT) === 0 && num(body.FID)) { d.fileId = d.consoleFileId = num(body.FID); d.patch = null; d.fileSavedAt = now(); }
         // UPDT 2 = a played game's stat tables + UploadGameResults; FID is 0 there and the dynasty file is unchanged (run 38 took it as file 0)
@@ -468,7 +705,8 @@ export function handleDod({ p, body, session, reply }) {
         if (!session?.leagueAuthenticated || me?.commissioner) {
           d.state = num(body.NWST, d.state); d.status = d.state; d.week = num(body.NWWK, d.week); d.year = num(body.NWYR, d.year ?? 0); d.advancing = false;
         }
-        d.update = null;
+        // the lock goes back, unless it is someone else's (a member's late EndDynastyUpdate after the commissioner took over)
+        if (!d.update || d.update.byUser === undefined || d.update.byUser === user.blazeId || !session?.leagueAuthenticated) { d.update = null; lockSessions.delete(d.id); }
         // the year offset the dynasty's first season ran in (hub card "Year N"): taken from the first advance into the
         // regular season, when a start year the bridge set (2025 -> NWYR 12) is already in the file
         if (d.startYear === undefined && num(body.NWST) === 7 && prevYear === 0) d.startYear = d.year;
@@ -526,14 +764,58 @@ export function handleDod({ p, body, session, reply }) {
     }
     case 14: { // RemoveMember {BZID, DID}. BZID 0 is the caller leaving.
       const target = num(body.BZID) || user.blazeId;
-      const before = d?.members.length ?? 0;
-      if (d && (target === user.blazeId || me?.commissioner)) {
+      const before = membersOf(d).length;
+      let after = before, destroyed = false;
+      const gone = d && (target === user.blazeId || me?.commissioner) ? d.members.find((m) => m.blazeId === target) : null;
+      if (gone) {
         d.members = d.members.filter((m) => m.blazeId !== target);
-        save();
+        after = d.members.length;
+        if (d.update?.byUser === target) clearLock(d, 'its holder left or was removed'); // their unfinished update must not block the others
+        if (d.memberRecruitingState) delete d.memberRecruitingState[target];
+        if (target !== user.blazeId) {
+          // removed by the commissioner: stays out until the commissioner invites them again (sendInvitation)
+          d.removed = [...(Array.isArray(d.removed) ? d.removed : []).filter((r) => r?.blazeId !== target), { blazeId: target, persona: str(gone.persona).slice(0, 32), at: now(), by: user.blazeId }].slice(-200);
+        }
+        if (!after) {
+          // the last member left: nobody could run it, and it would stay listed as a public dynasty with no owner
+          removeDynasty(did, `its last member (user ${target}) left`); destroyed = true;
+        } else {
+          if (!d.members.some((m) => m.commissioner)) {
+            // the commissioner left: the member who has been in the dynasty longest takes over
+            d.members[0].commissioner = true;
+            log('dod', `DID ${d.id}: the commissioner (user ${target}) left; user ${d.members[0].blazeId} (${str(d.members[0].persona)}) is the commissioner now`);
+          }
+          save();
+        }
       }
-      return reply(undefined, (w) => w.int('DEST', 0), note(`: removed ${target}, ${before} -> ${d?.members.length ?? 0}`));
+      return reply(undefined, (w) => w.int('DEST', destroyed ? 1 : 0), note(`: removed ${target}, ${before} -> ${after}${destroyed ? ' (dynasty deleted: no members left)' : ''}`));
+    }
+    case 8: { // sendInvitation {DID, INVT persona}. Invitations are not delivered here; inviting someone the
+      // commissioner removed earlier lets them join again.
+      const invited = str(body.INVT).trim().toLowerCase();
+      if (d && invited && (me?.commissioner || !session?.leagueAuthenticated) && Array.isArray(d.removed)) {
+        const keep = d.removed.filter((r) => str(r?.persona).toLowerCase() !== invited);
+        if (keep.length !== d.removed.length) { d.removed = keep; save(); log('dod', `DID ${d.id}: the commissioner invited a removed member back; they may join again`); }
+      }
+      return reply(undefined, ok, note(': generic ENUM 0'));
+    }
+    case 32: { // BreakLock {DYID}: the commissioner clears an update somebody started and never finished
+      const cleared = !!d && (me?.commissioner || !session?.leagueAuthenticated) && clearLock(d, `BreakLock by user ${user.blazeId}`);
+      if (cleared) save();
+      return reply(undefined, ok, note(cleared ? ': lock cleared' : ': no lock to clear'));
+    }
+    case 100: { // CheckDynastyPassword {DYID, PENT}. A correct password is remembered for this session: it opens the
+      // dynasty's status and files before the join (league-auth.mjs mayPreviewDynasty). The password is never logged.
+      const good = !!d && passwordMatches(d, { PASS: body.PENT }, session);
+      if (!good && session?.leagueAuthenticated && replyError) return replyError(0x4000);
+      return reply(undefined, ok, note(good ? ': password accepted' : ': generic ENUM 0'));
     }
     case 24: { // UploadGameResults {AOTS, AQ1S..AQ4S, ATID, ATSC, CRCT, DYID, FLID, GMWK, HOTS, HQ1S..HQ4S, HTID, HTSC, OTFL, STCT, TMID} -> {DYID, SFFG}
+      if (d && limits) { // one team plays one game a week: a member cannot fill a week (or invent weeks) with results
+        const cur = d.games?.[String(num(body.GMWK))] ?? [];
+        const others = cur.filter((x) => x.by === user.blazeId && !(x.HTID === num(body.HTID) && x.ATID === num(body.ATID))).length;
+        if (others >= 8 || cur.length >= 2000 || (!d.games?.[String(num(body.GMWK))] && Object.keys(d.games ?? {}).length >= 64) || Object.keys(body).length > 64) return refuse('too many game results for one week from one member, or too many weeks');
+      }
       if (d) { const g = Object.fromEntries(Object.entries(body).filter(([k]) => k !== 'DYID').map(([k, v]) => [k, num(v)])); g.by = user.blazeId; g.at = now();
         const wk = String(num(body.GMWK)); (d.games ??= {})[wk] ??= []; const ours = d.games[wk].find((x) => x.HTID === g.HTID && x.ATID === g.ATID && x.supersimRunId); if (ours) noteConsoleOverride(store, d, g, ours); const pg = pendingGames.get(d.id); if (pg) pg.result = g; const list = d.games[wk].filter((x) => !(x.HTID === g.HTID && x.ATID === g.ATID)); list.push(g); d.games[wk] = list; save(); }
       return reply(undefined, (w) => { w.int('DYID', did); w.int('SFFG', 0); }, note(`: week ${body.GMWK} ${body.ATID}@${body.HTID} ${body.ATSC}-${body.HTSC}`));
@@ -545,7 +827,7 @@ export function handleDod({ p, body, session, reply }) {
       // team ids instead credited a Brown away game to the home team's row, which does not exist (Supersim run 1, week 6).
       // One entry per member team in the game, so both sides of a head-to-head game get their row.
       const list = d?.games?.[String(num(body.WKID))] ?? [];
-      const humans = new Set((d?.members ?? []).map((m) => m.team).filter((t) => t && t !== 1023));
+      const humans = new Set(membersOf(d).map((m) => m.team).filter((t) => t && t !== 1023));
       const rows = list.flatMap((g) => { const own = [g.HTID, g.ATID].filter((t) => humans.has(t)); return (own.length ? own : [g.TMID ?? g.HTID]).map((t) => [g, t]); });
       return reply(undefined, (w) => { w.int('DYID', did); w.list('GRLI', T.STRUCT, rows, (x, [g]) => { gameResultsData(x, g); x.push(0); }); w.intList('TIDL', rows.map(([, t]) => t)); }, note(`: week ${body.WKID}: ${list.length} result(s) for team(s) ${rows.map(([, t]) => t).join(',') || '-'}`));
     }
@@ -571,7 +853,7 @@ export function handleDod({ p, body, session, reply }) {
       return reply(undefined, (w) => dynastyStatus(w, d, me, num(body.TMID) === 1023, cfid), note(`: TMID ${body.TMID} STAT ${body.STAT} DFID ${dfid} CFID ${cfid}${why}, T2B ${JSON.stringify(pairs.map((m) => [m.blazeId, m.team]))}, B2N ${JSON.stringify(b2n.map((m) => [m.blazeId, m.ncId ?? 0]))}`));
     }
     case 64: return reply(undefined, (w) => { w.intMap('TBID', []); w.intMap('TDMP', []); w.intMap('TSID', []); w.intMap('TTID', []); }, note()); // DownloadViewDetailsDataResponse
-    case 71: { const r = d?.request ?? {}; return reply(undefined, (w) => { w.str('DESC', str(r.DESC)); w.int('MHUM', num(r.MHUM, 12)); w.str('PASS', me ? str(r.PASS) : ''); w.int('SSOW', num(r.SSOW)); }, note()); } // GetExtraDynastySettingsResponse
+    case 71: { const r = d?.request ?? {}; return reply(undefined, (w) => { w.str('DESC', str(r.DESC)); w.int('MHUM', num(r.MHUM, 12)); w.str('PASS', ''); w.int('SSOW', num(r.SSOW)); }, note()); } // GetExtraDynastySettingsResponse
     case 83: { // CheckAdvanceWeekStatusResponse {ALLW, THTM, UTM}: ALLW 0 refuses the advance; the strings are shown to the commissioner
       const hold = d ? advanceHold(d) : null;
       if (hold) log('dod', `DID ${did}: advance refused: ${hold}`);
@@ -595,12 +877,13 @@ export function handleDod({ p, body, session, reply }) {
       return reply(undefined, (w) => { w.int('RSIM', 1); w.int('SYTY', 0); w.int('TLID', 0); }, note(`: coach ${body.CHID} contract ${body.CTID} -> RSIM 1 (the console simulates)`));
     }
     case 4: return reply(undefined, (w) => memberInfo(w, d ?? { id: did, request: {}, members: [] }, me ?? { ...user, commissioner: false, coach: 0, team: 0 }), note(me ? '' : ': not a member')); // getMemberByBlazeId -> MemberInfo
-    case 3: if (d) { delete store.dynasties[did]; save(); } return reply(undefined, ok, note(`: DID ${did}`));
+    case 3: if (d) removeDynasty(did, `deleteDynasty by user ${user.blazeId}`); return reply(undefined, ok, note(`: DID ${did}`));
     case 45: // changeUserTeam {DYID, NWTM, OLTM}
       if (me) { me.team = num(body.NWTM); save(); }
       return reply(undefined, ok, note(`: team ${body.OLTM} -> ${body.NWTM}`));
     case 67: if (d) { d.maxOwned = num(body.MAXD); save(); } return reply(undefined, ok, note(`: MAXD ${body.MAXD}`)); // SetMaxOwnedDynasties
     case 80: { // optimizeProspectInfo {DYID, PRED list<ProspectExtraBlazeData{PRID, SQUT}>, TMED list<TeamExtraBlazeData{BCSP, TMID}>}
+      if (d && limits && (items(body.PRED).length > 20000 || items(body.TMED).length > 2000)) return refuse(`prospect list of ${items(body.PRED).length} and team list of ${items(body.TMED).length} entries (limits 20000 and 2000)`);
       if (d) { d.prospectExtra = items(body.PRED).map((x) => [num(x.PRID), num(x.SQUT)]); d.teamExtra = items(body.TMED).map((x) => [num(x.TMID), num(x.BCSP)]); save(); }
       return reply(undefined, ok, note(`: ${items(body.PRED).length} prospects, ${items(body.TMED).length} teams`));
     }

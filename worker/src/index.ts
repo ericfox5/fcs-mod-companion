@@ -29,16 +29,24 @@ import { depthPage, depthAction } from './pages/depth.js';
 import { playbookPage } from './pages/playbook.js';
 import { playbookBookJson, playbookEditAction } from './pages/playbook-edit.js';
 import { recruitPage, recruitEditAction, overhaulAction } from './pages/recruit-edit.js';
-import { currentMember, memberCookie, redirect } from './session.js';
+import { currentMember, memberCookie, redirect, safeBack } from './session.js';
 import { loginPage, loginAction, logoutAction } from './pages/login.js';
 import { joinPage, joinAction } from './pages/join.js';
+import { handleSite } from './pages/account.js';
+import { withSecurityHeaders, sameSiteRequest } from './security.js';
 import { membersPage, inviteAction, revokeInviteAction, addWebMemberAction, webMemberAction, readyAction } from './pages/members.js';
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  // Every response leaves with the security headers (security.ts).
+  async fetch(req: Request, env: Env): Promise<Response> { return withSecurityHeaders(await route(req, env)); },
+} satisfies ExportedHandler<Env>;
+
+async function route(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const parts = url.pathname.split('/').filter(Boolean);
     try {
+      // a form or script on another site may not change anything here (the bridge API is token-authenticated instead)
+      if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS' && parts[0] !== 'api' && !sameSiteRequest(req, url)) return new Response('Cross-site request blocked', { status: 403 });
       if (parts[0] === 'api') {
         if (parts[1] === 'bridge') return handleBridge(req, env, parts.slice(2));
         if (parts[1] === 'health') return json({ ok: true });
@@ -50,6 +58,9 @@ export default {
       if (parts[0] === 'downloads' && parts[1] && parts.length === 2) return serveDownload(env, decodeURIComponent(parts[1])); // roster saves from R2 downloads/
       if (parts[0] === 'css' || parts[0] === 'js' || parts[0] === 'img' || parts[0] === 'data' || parts[0] === 'fonts' || parts[0] === 'favicon.ico') return env.ASSETS.fetch(req); // data/: playbook JSON for Supersim
       if (parts.length === 0) return landingPage(env, await listDynasties(env.DB));
+      if (parts[0] === 'signup' || parts[0] === 'login' || parts[0] === 'logout' || parts[0] === 'account' || parts[0] === 'admin') { // open sign-up, site-level sign in, the account page, the admin's member list (pages/account.ts)
+        return (await handleSite(req, env, url, parts)) ?? notFound();
+      }
       if (parts[0] === 'quickplay') return quickplay(req, env, parts); // any two FCS teams in Supersim, no dynasty (pages/quickplay.ts)
       if (parts[0] === 'd' && parts[1]) {
         const dyn = await getDynasty(env.DB, parts[1]);
@@ -73,7 +84,7 @@ export default {
           if (parts[2] === 'members' && parts[3] === 'web' && !parts[4]) return addWebMemberAction(actx, await req.formData()); // web-only members + Ready (migration 0014)
           if (parts[2] === 'members' && parts[3] === 'web' && parts[4] && !parts[5]) return webMemberAction(actx, parts[4], await req.formData());
           if (parts[2] === 'ready' && !parts[3]) return readyAction(actx, await req.formData());
-          if (parts[2] === 'member') { const form = await req.formData(); const id = Number(form.get('blaze_id')); const back = String(form.get('back') ?? `/d/${dyn.slug}`); return redirect(back.startsWith('/') ? back : `/d/${dyn.slug}`, members.some((m) => m.blaze_id === id) ? { 'set-cookie': memberCookie(id) } : {}); }
+          if (parts[2] === 'member') { const form = await req.formData(); const id = Number(form.get('blaze_id')); return redirect(safeBack(form.get('back'), `/d/${dyn.slug}`, url.origin), members.some((m) => m.blaze_id === id) ? { 'set-cookie': memberCookie(id) } : {}); }
           if (parts[2] === 'recruiting' && parts[3] === 'board') return boardAction({ env, dyn, url, req, member, members }, await req.formData());
           if (parts[2] === 'recruiting' && parts[3] === 'overhaul') return overhaulAction(actx, await req.formData()); // commissioner: re-generate the class (preseason)
           if (parts[2] === 'recruit' && parts[3] && parts[4] === 'edit') return recruitEditAction(actx, Number(parts[3]), await req.formData());
@@ -112,10 +123,12 @@ export default {
       }
       return notFound();
     } catch (e: any) {
-      console.error(e?.stack ?? e);
-      return new Response(`Server error: ${e?.message ?? e}`, { status: 500 });
+      // The visitor gets a plain message and a short reference; what went wrong stays in the Worker's log, next to the
+      // same reference (wrangler tail, or Workers Logs in the dashboard).
+      const ref = [...crypto.getRandomValues(new Uint8Array(4))].map((b) => b.toString(16).padStart(2, '0')).join('');
+      console.error(`server error ref=${ref} ${req.method} ${url.pathname}`, e?.stack ?? e);
+      return new Response(`Something went wrong on our side. Please try again in a moment.\nIf it keeps happening, tell the league admin this reference: ${ref}\n`, { status: 500, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
     }
-  },
-} satisfies ExportedHandler<Env>;
+}
 
 export interface PageCtx { env: Env; dyn: import('./db/queries.js').Dynasty; url: URL; req?: Request; member?: import('./db/queries.js').MemberRow | null; members?: import('./db/queries.js').MemberRow[]; strip?: import('./html.js').Raw; account?: import('./session.js').AccountInfo | null; locked?: boolean }

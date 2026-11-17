@@ -19,7 +19,7 @@ export const stageLabel = (d: Dynasty) => `${seasonLabel(d)} · ${d.week_type ==
 // area), the week's scoreboard strip, white cards on a light grey page. The brand is Eric's header image (the FCS
 // shield + "Online Dynasty FCS" wordmark on the bar's black; public/img/fcs-header.png, the shield alone on phones as
 // fcs-header-mark.png; both kept out of git like fcs-logo.svg, which stays the favicon).
-export function layout(opts: { title: string; siteName: string; dyn?: Dynasty; section?: string; body: Raw; wide?: boolean; strip?: Raw; member?: MemberRow | null; members?: MemberRow[]; path?: string; account?: AccountInfo | null; locked?: boolean; css?: string[] }): Response {
+export function layout(opts: { title: string; siteName: string; dyn?: Dynasty; section?: string; body: Raw; wide?: boolean; strip?: Raw; member?: MemberRow | null; members?: MemberRow[]; path?: string; account?: AccountInfo | null; locked?: boolean; css?: string[]; right?: Raw }): Response {
   const d = opts.dyn;
   const base = d ? `/d/${d.slug}` : '';
   const viewer = opts.members?.[0]?.auth; // stamped by currentMember; pages only pass member/members
@@ -46,7 +46,7 @@ export function layout(opts: { title: string; siteName: string; dyn?: Dynasty; s
         ${who ? html`<div class="dm-group dm-acct"><p class="dm-h">Account</p>${who}</div>` : ''}
       </div></nav>
     </details>` : ''}
-    <div class="gh-right">${d ? who : html`<span class="dyn-pill"><span class="dyn-stage">Fan revival of the NCAA 14 web app</span></span>`}</div>
+    <div class="gh-right">${d ? who : opts.right ?? html`<span class="dyn-pill"><span class="dyn-stage">Fan revival of the NCAA 14 web app</span></span>`}</div>
   </div>
 </header>`;
   return page(html`<!DOCTYPE html>

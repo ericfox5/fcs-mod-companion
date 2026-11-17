@@ -951,9 +951,11 @@ export async function odImportOne(cfg: BridgeConfig, d: OdDynasty, opts: OdImpor
     coach: ex.coaches.find((c) => c.tgid === m.team && c.userControlled)?.ccid ?? m.coach ?? 0,
   }));
   const api = new WorkerApi(cfg);
+  // the dynasty's join password (and its hash) never leave the league server
+  const publicSettings = (r: any) => { const { PASS: _p, passwordHash: _h, ...rest } = r ?? {}; return rest; };
   const od = {
     id: d.id, name, abbr: String(d.request?.ABBR ?? ''), description: String(d.request?.DESC ?? ''), state: d.state ?? 0, week: d.week ?? 0, season: d.season ?? 1, year: d.year ?? 0,
-    fileId, fileSavedAt: d.fileSavedAt ?? null, createdAt: d.createdAt, settings: d.request, members, games: seasonGames(d),
+    fileId, fileSavedAt: d.fileSavedAt ?? null, createdAt: d.createdAt, settings: publicSettings(d.request), members, games: seasonGames(d),
   };
   // `||`, not `??`: the playoff and lock passes create a state entry with slug '' before the first import, and the
   // Worker refuses an empty slug (DID 10 "efoxOD4" sat invisible for this on 2026-11-05).

@@ -4,6 +4,7 @@
 // records. Field names are stored byte-reversed on the PS3 (big-endian) files.
 import fs from 'node:fs';
 import zlib from 'node:zlib';
+const DYNASTY_FILE_MAX_BYTES = 64 * 1024 * 1024;
 
 const name4 = (b) => Buffer.from(b).reverse().toString('latin1');
 
@@ -58,7 +59,10 @@ export function rows(db, table) {
 
 // The dynasty database inside a locker DYNASTY.dynasty blob.
 export function readDynastyFile(file) {
-  const z = zlib.inflateSync(fs.readFileSync(file));
+  // an uploaded file: the unpacked size is capped (the largest real dynasty file unpacks to 8.3 MB)
+  let z;
+  try { z = zlib.inflateSync(fs.readFileSync(file), { maxOutputLength: DYNASTY_FILE_MAX_BYTES }); }
+  catch (e) { if (e?.code === 'ERR_BUFFER_TOO_LARGE') throw new Error(`dynasty file unpacks to more than ${DYNASTY_FILE_MAX_BYTES} bytes: refused`); throw e; }
   const at = z.indexOf(Buffer.from('DB\0\x08', 'latin1'));
   if (at < 0) throw new Error('no DB in dynasty file');
   return parseDb(new Uint8Array(z.buffer, z.byteOffset + at, z.length - at));

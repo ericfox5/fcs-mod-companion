@@ -1,0 +1,30 @@
+[Unit]
+Description=FCS league server: encrypted off-site copy of the newest backup
+Documentation=file:///opt/fcs-league/app/deploy/league-server/README.md
+# Off by default: without this root-only settings file the unit is skipped (and the script also checks FCS_OFFSITE=on).
+ConditionPathExists=/etc/fcs-league/offsite.env
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# root: reads the backups (mode 700) and /etc/fcs-league/offsite.env (mode 600). The script reads that file itself,
+# so the storage key and the passphrase are never in a unit file, an environment listing or a command line.
+ExecStart=/opt/fcs-league/app/deploy/league-server/backup.sh --offsite
+TimeoutStartSec=3h
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes
+ProtectSystem=strict
+# the encrypted copy is staged next to the backups, then removed
+ReadWritePaths=/var/backups/fcs-league
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes

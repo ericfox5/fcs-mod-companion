@@ -11,6 +11,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rows as dbRows } from './tdb-read.mjs';
+import { writeFileAtomic } from './state-file.mjs';
+import { stateBudget, fileSize } from './storage-budget.mjs';
 
 export const GAME_FILTER = 0x47483458;
 // Column layouts exactly as the console uploads them after a played game (UPDT 2 sendTableUpdate, FLTY 2, TYPE 0).
@@ -36,7 +38,17 @@ const DIR = path.join(process.env.NCAA_PRIVATE
   ? path.resolve(process.env.NCAA_PRIVATE)
   : path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'private'), 'game-data');
 const file = (did, id) => path.join(DIR, String(did), String(id) + '.json');
-export const saveGameData = (did, id, data) => { fs.mkdirSync(path.dirname(file(did, id)), { recursive: true }); fs.writeFileSync(file(did, id), JSON.stringify(data)); };
+// Written in one step (temp file + rename), so a crash never leaves half a game on disk.
+export const gameDataFolder = (did) => path.join(DIR, String(did));
+export function saveGameData(did, id, data) {
+  const f = file(did, id), text = typeof data === 'string' ? data : JSON.stringify(data), before = fileSize(f);
+  writeFileAtomic(f, text);
+  stateBudget.recordWrite(f, Buffer.byteLength(text), before);
+}
+export function removeGameData(did, id) {
+  const f = file(did, id), before = fileSize(f);
+  try { fs.rmSync(f, { force: true }); stateBudget.recordRemove(f, before); } catch { /* still there: counted by the next scan */ }
+}
 export const loadGameData = (did, id) => { try { return JSON.parse(fs.readFileSync(file(did, id), 'utf8')); } catch { return null; } };
 
 const n = (v) => (Number.isFinite(Number(v)) ? Math.trunc(Number(v)) : 0);

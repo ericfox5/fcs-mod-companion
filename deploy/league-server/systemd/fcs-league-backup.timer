@@ -1,0 +1,11 @@
+[Unit]
+Description=FCS league server: daily backup
+
+[Timer]
+# every day at 09:15 UTC (early morning in the US), with up to 20 minutes of jitter; runs at boot if a day was missed
+OnCalendar=*-*-* 09:15:00 UTC
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

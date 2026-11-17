@@ -16,6 +16,8 @@ export function landingPage(env: Env, dynasties: Dynasty[]) {
     <h1>NCAA Online Dynasty FCS</h1>
     <p class="lede">The companion site EA shut down, rebuilt for RPCS3 leagues: the console plays its Online Dynasty against the league's own server, and every advance and uploaded result shows up here.</p>
   </div>
+  ${box('Play online', html`<div class="play-cta"><p><b>Anyone can join.</b> Create a free account, pick your in-game name, and the setup wizard connects your game to the league server. It takes a few minutes.</p>
+    <p><a class="btn" href="/signup">Join the league</a> <a class="btn light" href="/account">My account</a></p></div>`)}
   ${box('Browse Dynasties', dynasties.length ? html`<table class="list"><tr><th>Dynasty</th><th>Stage</th><th>Members</th><th>Updated (UTC)</th></tr>
     ${dynasties.map((d) => html`<tr><td><a href="/d/${d.slug}">${d.name}</a>${d.od_id !== null ? html` <span class="tag">ONLINE</span>` : ''}</td><td>${stageLabel(d)}</td><td>${d.member_count ?? 0}</td><td>${d.updated_at ?? ''}</td></tr>`)}</table>`
     : html`<p class="muted">No dynasties yet. Create one from the console's Online Dynasty menu; <code>ncaa-bridge od watch</code> mirrors it here.</p>`)}
@@ -26,5 +28,5 @@ export function landingPage(env: Env, dynasties: Dynasty[]) {
     ${box('Advance Week', html`<p>The console advances; the site shows the new week within seconds of the upload.</p>`)}
   </div>
 </div>`;
-  return layout({ title: 'Home', siteName: env.SITE_NAME, body });
+  return layout({ title: 'Home', siteName: env.SITE_NAME, body, right: html`<div class="who"><a class="who-in" href="/account">My account</a><span class="sep">·</span><a class="who-in" href="/signup">Join</a></div>` });
 }

@@ -1,6 +1,7 @@
 // Builds installer/dist/FCS-online.exe: generates the payload from the project's private files, bundles src/main.ts
-// with esbuild and injects it into a copy of node.exe as a single executable application (Node SEA).
-//   node installer/build.mjs [--roster <save folder, e.g. ...\2026\out\BLUS31159-ROSTER-FCS2026>] [--generics <plan.json>] [--rpcs3 DIR] [--no-exe]
+// with esbuild and injects it into a copy of node.exe as a single executable application (Node SEA). Writes the exe's
+// SHA-256 next to it (dist/FCS-online.exe.sha256).
+//   node installer/build.mjs [--roster <save folder, e.g. ...\2026\out\BLUS31159-ROSTER-FCS2026>] [--generics <plan.json>] [--rpcs3 DIR] [--elf <stock 1.02 EBOOT.elf>] [--no-exe]
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -8,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { build } from 'esbuild';
+import { writeChecksum } from './checksum.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -106,15 +108,39 @@ if (rpcs3) {
   run(process.execPath, ['--import', 'tsx', path.join(root, 'bridge', 'src', 'cli.ts'), 'playbook', 'export', '--rpcs3', rpcs3, '--out', m, '--blob', playbookBlob]);
   const pm = JSON.parse(fs.readFileSync(m, 'utf8')); if (pm.books.length) playbooks = pm;
 } else fs.writeFileSync(playbookBlob, Buffer.alloc(0));
-const payload = { builtAt: new Date().toISOString().slice(0, 16).replace('T', ' '), site: 'https://fcs-mod.online', ppuHash, patches: entries, uniforms, uniformSets, ...(roster ? { roster } : {}), ...(genericRosters ? { genericRosters } : {}), ...(scorebug ? { scorebug } : {}), ...(swapDonors ? { swapDonors } : {}), ...(swapPack ? { swapPack } : {}), ...(playbooks ? { playbooks } : {}) };
+// The online league's sign-in (docs/online-member-setup.md): the addresses the game-local NP adapter needs, read from
+// the stock decrypted executable (spike/blaze/tools/np-adapter-rpcs3.mjs). The exe carries only these addresses; join
+// assembles the adapter for the member's own profile on their PC. No mod patch word may touch what the adapter writes.
+let npAdapter;
+const stockElf = opt('elf') ?? path.join(root, 'spike', 'blaze', 'private', 'EBOOT.elf');
+if (fs.existsSync(stockElf)) {
+  const { extractTemplate } = await import('../spike/blaze/tools/np-adapter-rpcs3.mjs');
+  npAdapter = extractTemplate(fs.readFileSync(stockElf));
+  const taken = new Set([...Object.values(npAdapter.sites).flat(), 0x719560]);
+  for (const e of entries) for (const m of e.block.matchAll(/^\s*- \[ *be32, *(0x[0-9a-fA-F]+),/gm)) {
+    const va = Number(m[1]);
+    if (taken.has(va) || (va >= npAdapter.codeVa && va < npAdapter.codeLimit) || (va >= npAdapter.stateVa && va < npAdapter.stateVa + 128)) throw new Error(`patch entry "${e.name}" writes 0x${va.toString(16)}, which the league sign-in uses`);
+  }
+  fs.writeFileSync(path.join(here, 'generated', 'np-adapter-template.json'), JSON.stringify(npAdapter));
+} else console.log(`online sign-in: ${stockElf} not found; this build's join cannot set up the online league (pass --elf <stock decrypted 1.02 EBOOT.elf>)`);
+const payload = { builtAt: new Date().toISOString().slice(0, 16).replace('T', ' '), site: 'https://fcs-mod.online', ppuHash, patches: entries, uniforms, uniformSets, ...(roster ? { roster } : {}), ...(genericRosters ? { genericRosters } : {}), ...(scorebug ? { scorebug } : {}), ...(swapDonors ? { swapDonors } : {}), ...(swapPack ? { swapPack } : {}), ...(playbooks ? { playbooks } : {}), ...(npAdapter ? { npAdapter } : {}) };
 fs.writeFileSync(path.join(here, 'generated', 'payload.json'), JSON.stringify(payload));
-console.log(`payload: ${entries.length} patch entries (${entries.reduce((a, e) => a + e.words, 0)} words), ${Object.keys(uniforms).length} stop-gap XMLs, ${uniformSets.length} uniform-set files (${(offset / 1048576).toFixed(1)} MB; ${fromLive} read from ${liveDlc ?? 'no DLC folder'}, ${touched} touched up)${roster ? `, roster save ${roster.dir} (${Object.keys(roster.files).length} files)` : ''}${genericRosters ? `, generic rosters ${genericRosters.rows.length} rows (${genericRosters.teams.map((t) => t.team).join(', ')})` : ', no generic roster plan'}${scorebug ? `, score bug fix (${scorebug.teams} teams)` : ''}${swapDonors ? `, swap donors ${swapDonors.name}` : ''}${playbooks ? `, ${playbooks.books.length} private playbook(s)` : ', no private playbooks'}`);
+console.log(`payload: ${entries.length} patch entries (${entries.reduce((a, e) => a + e.words, 0)} words), ${Object.keys(uniforms).length} stop-gap XMLs, ${uniformSets.length} uniform-set files (${(offset / 1048576).toFixed(1)} MB; ${fromLive} read from ${liveDlc ?? 'no DLC folder'}, ${touched} touched up)${roster ? `, roster save ${roster.dir} (${Object.keys(roster.files).length} files)` : ''}${genericRosters ? `, generic rosters ${genericRosters.rows.length} rows (${genericRosters.teams.map((t) => t.team).join(', ')})` : ', no generic roster plan'}${scorebug ? `, score bug fix (${scorebug.teams} teams)` : ''}${swapDonors ? `, swap donors ${swapDonors.name}` : ''}${playbooks ? `, ${playbooks.books.length} private playbook(s)` : ', no private playbooks'}${npAdapter ? `, online sign-in (${Object.values(npAdapter.sites).flat().length} call sites, code at 0x${npAdapter.codeVa.toString(16)})` : ', NO online sign-in'}`);
 
 // ---- bundle
 const dist = path.join(here, 'dist'); fs.mkdirSync(dist, { recursive: true });
 const bundle = path.join(dist, 'fcs-online.cjs');
-await build({ entryPoints: [path.join(here, 'src', 'main.ts')], bundle: true, platform: 'node', format: 'cjs', target: 'node20', outfile: bundle, logLevel: 'warning', legalComments: 'none', loader: { '.html': 'text' } });
-console.log(`bundle: ${bundle} (${(fs.statSync(bundle).size / 1024).toFixed(0)} KB)`);
+// Every program the exe starts goes through src/online/system.ts (Windows tools by full path under %SystemRoot%, no
+// shell, never a bare name that the current folder could answer). The exe also carries bridge code that imports
+// node:child_process itself, so that import is pointed at system.ts for every file but system.ts; the check after the
+// build fails it if anything else still reaches the real module.
+const guardFile = path.join(here, 'src', 'online', 'system.ts');
+const guardChildProcess = { name: 'guard-child-process', setup(b) { b.onResolve({ filter: /^(node:)?child_process$/ }, (a) => (path.resolve(a.importer) === guardFile ? null : { path: guardFile })); } };
+const built = await build({ entryPoints: [path.join(here, 'src', 'main.ts')], bundle: true, platform: 'node', format: 'cjs', target: 'node20', outfile: bundle, logLevel: 'warning', legalComments: 'none', loader: { '.html': 'text' }, plugins: [guardChildProcess], metafile: true });
+const direct = Object.entries(built.metafile.inputs).filter(([file, i]) => path.resolve(file) !== guardFile && i.imports.some((m) => /^(node:)?child_process$/.test(m.path))).map(([file]) => file);
+if (direct.length) throw new Error(`these files in the bundle start programs without src/online/system.ts: ${direct.join(', ')}`);
+const viaGuard = Object.entries(built.metafile.inputs).filter(([, i]) => i.imports.some((m) => path.resolve(m.path) === guardFile)).map(([file]) => file);
+console.log(`bundle: ${bundle} (${(fs.statSync(bundle).size / 1024).toFixed(0)} KB); programs are started through src/online/system.ts only (used by ${viaGuard.join(', ')})`);
 if (args.includes('--no-exe')) process.exit(0);
 
 // ---- single executable (Node SEA): blob, node.exe copy, inject
@@ -125,3 +151,7 @@ const exe = path.join(dist, 'FCS-online.exe');
 fs.copyFileSync(process.execPath, exe);
 run(process.execPath, [path.join(root, 'node_modules', 'postject', 'dist', 'cli.js'), exe, 'NODE_SEA_BLOB', blob, '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2']);
 console.log(`exe: ${exe} (${(fs.statSync(exe).size / 1048576).toFixed(0)} MB, Node ${process.version})`);
+// The exe is not code-signed: its SHA-256 goes next to it (FCS-online.exe.sha256) and is published with every release,
+// so the site can show it and a member can compare (installer/checksum.mjs, installer/RELEASE.md).
+const sum = writeChecksum(exe);
+console.log(`sha256: ${sum.sha256}  (${sum.file})`);

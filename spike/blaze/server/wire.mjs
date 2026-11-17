@@ -23,12 +23,15 @@ import { log } from './log.mjs';
 import { siteConfig } from './supersim.mjs';
 import { xmsEvents, addMedia, removeMedia, getMedia, allMedia, readBinary, replaceBinary } from './easw.mjs';
 import { buildUserStory, parseContainer, replaceTextBlock, consoleText, MAX } from './story.mjs';
+import { loadJsonState, saveJsonState } from './state-file.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const STATE = path.join(process.env.NCAA_XMS_DIR || path.join(HERE, '..', 'private', 'xms'), 'wire-sync.json');
+const STATE = path.join(process.env.NCAA_XMS_DIR || path.join(process.env.NCAA_PRIVATE ? path.resolve(process.env.NCAA_PRIVATE) : path.join(HERE, '..', 'private'), 'xms'), 'wire-sync.json');
 const TO_JPEG = path.join(HERE, '..', '..', '..', 'bridge', 'scripts', 'to-jpeg.ps1');
-const state = (() => { try { return JSON.parse(fs.readFileSync(STATE, 'utf8')); } catch { return { site: {}, mirrored: {} }; } })();
-const saveState = () => fs.writeFileSync(STATE, JSON.stringify(state, null, 1));
+// written in one step, previous copy kept as wire-sync.json.bak; a damaged file falls back to that copy
+const state = loadJsonState(STATE, { validate: (v) => !!v && typeof v === 'object' && !Array.isArray(v) && !!v.site && typeof v.site === 'object', log: (m) => log('wire', m), what: 'the Dynasty Wire sync state (xms/wire-sync.json)' }).value ?? { site: {}, mirrored: {} };
+state.mirrored ??= {};
+const saveState = () => saveJsonState(STATE, state, { pretty: 1, backup: true, log: (m) => log('wire', m) });
 
 // JPEG re-encode through the Windows drawing classes (bridge/scripts/to-jpeg.ps1). Returns null when it cannot decode.
 // check = true only measures the picture: { width, height, range } (range = brightness spread, <= BLANK on a flat frame).
@@ -70,19 +73,23 @@ function gamePhotos(rec, s) {
 const LAYOUT = 2; // 2: header field 1 / SEARCH_KEY_1 = week (was the team id)
 
 // Which dynasty a console upload belongs to: the container says so; a photo goes to the dynasty its uploader is in.
-function dynastyOf(store, rec) {
+// The container's own word is not enough: the uploader has to be a member of the dynasty it names, or the item is
+// not sent to the site at all (it would appear in a league its uploader is not in).
+const isMember = (d, userId) => (Array.isArray(d?.members) ? d.members : []).some((m) => String(m.blazeId) === String(userId));
+export function dynastyOf(store, rec) {
   const g = Number(rec.attributes?.CONTAINER_GROUP);
-  if (g && store.dynasties[g]) return store.dynasties[g];
+  if (g && Object.hasOwn(store.dynasties, g)) return isMember(store.dynasties[g], rec.ownerId) ? store.dynasties[g] : null;
   const mine = Object.values(store.dynasties).filter((d) => d.fileId && (d.members ?? []).some((m) => String(m.blazeId) === String(rec.ownerId)));
   return mine.sort((a, b) => (b.fileSavedAt ?? 0) - (a.fileSavedAt ?? 0))[0] ?? null;
 }
 
 export function startWireSync({ store, loadTable }, { intervalMs = 20000 } = {}) {
   const site = siteConfig();
-  if (!site) { log('wire', 'no ~/.ncaa-bridge/config.json (workerUrl + token): the Dynasty Wire is not synced with the site'); return () => {}; }
+  if (!site) { log('wire', 'no bridge token for this service (~/.ncaa-bridge/config.json on a PC, NCAA_BRIDGE_TOKEN on a server): the Dynasty Wire is not synced with the site'); return () => {}; }
   const missing = new Set(); // endpoints the deployed Worker does not have yet (logged once)
+  const unplaced = new Set(); // media with no dynasty to send them to (logged once each, not every tick)
   const call = async (p, method = 'GET', body, raw = false) => {
-    const res = await fetch(site.workerUrl + p, { method, headers: { authorization: `Bearer ${site.token}`, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    const res = await fetch(site.workerUrl + p, { method, headers: { authorization: `Bearer ${site.token}`, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000) });
     if (res.status === 404 && !missing.has(p.split('?')[0])) { missing.add(p.split('?')[0]); log('wire', `${method} ${p.split('?')[0]} -> 404 (deploy the Worker to enable)`); }
     if (!res.ok) throw Object.assign(new Error(`${method} ${p} -> ${res.status}`), { status: res.status });
     return raw ? Buffer.from(await res.arrayBuffer()) : res.json();
@@ -91,7 +98,7 @@ export function startWireSync({ store, loadTable }, { intervalMs = 20000 } = {})
   // console -> site
   const mirror = async (rec) => {
     if (rec.origin !== 'console' || state.mirrored[rec.id] === rec.serverDate) return;
-    const d = dynastyOf(store, rec); if (!d) { log('wire', `media ${rec.id}: no dynasty for owner ${rec.ownerId}`); return; }
+    const d = dynastyOf(store, rec); if (!d) { if (!unplaced.has(rec.id)) { if (unplaced.size >= 10000) unplaced.clear(); unplaced.add(rec.id); log('wire', `media ${rec.id}: no dynasty for owner ${rec.ownerId} (not a member of the dynasty it names, or in none); not sent to the site`); } return; }
     if (/SCREENSHOT/i.test(rec.type)) {
       const bin = readBinary(rec, 0); if (!bin) return;
       const jpg = isJpeg(bin) ? { bytes: bin } : isPng(bin) ? toJpeg(bin, 1280) : null;

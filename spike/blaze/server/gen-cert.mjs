@@ -4,9 +4,10 @@
 // Output: ./certs/gosredirector_mod.crt (PEM) + ./certs/gosredirector.key.pem. Nothing here ever contacts EA.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
-const dir = join(import.meta.dirname, 'certs');
+// NCAA_CERT_DIR: write somewhere else (a server keeps them in /etc/fcs-league/certs; redirector.mjs reads the same variable)
+const dir = process.env.NCAA_CERT_DIR ? resolve(process.env.NCAA_CERT_DIR) : join(import.meta.dirname, 'certs');
 mkdirSync(dir, { recursive: true });
 const f = (n) => join(dir, n);
 const ssl = (...args) => execFileSync('openssl', args, { stdio: ['ignore', 'pipe', 'pipe'] }).toString();

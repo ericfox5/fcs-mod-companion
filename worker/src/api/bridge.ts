@@ -7,6 +7,8 @@ import { json } from '../html.js';
 import { IMPORT_TABLES, buildInserts } from '../db/import-tables.js';
 import { handlePhotos } from './photos.js';
 import { handleInvites } from './auth.js';
+import { leagueRegistry } from './league-registry.js';
+import { timingSafeEqual } from '../security.js';
 import { handleSupersimBridge, type SimEnv } from '../supersim/routes.js';
 import { listPendingWebVisits, markWebVisitsDelivered, insertCapture } from '../db/visits.js';
 import { listPendingWireStories, listLiveWebStoryIds, getWebStoryImageKey, markWireDelivered, wireHeadline, upsertConsoleStory, listPendingRecaps, markRecapDelivered } from '../db/wire.js';
@@ -19,12 +21,20 @@ async function sha256Hex(s: string): Promise<string> {
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function bridgeAuthorized(req: Request, env: Env): Promise<boolean> {
-  const auth = req.headers.get('authorization') ?? '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-  if (!token || !env.BRIDGE_TOKEN) return false;
-  const [a, b] = await Promise.all([sha256Hex(token), sha256Hex(env.BRIDGE_TOKEN)]);
-  return a === b;
+const bearer = (req: Request) => { const auth = req.headers.get('authorization') ?? ''; return auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''; };
+// Constant-time, over the two SHA-256 digests. An unset or empty secret matches nothing.
+async function tokenMatches(token: string, secret: string | undefined): Promise<boolean> {
+  const [a, b] = await Promise.all([sha256Hex(token), sha256Hex(secret || 'unset')]);
+  return timingSafeEqual(a, b) && !!token && !!secret;
+}
+export const bridgeAuthorized = (req: Request, env: Env): Promise<boolean> => tokenMatches(bearer(req), env.BRIDGE_TOKEN);
+// The member list (GET /api/bridge/league-registry) also takes REGISTRY_TOKEN, a secret that is good for that one
+// route and nothing else, so the public league server does not have to hold the token that can import data and issue
+// invites. Both secrets are always compared, whichever matches.
+export async function registryAuthorized(req: Request, env: Env): Promise<boolean> {
+  const token = bearer(req);
+  const [full, narrow] = await Promise.all([tokenMatches(token, env.BRIDGE_TOKEN), tokenMatches(token, env.REGISTRY_TOKEN)]);
+  return full || narrow;
 }
 
 async function readJson(req: Request): Promise<any> {
@@ -51,7 +61,7 @@ async function upsertOnlineDynasty(db: D1Database, body: any): Promise<Response>
     VALUES (?,?,?,?,?,?,?,?,?,?, datetime('now'))
     ON CONFLICT(slug) DO UPDATE SET name = excluded.name, od_id = excluded.od_id, abbr = excluded.abbr, description = excluded.description, state = excluded.state,
       od_file_id = excluded.od_file_id, od_file_saved_at = excluded.od_file_saved_at, od_created_at = excluded.od_created_at, settings_json = excluded.settings_json, updated_at = datetime('now')`)
-    .bind(slug, String(body.name ?? slug), od.id, od.abbr ?? null, od.description ?? null, num(od.state), num(od.fileId), num(od.fileSavedAt), num(od.createdAt), JSON.stringify(od.settings ?? {})).run();
+    .bind(slug, String(body.name ?? slug), od.id, od.abbr ?? null, od.description ?? null, num(od.state), num(od.fileId), num(od.fileSavedAt), num(od.createdAt), JSON.stringify(withoutPassword(od.settings))).run();
   const row = await db.prepare('SELECT * FROM dynasties WHERE slug = ?').bind(slug).first<{ id: number }>();
   if (!row) return json({ error: 'dynasty vanished' }, 500);
   // console members are replaced wholesale; web-only members (migration 0014) exist only on the site and stay
@@ -73,8 +83,12 @@ async function upsertOnlineDynasty(db: D1Database, body: any): Promise<Response>
 }
 
 export async function handleBridge(req: Request, env: Env, path: string[]): Promise<Response> {
-  if (!(await bridgeAuthorized(req, env))) return json({ error: 'unauthorized' }, 401);
   const [resource, id, sub, name] = path; // e.g. ['import', '12', 'rows'] or ['import','12','file','USR-DATA']
+  if (resource === 'league-registry' && path.length === 1) { // league identities for the public league server (api/league-registry.ts): BRIDGE_TOKEN or REGISTRY_TOKEN
+    if (!(await registryAuthorized(req, env))) return json({ error: 'unauthorized' }, 401);
+    return leagueRegistry(req, env);
+  }
+  if (!(await bridgeAuthorized(req, env))) return json({ error: 'unauthorized' }, 401); // everything else: BRIDGE_TOKEN only
   const db = env.DB;
 
   if (resource === 'ping') return json({ ok: true, now: new Date().toISOString() });
@@ -82,6 +96,7 @@ export async function handleBridge(req: Request, env: Env, path: string[]): Prom
   if (resource === 'photos') return handlePhotos(req, env);
   if (resource === 'logos') return handlePhotos(req, env, 'logos');
   if (resource === 'invites') return handleInvites(req, env, path.slice(1));
+
   if (resource === 'captures' && req.method === 'PUT') { // an in-game screenshot from the bridge, captioned from the highlight log
     const body = await readJson(req);
     const dyn = await getDynastyByOdId(db, Number(body.od));
@@ -315,4 +330,11 @@ export async function handleBridge(req: Request, env: Env, path: string[]): Prom
     if (sub === 'status') return json({ snapshot: snap });
   }
   return json({ error: 'not found' }, 404);
+}
+
+// A dynasty's join password belongs to the league server only: never store it, whatever the bridge sends.
+function withoutPassword(settings: unknown): Record<string, unknown> {
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return {};
+  const { PASS: _p, passwordHash: _h, ...rest } = settings as Record<string, unknown>;
+  return rest;
 }

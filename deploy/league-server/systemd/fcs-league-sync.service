@@ -1,0 +1,66 @@
+[Unit]
+Description=FCS league server: site sync (ncaa-bridge od watch: mirrors dynasties to the website)
+Documentation=file:///opt/fcs-league/app/deploy/league-server/README.md
+After=network-online.target fcs-league-blaze.service
+Wants=network-online.target
+PartOf=fcs-league.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# Its own user. It is in the data group so it can READ the league data; it can write only the site-edits folder
+# and its own home.
+User=fcs-sync
+Group=fcsleague
+WorkingDirectory=/opt/fcs-league/app
+# NCAA_WORKER_URL and NCAA_OD_DIR come from league.env
+EnvironmentFile=/etc/fcs-league/league.env
+# root-only file with NCAA_BRIDGE_TOKEN; systemd reads it before dropping to the service user. The bridge takes the
+# token from the environment, so it is never on a command line (where other users could see it) and never in a log.
+# This is the ONLY service that gets the full token (it writes dynasties to the site). It listens on no port.
+EnvironmentFile=/etc/fcs-league/bridge.env
+Environment=NODE_ENV=production
+Environment=HOME=/var/lib/fcs-league/sync
+ExecStart=/usr/bin/node /opt/fcs-league/app/node_modules/tsx/dist/cli.mjs bridge/src/cli.ts od watch
+# Always comes back by itself. Whatever stops it (a crash, the memory limit below, a settings mistake) it is started
+# again: after 15 seconds, then with longer pauses up to two minutes if it keeps stopping. There is no "too many
+# restarts" lockout (StartLimitIntervalSec=0 above), so a bad hour never leaves the league down until somebody logs
+# in to the server. "systemctl stop" still stops it. A settings mistake shows as one "cannot start" line a minute.
+Restart=always
+RestartSec=15
+RestartSteps=5
+RestartMaxDelaySec=120
+TimeoutStopSec=15
+LimitNOFILE=16384
+MemoryMax=1G
+TasksMax=256
+
+# ---- sandbox: writes site edits for consoles (private/web-edits) and its own state (its home); reads the rest ----
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/fcs-league/private/web-edits /var/lib/fcs-league/sync
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0027
+
+[Install]
+WantedBy=fcs-league.target

@@ -1,12 +1,19 @@
 // Account creation from an invite code: GET /d/<slug>/join?code=... shows which persona the code is for and asks for a
 // username + password, or, when the browser is already signed in to a site account, offers to take the invite with that
 // account; POST creates (or links) the account for the invite's member, marks the invite used and signs the browser in.
+// A new account made here passes the same gate as one made on /signup (account-rules.ts: reserved and admin usernames,
+// the password rules) plus its own limits (security.ts: form posts per address, accounts per network per day) and
+// Turnstile when that is configured. The invite itself is what open sign-up does not have, so the site-wide daily
+// counts and the "agree" box do not apply; how many invites exist is capped where they are made (pages/members.ts).
 import type { PageCtx } from '../index.js';
 import { html } from '../html.js';
 import { box } from '../layout.js';
 import type { Dynasty, MemberRow, InviteRow } from '../db/queries.js';
 import { getInvite, getAccountForMember, getAccountForPersona, getAccountByUsername, createAccountFromInvite, linkAccountFromInvite, getTeam, deleteSession } from '../db/queries.js';
-import { hashPassword, createSession, redirect, sameOrigin, normalizeCode, sessionAccount, sessionHashFromRequest, USERNAME_RE, PASSWORD_MIN, type AccountInfo } from '../session.js';
+import { hashPassword, createSession, redirect, sameOrigin, normalizeCode, sessionAccount, sessionHashFromRequest, type AccountInfo } from '../session.js';
+import { SIGNUP_PASSWORD_MIN, PASSWORD_MAX, PASSWORD_MESSAGES, passwordProblem, usernameProblem } from '../account-rules.js';
+import { LIMITS, rateHit, clientIp, clientNet, clientAddress, ipHash, turnstileOn, verifyTurnstile } from '../security.js';
+import { audit } from '../league.js';
 import { authPage } from './login.js';
 import { teamLogo } from './common.js';
 
@@ -44,6 +51,7 @@ export async function joinPage(ctx: PageCtx): Promise<Response> {
   const m = check.member;
   const team = m.tgid && m.tgid !== 1023 ? await getTeam(env.DB, dyn.id, m.tgid) : null;
   const acct = req ? await sessionAccount(req, env.DB) : null;
+  const ts = turnstileOn(env);
   const who = html`This invite is for <b>${m.persona}</b>${team ? html` · ${teamLogo(team, 'xs')}${team.name}` : ''}${m.commissioner === 1 ? html` <span class="tag">Commissioner</span>` : ''}${m.web_only === 1 ? html` <span class="tag web">Web player</span>. You coach your team's games in Supersim on this site and mark yourself ready each week; no console needed` : ''}.`;
   const linkBox = !acct ? html`` : canLink(acct, check.persona)
     ? box('Use the account you are signed in with', html`<p>${who} You are signed in as <b>${acct.username}</b>: take the invite with that account and keep one username and password for every dynasty you are in.</p>
@@ -56,11 +64,12 @@ export async function joinPage(ctx: PageCtx): Promise<Response> {
     <form class="wform" method="post" action="/d/${dyn.slug}/join"><input type="hidden" name="code" value="${code}">
       <div class="fields">
         <div class="wide"><label for="jn-u">Username</label><input id="jn-u" type="text" name="username" autocomplete="username" pattern="[A-Za-z0-9_.-]{3,24}" maxlength="24" required ${acct ? '' : 'autofocus'} value="${url.searchParams.get('username') ?? ''}"></div>
-        <div class="wide"><label for="jn-p">Password</label><input id="jn-p" type="password" name="password" autocomplete="new-password" minlength="${PASSWORD_MIN}" required></div>
-        <div class="wide"><label for="jn-c">Confirm password</label><input id="jn-c" type="password" name="confirm" autocomplete="new-password" minlength="${PASSWORD_MIN}" required></div>
+        <div class="wide"><label for="jn-p">Password</label><input id="jn-p" type="password" name="password" autocomplete="new-password" minlength="${SIGNUP_PASSWORD_MIN}" maxlength="${PASSWORD_MAX}" required></div>
+        <div class="wide"><label for="jn-c">Confirm password</label><input id="jn-c" type="password" name="confirm" autocomplete="new-password" minlength="${SIGNUP_PASSWORD_MIN}" maxlength="${PASSWORD_MAX}" required></div>
+        ${ts ? html`<div class="wide"><div class="cf-turnstile" data-sitekey="${env.TURNSTILE_SITE_KEY}"></div></div>` : ''}
       </div>
-      <div class="actions"><button class="btn">Create account and sign in</button><span class="muted">3-24 letters, digits, _ . - for the username; at least ${PASSWORD_MIN} characters for the password.</span></div>
-    </form>`)}</div>`;
+      <div class="actions"><button class="btn">Create account and sign in</button><span class="muted">3-24 letters, digits, _ . - for the username; at least ${SIGNUP_PASSWORD_MIN} characters for the password. Write the password down: there is no email reset.</span></div>
+    </form>${ts ? html`<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>` : ''}`)}</div>`;
   return authPage(ctx, 'Join', body);
 }
 
@@ -72,29 +81,36 @@ export async function joinAction(ctx: PageCtx, form: FormData): Promise<Response
   const username = String(form.get('username') ?? '').trim();
   const back = (msg: string) => redirect(`/d/${dyn.slug}/join?code=${enc(code)}&username=${enc(username)}&err=${enc(msg)}`);
   if (!req || !sameOrigin(req, url)) return back('The form came from another site; try again from this page.');
+  if (!(await rateHit(db, LIMITS.inviteTryIp, clientIp(req)))) return back('Too many tries from your connection. Please wait a while and try again.');
   const check = await checkInvite(db, dyn, members ?? [], code);
   if (!check.ok) return redirect(`/d/${dyn.slug}/join?code=${enc(code)}`);
   const errorText = (e: unknown) => String((e as any)?.message ?? e);
+  const failed = (what: string, e: unknown) => { console.error(`join: could not ${what}`, e); return back(`Could not ${what} just now. Please try again.`); }; // the detail goes to the log, not the page
   if (form.get('link') === '1') { // take the invite with the account the browser is signed in with
     const acct = await sessionAccount(req, db);
     if (!acct) return back('You are not signed in; sign in first, or create an account below.');
     if (!canLink(acct, check.persona)) return back(`${acct.username} already stands for another console persona; create a separate account for ${check.member.persona}.`);
     let ok: boolean;
     try { ok = await linkAccountFromInvite(db, acct.id, dyn.id, check.member.blaze_id, check.persona, code); }
-    catch (e) { return back(/UNIQUE/i.test(errorText(e)) ? `${check.member.persona} just got an account; sign in with it.` : `Could not link the account: ${errorText(e)}`); }
+    catch (e) { return /UNIQUE/i.test(errorText(e)) ? back(`${check.member.persona} just got an account; sign in with it.`) : failed('link the account', e); }
     if (!ok) return back('That invite was used a moment ago.');
     return redirect(`/d/${dyn.slug}/members?joined=1`);
   }
   const password = String(form.get('password') ?? '');
-  if (!USERNAME_RE.test(username)) return back('Usernames are 3 to 24 characters: letters, digits, _ . and -.');
-  if (password.length < PASSWORD_MIN) return back(`Passwords need at least ${PASSWORD_MIN} characters.`);
+  const badName = await usernameProblem(env, db, username); // the gate /signup uses: format, reserved words, admin names and their look-alikes
+  if (badName) return back(badName === 'username' ? 'Usernames are 3 to 24 characters: letters, digits, _ . and -.' : 'That username is not available. Please pick another one.');
+  const badPassword = passwordProblem(password, username);
+  if (badPassword) return back(PASSWORD_MESSAGES[badPassword]);
   if (password !== String(form.get('confirm') ?? '')) return back('The two passwords do not match.');
+  if (!(await verifyTurnstile(env, String(form.get('cf-turnstile-response') ?? ''), clientAddress(req)))) return back('We could not confirm you are a person. Please try the check again.');
   if (await getAccountByUsername(db, username)) return back('That username is taken.');
+  if (!(await rateHit(db, LIMITS.inviteOkIp, clientNet(req)))) return back('Several accounts were created from your connection today. Please try again tomorrow, or sign in with an account you already have and take the invite with it.');
   const { hash, salt } = await hashPassword(password);
   let id: number | null;
   try { id = await createAccountFromInvite(db, dyn.id, check.member.blaze_id, check.persona, username, hash, salt, code); }
-  catch (e) { return back(/UNIQUE/i.test(errorText(e)) ? 'That username is taken, or this member just got an account.' : `Could not create the account: ${errorText(e)}`); }
+  catch (e) { return /UNIQUE/i.test(errorText(e)) ? back('That username is taken, or this member just got an account.') : failed('create the account', e); }
   if (id === null) return back('That invite was used a moment ago.');
+  await audit(db, { action: 'invite_signup', accountId: id, actorId: id, ipHash: await ipHash(req), detail: `dynasty ${dyn.slug}` });
   const old = await sessionHashFromRequest(req); // one session per browser: the new account replaces whatever cookie it carried
   if (old) await deleteSession(db, old);
   return redirect(`/d/${dyn.slug}/members?joined=1`, { 'set-cookie': await createSession(db, id) });
