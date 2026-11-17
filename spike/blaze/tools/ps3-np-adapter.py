@@ -146,7 +146,8 @@ def build(original, profile):
     # Validate ID before clearing the 256-byte SceNpTicketParam union.
     c.emit(d(10,0,3,12)); c.branch('invalid','ge')
     c.bytes_to(4,bytes(256))
-    values = {0:hashlib.sha256(ticket).digest()[:20],1:struct.pack('>I',1),2:struct.pack('>Q',issued),
+    # Param 1 = issuer: the game maps 1 to EA's TEST environment and 8 to CERT (VA 0x71aaa8); 0x100 = PSN production.
+    values = {0:hashlib.sha256(ticket).digest()[:20],1:struct.pack('>I',0x100),2:struct.pack('>Q',issued),
               3:struct.pack('>Q',expires),4:struct.pack('>Q',uid),5:name.encode()+b'\0',6:b'us\0\1',7:b'league\0',
               9:bytes(4),10:bytes(4),11:struct.pack('>HBB',2000,1,1)}
     for param in range(12):

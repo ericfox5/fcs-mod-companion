@@ -10,6 +10,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { verifyChecksum, writeChecksum } from './checksum.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -35,7 +36,12 @@ if (!has('no-build')) {
   if (b.status !== 0) throw new Error('build failed');
 }
 if (!fs.existsSync(exe)) throw new Error(`${exe} not found`);
+// The exe is not code-signed. Its SHA-256 is published three ways, all from the same bytes: the last line of the
+// release notes, the asset FCS-online.exe.sha256 (so the site can fetch
+// .../releases/latest/download/FCS-online.exe.sha256 and show it next to the download button), and the console line below.
 const bytes = fs.readFileSync(exe), sha = createHash('sha256').update(bytes).digest('hex');
+const sum = writeChecksum(exe);
+if (sum.sha256 !== sha || !verifyChecksum(exe).ok) throw new Error(`${sum.file} does not match ${exe}: the exe changed while it was being read; build again`);
 const built = JSON.parse(fs.readFileSync(path.join(here, 'generated', 'payload.json'), 'utf8')).builtAt;
 
 // ---- tag, notes, release
@@ -45,6 +51,7 @@ let tag = day; for (let n = 2; taken.has(tag); n++) tag = `${day}-${n}`;
 const notes = fs.readFileSync(path.join(here, 'RELEASE.md'), 'utf8').replaceAll('{{VERSION}}', tag).replaceAll('{{BUILT}}', built).replaceAll('{{SHA256}}', sha).replaceAll('{{SIZE}}', (bytes.length / 1048576).toFixed(0));
 const notesFile = path.join(here, 'dist', 'release-notes.md'); fs.writeFileSync(notesFile, notes);
 console.log(`release ${tag}: ${exe} (${(bytes.length / 1048576).toFixed(0)} MB, sha256 ${sha.slice(0, 16)}...), commit ${head.slice(0, 7)}`);
-must('gh', ['release', 'create', tag, exe, '--target', head, '--title', `FCS mod add-ons ${tag}`, '--notes-file', notesFile, ...(has('draft') ? ['--draft'] : ['--latest'])], { stdio: ['ignore', 'pipe', 'pipe'] });
+must('gh', ['release', 'create', tag, exe, sum.file, '--target', head, '--title', `FCS mod add-ons ${tag}`, '--notes-file', notesFile, ...(has('draft') ? ['--draft'] : ['--latest'])], { stdio: ['ignore', 'pipe', 'pipe'] });
 const repo = must('gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']);
-console.log(`published: https://github.com/${repo}/releases/tag/${tag}${has('draft') ? ' (draft: publish it on GitHub)' : `\nnewest-download link: https://github.com/${repo}/releases/latest/download/FCS-online.exe`}`);
+console.log(`published: https://github.com/${repo}/releases/tag/${tag}${has('draft') ? ' (draft: publish it on GitHub)' : `\nnewest-download link: https://github.com/${repo}/releases/latest/download/FCS-online.exe\nits checksum:         https://github.com/${repo}/releases/latest/download/FCS-online.exe.sha256`}`);
+console.log(`SHA-256 to show on the site's download page: ${sha}`);
