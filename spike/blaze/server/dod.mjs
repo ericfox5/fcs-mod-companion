@@ -144,6 +144,17 @@ if (loaded.source !== 'file') {
   const floor = Math.max(0, ...ids, maxNumericName(TABLE_DIR), maxNumericName(MEMBER_DIR), maxNumericName(path.join(PRIVATE, 'game-data')), maxNumericName(path.join(PRIVATE, 'web-edits')), maxGroupId(), (loaded.source === 'none' ? 0 : damagedHint(STORE_FILE, 'nextId')) - 1) + 1;
   if (!Number.isSafeInteger(store.nextId) || store.nextId < floor) { if (floor > 1) log('dod', `next dynasty id moved from ${store.nextId} to ${floor}: data of dynasties with lower ids is on disk`); store.nextId = floor; }
 }
+// NCAA_DYNASTY_ID_BASE: the lowest id a NEW dynasty gets. The site keys a mirrored dynasty by this id, so two league
+// servers that feed one site (a PC and the cloud server) must not hand out the same numbers. A PC starts at 1; the
+// cloud server starts at 1000 unless told otherwise. Existing dynasties keep their ids.
+const ID_BASE = (() => {
+  const raw = (process.env.NCAA_DYNASTY_ID_BASE ?? '').trim();
+  if (raw === '') return isCloud() ? 1000 : 1;
+  if (!/^[1-9][0-9]{0,8}$/.test(raw)) { console.error(`[dod] cannot start: NCAA_DYNASTY_ID_BASE must be a whole number from 1 to 999999999, found: ${raw}`); process.exit(78); }
+  return Number(raw);
+})();
+if (!Number.isSafeInteger(store.nextId) || store.nextId < ID_BASE) { log('dod', `new dynasties are numbered from ${ID_BASE} (NCAA_DYNASTY_ID_BASE)`); store.nextId = ID_BASE; }
+export const nextDynastyId = () => store.nextId;
 // ---- storage limits (cloud mode; blaze.mjs passes cloud-config limits()). null = no caps, as on a local PC. ----
 let limits = null;
 export const configureDodLimits = (l) => { limits = l; };
