@@ -48,7 +48,8 @@ esac
 ufw default deny incoming
 ufw default allow outgoing
 # the port sshd really listens on (22 unless you changed it), so turning the firewall on cannot lock you out
-SSH_PORT=$(sshd -T 2>/dev/null | awk '/^port / {print $2; exit}')
+# awk reads to the end: leaving early would kill sshd -T with SIGPIPE, which pipefail turns into a failed script
+SSH_PORT=$(sshd -T 2>/dev/null | awk '/^port / && !p {p=$2} END {print p}' || true)
 case "${SSH_PORT:-}" in ''|*[!0-9]*) SSH_PORT=22 ;; esac
 ufw limit "$SSH_PORT/tcp" comment 'SSH'
 ufw allow "$REDIRECTOR/tcp" comment 'FCS league redirector'

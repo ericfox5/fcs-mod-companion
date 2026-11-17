@@ -86,18 +86,26 @@ apt-get update -q
 apt-get install -y -q ca-certificates curl gnupg tar openssl ufw git
 
 node_major() { command -v node >/dev/null 2>&1 && node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0; }
+install_nodesource() {
+  install -d -m 0755 /etc/apt/keyrings
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
+  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODESOURCE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+  apt-get update -q
+  apt-get install -y -q nodejs
+}
 if [ "$(node_major)" -lt "$MIN_NODE_MAJOR" ]; then
   candidate=$(apt-cache policy nodejs | awk '/Candidate:/ {print $2}' | cut -d. -f1 | tr -cd '0-9')
   if [ "${candidate:-0}" -ge "$MIN_NODE_MAJOR" ]; then
     say "Installing Node.js from Ubuntu"
-    apt-get install -y -q nodejs npm
+    # Ubuntu's npm is several hundred small packages. A cloud mirror that is mid-update answers 404 for some of them
+    # (seen on a fresh 26.04 VM), so fall back to NodeSource, whose one package carries npm.
+    if ! apt-get install -y -q --no-install-recommends nodejs npm; then
+      say "Ubuntu's packages could not all be fetched: installing Node.js $NODESOURCE_MAJOR from NodeSource instead"
+      install_nodesource
+    fi
   else
     say "Installing Node.js $NODESOURCE_MAJOR from NodeSource (Ubuntu's own is older than $MIN_NODE_MAJOR)"
-    install -d -m 0755 /etc/apt/keyrings
-    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODESOURCE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
-    apt-get update -q
-    apt-get install -y -q nodejs
+    install_nodesource
   fi
 fi
 [ "$(node_major)" -ge "$MIN_NODE_MAJOR" ] || die "Node.js $MIN_NODE_MAJOR or newer is needed, found $(node -v 2>/dev/null || echo none)"
