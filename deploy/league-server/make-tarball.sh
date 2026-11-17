@@ -15,6 +15,8 @@ cd "$ROOT"
 OUT_DIR=$(dirname "$ROOT")
 STATE=0
 for a in "$@"; do case "$a" in --state) STATE=1 ;; --out) : ;; *) [ -d "$a" ] && OUT_DIR=$a ;; esac; done
+# Git Bash hands out paths like C:/Users/...; tar reads "C:" as a remote host, so use the /c/Users/... form.
+if command -v cygpath >/dev/null 2>&1; then OUT_DIR=$(cygpath -u "$OUT_DIR"); fi
 
 if [ -n "$(git status --porcelain -- spike/blaze/server bridge packages deploy package.json package-lock.json)" ]; then
   echo "WARNING: there are uncommitted changes in the server code. The archive holds the last COMMIT only." >&2
