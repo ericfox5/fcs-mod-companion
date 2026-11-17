@@ -6,6 +6,8 @@
     "cert": "node gen-cert.mjs",
     "peek": "node redirector.mjs --peek",
     "redirector": "node redirector.mjs",
-    "blaze": "node blaze.mjs"
+    "blaze": "node blaze.mjs",
+    "qos": "node qos.mjs",
+    "test": "node --test"
   }
 }

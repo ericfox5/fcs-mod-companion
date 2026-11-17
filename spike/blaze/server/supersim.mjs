@@ -11,6 +11,7 @@ import { log } from './log.mjs';
 import { fileURLToPath } from 'node:url';
 import { buildGameTables, saveGameData } from './gamedata.mjs';
 import { readDynastyFile } from './tdb-read.mjs';
+import { siteSettings } from './cloud-config.mjs';
 
 const LOCKER_DIR = path.join(process.env.NCAA_PRIVATE
   ? path.resolve(process.env.NCAA_PRIVATE)
@@ -19,7 +20,10 @@ const LOCKER_DIR = path.join(process.env.NCAA_PRIVATE
 const now = () => Math.floor(Date.now() / 1000);
 
 // Site URL + bridge token from the bridge's own config (same machine); nothing from the browser is trusted here.
+// On a server the same two values come from the environment (NCAA_SITE_URL or NCAA_WORKER_URL, NCAA_BRIDGE_TOKEN: the
+// names the bridge CLI reads), which wins over the file. The token is never logged.
 export function siteConfig() {
+  try { const s = siteSettings(); if (s) return { workerUrl: s.siteUrl, token: s.token }; } catch (e) { log('supersim', `site settings ignored: ${e.message}`); }
   try { const c = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.ncaa-bridge', 'config.json'), 'utf8')); if (c.workerUrl && c.token) return { workerUrl: String(c.workerUrl).replace(/\/$/, ''), token: String(c.token) }; } catch { /* no config */ }
   return null;
 }
@@ -88,10 +92,10 @@ export function noteConsoleOverride(store, d, consoleResult, ours) {
 
 export function startSupersimPoller(deps, { intervalMs = 5000 } = {}) {
   const site = siteConfig();
-  if (!site) { log('supersim', 'no ~/.ncaa-bridge/config.json (workerUrl + token): web-simulated games are not polled'); return () => {}; }
+  if (!site) { log('supersim', 'no bridge token for this service (~/.ncaa-bridge/config.json on a PC, NCAA_BRIDGE_TOKEN on a server): web-simulated games are not polled'); return () => {}; }
   let busy = false;
   const call = async (p, method = 'GET', body) => {
-    const res = await fetch(site.workerUrl + p, { method, headers: { authorization: `Bearer ${site.token}`, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    const res = await fetch(site.workerUrl + p, { method, headers: { authorization: `Bearer ${site.token}`, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000) });
     if (!res.ok) throw new Error(`${method} ${p} -> ${res.status}`);
     return res.json();
   };

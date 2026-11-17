@@ -11,6 +11,9 @@
 // --lan <ip> (start/restart/run): the address consoles are told to use for Blaze, QoS and the Locker/Wire HTTP
 //   (default 127.0.0.1, which only RPCS3 on this PC can reach); a real PS3 on the shared Ethernet port needs the PC's
 //   address on that port, e.g. --lan 192.168.137.1, plus a hosts entry sending gosredirector.ea.com there.
+//   Without --lan the services listen on this PC only (127.0.0.1): with no member list anyone who can reach them
+//   could sign in as anyone, so being reachable from the network is something you ask for. With --lan they listen
+//   on every interface, as before (the services are told through NCAA_LAN=on).
 // start-league.cmd / stop-league.cmd / restart-league.cmd wrap these for double-clicking.
 import fs from 'node:fs';
 import net from 'node:net';
@@ -97,12 +100,13 @@ async function run() {
   if (stopLeftovers([process.pid])) await new Promise((r) => setTimeout(r, 1000));
   const busy = tcpRows().filter((r) => r.state === 'LISTENING' && services.some((s) => (PORTS[s.name] ?? []).includes(r.port)));
   if (busy.length) say(`warning: ports already in use: ${busy.map((r) => `${r.port} (pid ${r.pid})`).join(', ')}`);
+  const childEnv = { ...process.env, FORCE_COLOR: '0', ...(lan ? { NCAA_LAN: 'on' } : {}) };
   let stopping = false; const startedAt = new Date().toISOString();
   const saveState = () => fs.writeFileSync(STATE, JSON.stringify({ pid: process.pid, startedAt, services: Object.fromEntries(services.map((s) => [s.name, s.child?.pid ?? null])) }, null, 1));
 
   const launch = (s) => {
     s.startedAt = Date.now(); s.planned = false;
-    const child = spawn(process.execPath, s.args, { cwd: s.cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, FORCE_COLOR: '0' } });
+    const child = spawn(process.execPath, s.args, { cwd: s.cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv });
     s.child = child; saveState();
     const tag = `\x1b[${s.color}m[${s.name}]\x1b[0m `;
     for (const stream of [child.stdout, child.stderr]) {
@@ -113,6 +117,7 @@ async function run() {
       if (stopping) return;
       if (s.planned) { launch(s); return; }
       s.crashes = Date.now() - s.startedAt < 15000 ? (s.crashes ?? 0) + 1 : 0;
+      if (code === 78 && s.crashes === 1) say(`${s.name} stopped on a settings mistake (the line above says which); it is tried again, but it will not start until that is fixed`);
       if (s.name === 'sync' && s.crashes >= 4) { say('site sync keeps exiting (bridge not configured? run `npx tsx bridge/src/cli.ts init`); not restarting it'); return; }
       const delay = Math.min(30, 2 ** s.crashes);
       say(`${s.name} exited (code ${code}); restarting in ${delay}s`);

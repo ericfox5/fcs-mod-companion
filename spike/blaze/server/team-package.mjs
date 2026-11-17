@@ -9,9 +9,22 @@
 import { inflateSync, deflateSync } from 'node:zlib';
 import { parseTdb, serializeTdb, verifyTdb } from '../../../packages/tdb/dist/index.js';
 
+// An uploaded file is unpacked here, in the main process, so the unpacked size is capped: a few KB of zlib can
+// otherwise expand to gigabytes. A real .team package unpacks to 50,000 bytes; the largest real dynasty file to
+// 8.3 MB. Anything over the ceiling is refused (PackageTooLarge) before more than the ceiling is allocated.
+export const TEAM_PACKAGE_MAX_BYTES = 1024 * 1024;
+export const DYNASTY_FILE_MAX_BYTES = 64 * 1024 * 1024;
+export class PackageTooLarge extends Error {}
+export function inflateCapped(blob, maxBytes, what) {
+  try { return inflateSync(blob, { maxOutputLength: maxBytes }); }
+  catch (e) {
+    if (e?.code === 'ERR_BUFFER_TOO_LARGE') throw new PackageTooLarge(`${what} unpacks to more than ${maxBytes} bytes (${blob.length} bytes packed)`);
+    throw e;
+  }
+}
 const DB_MAGIC = (b, i) => b[i] === 0x44 && b[i + 1] === 0x42 && b[i + 2] === 0 && b[i + 3] === 8;
-function unwrap(blob) {
-  const inflated = inflateSync(blob);
+function unwrap(blob, maxBytes = TEAM_PACKAGE_MAX_BYTES, what = 'the team package') {
+  const inflated = inflateCapped(blob, maxBytes, what);
   let off = -1;
   for (let i = 0; i < Math.min(inflated.length - 4, 256); i++) if (DB_MAGIC(inflated, i)) { off = i; break; }
   if (off < 0) throw new Error('no EA DB header in the blob');
@@ -26,7 +39,7 @@ export function completeTeamPackage(pkgBlob, dynastyBlob, tgid, rosterIds = null
   if (!pkg.hasTable('PLAY')) return null;
   const pp = pkg.table('PLAY'); const before = pp.recordCount;
   const present = new Set(); for (let i = 0; i < before; i++) present.add(Number(pp.get(i, 'PGID')));
-  const dyn = parseTdb(unwrap(dynastyBlob)); const dp = dyn.table('PLAY');
+  const dyn = parseTdb(unwrap(dynastyBlob, DYNASTY_FILE_MAX_BYTES, 'the dynasty file')); const dp = dyn.table('PLAY');
   const want = rosterIds ? new Set(rosterIds.map(Number)) : null;
   const rows = [];
   for (let i = 0; i < dp.recordCount; i++) {

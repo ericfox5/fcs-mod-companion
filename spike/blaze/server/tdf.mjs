@@ -20,28 +20,48 @@ export function decodeTag(b0, b1, b2) {
   return chars.map((c) => (c === 0 ? '' : String.fromCharCode(c + 32))).join('');
 }
 
+// Hostile input: a length or element count is checked against the bytes that are actually left (every element takes
+// at least one byte), so a 20-byte packet cannot ask for a billion list items; varints stop at 64 bits and nesting is
+// capped. A caller can tighten two more caps per message (blaze.mjs does, by command): maxElements = most items in
+// one list or map, maxNodes = most values decoded in the whole message. Exceeding either throws.
+const MAX_DEPTH = 48;
+export const DEFAULT_DECODE_LIMITS = Object.freeze({ maxElements: 1000000, maxNodes: 8000000 });
 export class Reader {
-  constructor(buf) { this.buf = buf; this.pos = 0; }
+  constructor(buf, { maxElements = DEFAULT_DECODE_LIMITS.maxElements, maxNodes = DEFAULT_DECODE_LIMITS.maxNodes } = {}) {
+    this.buf = buf; this.pos = 0; this.depth = 0; this.nodes = 0; this.maxElements = maxElements; this.maxNodes = maxNodes;
+  }
+  count() {
+    const n = Number(this.varint());
+    if (!Number.isSafeInteger(n) || n < 0 || n > this.remaining) throw new Error('tdf: bad element count');
+    if (n > this.maxElements) throw new Error(`tdf: a list of ${n} items is over the limit of ${this.maxElements}`);
+    return n;
+  }
   get remaining() { return this.buf.length - this.pos; }
   u8() { if (this.pos >= this.buf.length) throw new Error('tdf: unexpected end'); return this.buf[this.pos++]; }
+  // 6 bits in the first byte, 7 in each that follows. Up to seven bytes (48 bits) is plain number arithmetic: nearly
+  // every integer on the wire. Only a longer one goes through BigInt, and comes back as a BigInt when it does not fit
+  // a double exactly (as before).
   varint() {
     let b = this.u8();
-    let v = BigInt(b & 0x3f);
     const neg = (b & 0x40) !== 0;
-    let shift = 6n;
-    while (b & 0x80) { b = this.u8(); v |= BigInt(b & 0x7f) << shift; shift += 7n; }
-    const n = neg ? -v : v;
+    let v = b & 0x3f, mul = 64, bytes = 1;
+    while ((b & 0x80) && bytes < 7) { b = this.u8(); v += (b & 0x7f) * mul; mul *= 128; bytes++; }
+    if (!(b & 0x80)) return neg && v !== 0 ? -v : v;
+    let big = BigInt(v), shift = 48n;
+    while (b & 0x80) { if (shift > 62n) throw new Error('tdf: varint too long'); b = this.u8(); big |= BigInt(b & 0x7f) << shift; shift += 7n; }
+    const n = neg ? -big : big;
     return n >= -(2n ** 53n) && n <= 2n ** 53n ? Number(n) : n;
   }
-  bytes(n) { if (this.pos + n > this.buf.length) throw new Error('tdf: unexpected end'); const s = this.buf.subarray(this.pos, this.pos + n); this.pos += n; return s; }
+  bytes(n) { if (!Number.isSafeInteger(n) || n < 0 || this.pos + n > this.buf.length) throw new Error('tdf: unexpected end'); const s = this.buf.subarray(this.pos, this.pos + n); this.pos += n; return s; }
   value(type) {
+    if (++this.nodes > this.maxNodes) throw new Error(`tdf: more than ${this.maxNodes} values in one message`);
     switch (type) {
       case T.INT: case T.TIME: return this.varint();
       case T.STRING: { const n = Number(this.varint()); const s = this.bytes(n); return Buffer.from(s.subarray(0, Math.max(0, n - 1))).toString('utf8'); }
       case T.BLOB: { const n = Number(this.varint()); return '0x' + Buffer.from(this.bytes(n)).toString('hex'); }
       case T.STRUCT: return this.struct();
-      case T.LIST: { const et = this.u8(); const n = Number(this.varint()); const out = []; for (let i = 0; i < n; i++) out.push(this.value(et)); return { $list: TYPE_NAMES[et] ?? et, items: out }; }
-      case T.MAP: { const kt = this.u8(); const vt = this.u8(); const n = Number(this.varint()); const out = []; for (let i = 0; i < n; i++) { const k = this.value(kt); const v = this.value(vt); out.push([k, v]); } return { $map: `${TYPE_NAMES[kt]}->${TYPE_NAMES[vt]}`, entries: out }; }
+      case T.LIST: { const et = this.u8(); const n = this.count(); const out = []; for (let i = 0; i < n; i++) out.push(this.value(et)); return { $list: TYPE_NAMES[et] ?? et, items: out }; }
+      case T.MAP: { const kt = this.u8(); const vt = this.u8(); const n = this.count(); const out = []; for (let i = 0; i < n; i++) { const k = this.value(kt); const v = this.value(vt); out.push([k, v]); } return { $map: `${TYPE_NAMES[kt]}->${TYPE_NAMES[vt]}`, entries: out }; }
       case T.UNION: { const d = this.u8(); if (d === 0x7f) return { $union: null }; const f = this.field(); return { $union: d, ...f }; }
       case T.VARIABLE: { const present = this.u8(); if (!present) return { $variable: null }; const objType = { component: this.varint(), type: this.varint() }; const v = this.struct(); return { $variable: objType, ...v }; }
       case T.OBJTYPE: return { component: this.varint(), type: this.varint() };
@@ -57,6 +77,10 @@ export class Reader {
     return { [tag]: this.value(type) };
   }
   struct() {
+    if (++this.depth > MAX_DEPTH) throw new Error('tdf: nested too deep');
+    try { return this.structBody(); } finally { this.depth--; }
+  }
+  structBody() {
     const out = {};
     if (this.buf[this.pos] === 0x02) { this.pos++; out.$obj = true; }
     while (this.pos < this.buf.length) {
@@ -68,8 +92,9 @@ export class Reader {
   }
 }
 
-export function decode(buf) {
-  const r = new Reader(buf);
+// limits: { maxElements, maxNodes } (see Reader); omitted = the generous defaults.
+export function decode(buf, limits) {
+  const r = new Reader(buf, limits);
   const out = {};
   while (r.remaining > 0) {
     const b = r.buf[r.pos];
@@ -84,6 +109,13 @@ export class Writer {
   push(...bytes) { this.parts.push(Buffer.from(bytes)); }
   raw(buf) { this.parts.push(Buffer.from(buf)); }
   varint(n) {
+    if (typeof n === 'number' && Number.isInteger(n) && n > -0x80000000 && n < 0x80000000) { // the usual case, without BigInt
+      let u = n < 0 ? -n : n; const sign = n < 0 ? 0x40 : 0;
+      if (u < 0x40) { this.parts.push(Buffer.from([u | sign])); return; }
+      const out = [(u & 0x3f) | 0x80 | sign]; u >>>= 6;
+      while (u >= 0x80) { out.push((u & 0x7f) | 0x80); u >>>= 7; }
+      out.push(u); this.parts.push(Buffer.from(out)); return;
+    }
     let v = BigInt(n);
     let first = 0;
     if (v < 0n) { v = -v; first = 0x40; }
