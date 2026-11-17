@@ -2789,3 +2789,81 @@ write journal (journal-2026-11-08.jsonl, every upload and rename), the before/af
   off the named books, on the stride-70 dynasty fixture), worker/test/playbook-edits.test.ts (web-edits GET carries
   `playbooks` + `playbookTeams`). 143 tests pass. The E2 test slot `local/18/off` was dropped from the map after the restore.
 - Still open: defensive private books (BOFF 0 repurpose experiment), the first real release with a private book, PS3 push.
+
+## 2026-11-08 — Create-a-Player any jersey number: entry "FCS mod: Create-a-Player any jersey number" (built, not yet run in game)
+
+- Eric: the Create-a-Player Jersey Number picker offers only numbers nobody on the chosen School wears. Wanted: all of
+  0..99, teammates' numbers included, saved exactly as picked; the player editor and automatic numbering keep avoiding
+  duplicates.
+- Correction to the jersey #0 entry: kind 5 is not Create-a-Player. "Create A Player Manager" (ctor 0x173e70, vtable
+  0x18946f0, made by the feature adapter 0x250cbc from the script's featureKey, kept at this+4) serves several kinds
+  (ctor switch 0x173f90, telemetry names in 0x17e1b8):
+  - 0: new player, team = 0x4d6fb8(), "PlyrCreated.%d", has the School field (7): this is Create-a-Player;
+  - 2: new player, team 0x263, "ProsCreated.%d", has School; 5: new player, team 0x262, "LgndCreated.%d" /
+    "Create New", no School (38-field table 0x1c72b8c);
+  - 1: loads an existing player (0x172cc4 with "set PGID", rec+0x70 = PGID): the player editor (the dynasty editor
+    uses the 35-field table 0x1c72c24 and edits an existing PGID, so kind 1); 6: loads an existing player, kind-5 table;
+  - 7 / 8: field tables without Jersey Number; 3 / 4 (coach) and 9 (Heisman) are other classes or override count/fill
+    (the Heisman count 0x18475c returns 0 for field 6).
+  Kinds 0/2/5 never load a player (the template import 0x17d498 passes "keep PGID", rec+0x70 stays 0xffff); 1/6 always do.
+- Jersey Number is field 6 (label table 0x16fcc58, "Select your player's jersey number."; 7 = School). 0x17d5b8 builds
+  each field's list: count (vtable+0x64, 0x17a498 -> 0x17a3b4), malloc count x 4, fill (vtable+0x54, 0x178284 ->
+  0x177c84). Current value: vtable+0x48 0x1791f0, jersey case 0x179518 (kind 5: index = number - 1; others sprintf +
+  FindStringIndex 0x179188). A pick: 0x17bb4c, strtol(list[index]) -> rec+0x78. Picking a School (0x17b920) frees and
+  rebuilds the lists and re-rolls the number to a free one (0x17b60c -> 0x483c5c(0, 10, mask)). Lists are freed
+  (0x17183c, destructor 0x171898) with the count recomputed at that moment, so count and fill must agree for the
+  manager's whole life: that is why the patch keys on the kind (fixed at construction) and not on rec+0x70 = 0xffff,
+  which Save changes before the destructor runs (that version would have freed fewer strings than it allocated).
+- Before: kind 5 = 99 entries "1".."99" (index n - 1, then rec+0x78 forced to 1); every other kind = mask 0x483b1c of
+  TGID rec+0x58 -> free numbers plus the player's own. Create-a-Player (kind 0) therefore listed the School's free numbers.
+- Commit: Save 0x17ee90 (from 0x17ef38: kinds 0/1, or any kind when 0x9b268() != 0; otherwise kind 2 -> 0x17e2b8): new
+  PGID (0x17ed84 room check 0x17eda0 / 0x4458cc), defaults row (0x17e1b8 -> 0x17ddcc), then one UPDATE of every column
+  0x17e778 ("update 'YALP' set ... 'NEJP' = ..." at 0x1700528; PJEN = rec+0x78 read at 0x17e8e8, where PGID =
+  rec+0x70), then the depth chart 0x49c5d0. No duplicate check: neither 0x483b1c nor 0x483c5c is reachable from
+  0x17ef38 by direct calls (14 levels). Nothing to patch there.
+- Patch (16 words, generator tools/cap-any-number-patch.py). "Create kind" = bit clear in 0x42 (kinds 1 and 6 set):
+  `li rX,0x42; srw rX,rX,kind; andi. rX,rX,1`, eq = create.
+  - count 0x17a3b4: 0x17a3c4 `mr r31,r3` -> `mr r29,r3` (0x607d0000); 0x17a3cc `li r30,0` -> `li r30,0x42`
+    (0x3bc00042); 0x17a3d0 `cmpwi r3,5` -> `srw r30,r30,r3` (0x7fde1c30); 0x17a3d4 `bne 0x17a3e0` -> `andi. r30,r30,1`
+    (0x73de0001); 0x17a3d8 `li r30,99` -> `li r30,100` (0x3bc00064); 0x17a3dc `b 0x17a480` -> `beq 0x17a480`
+    (0x418200a4); 0x17a3e4 `mr r29,r31` -> `li r30,0` (0x3bc00000). Create kinds return 100; kinds 1/6 run the mask
+    path exactly as before (0..99 with jersey #0).
+  - fill 0x177c84: 0x177ca0 `cmpwi r3,5` -> `li r26,0x42` (0x3b400042); 0x177cb8 `bne 0x177d5c` -> `srw r26,r26,r3`
+    (0x7f5a1c30); 0x177cbc `li r26,0x2810` -> `andi. r26,r26,1` (0x735a0001); 0x177cc0 `lis r3,0x16e` -> `bne
+    0x177d5c` (0x4082009c); 0x177cc4 `mr r25,r30` -> `li r25,0` (0x3b200000); 0x177cc8 `lbzx r26,r3,r26` -> `li r26,0`
+    (0x3b400000; the byte it read, 0x16e2810, is 0 and snprintf overwrites the buffer anyway); 0x177d2c `addi
+    r4,r25,-1` -> `mr r4,r25` (0x63240000); 0x177d54 `stb r30,0x78(r3)` -> nop (0x60000000). Create kinds get "0".."99"
+    at index n (100 entries, equal to the count) and keep the default or picked number.
+  - value 0x1791f0: 0x179520 `bne 0x179534` -> `b 0x179534` (0x48000014): no kind indexes number - 1 any more; every
+    kind finds its number by string (FindStringIndex returns 0 when absent, never past the list).
+- Why only Create-a-Player: the three functions are reached only through the CAP manager vtable (one descriptor
+  reference each; Heisman overrides them); kinds 1 and 6 execute the same instructions as before; the mask 0x483b1c,
+  the picker 0x483c5c, team moves through TEAM.JJNM (0x4ea978), recruits/transfers (0x484508), 0x4eac04, 0x4d6374,
+  0x501bb8 and the Campus Legend picker 0x240f68 (GetJerseyNumbersAvailableForTeam) are not touched. Side effects: kind
+  5 (legend create) also lists 0..99 and keeps its default number instead of #1; picking a School still re-rolls the
+  number to a free one, so pick the School first.
+- No address shared with another entry (jersey #0 keeps 0x17a3fc / 0x17a404 / 0x177d80 inside the mask paths). All ten
+  entries applied in memory: the three functions disassemble as intended. ps3-eboot tests 11/11 (not added to
+  ps3-eboot.mjs). Entry appended to private/rpcs3-patches.yml (installer/build.mjs ships every entry there, so the
+  next FCS-online.exe / release carries it).
+- RPCS3 install NOT done: rpcs3.exe was running from the 0.0.29 install (rpcs3RunningOver true), so nothing was written
+  there. To install: with RPCS3 closed, back up patches/imported_patch.yml and config/patch_config.yml to
+  %LOCALAPPDATA%\ncaa-bridge\backups\<date>-cap-number, append the entry block to imported_patch.yml and list it in
+  patch_config.yml with 01.00 / 01.02 Enabled: true like the others.
+- Test: a School with room (the capacity entry calls a team full at 89), Create-a-Player, pick the School, then open
+  Jersey Number: 0..99 should all be there, including teammates' numbers. Pick one a teammate wears (and 0 once),
+  save, check the roster shows both players with that number. Then the player editor on an existing player: the list
+  must still skip teammates' numbers. Recruits / transfers numbering unchanged.
+
+## 2026-11-16 — Edit Player any jersey number: the entry becomes "FCS mod: Create-a-Player and Edit Player any jersey number"
+
+- Eric asked for the same in the player editor. The 2026-11-08 entry kept kinds 1 and 6 (the ones that load an existing
+  player) on the taken-number mask path through the test `(0x42 >> kind) & 1`. The mask is now 0, so every kind takes
+  the 100-entry path: 0x17a3cc `li r30,0x42` -> `li r30,0` (the original word) and 0x177ca0 `li r26,0x42` -> `li r26,0`.
+  The other 14 words are unchanged. Count and fill still agree for the manager's whole life (both key on the kind), the
+  current number is found by string (0x179520), a pick stores strtol(list[index]) in rec+0x78, and Save writes it as
+  PJEN unchecked.
+- Generator: `tools/cap-any-number-patch.py --edit`. The entry was shelved (private, Eric's PC only) from 2026-11-08;
+  the combined entry replaces it and ships in FCS-online.exe from v1.0.2.
+- In game (Eric, 2026-11-17): Edit Player lists every number. Not reported: saving a duplicate, Create-a-Player after
+  the swap.

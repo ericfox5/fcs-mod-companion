@@ -91,6 +91,7 @@ FCS-online.exe adds these to RPCS3 and turns them on. They are needed by every p
 | FCS mod: preseason All-Conference crash fix | Stops the crash at "Generating All-Americans" when a season rolls over |
 | Online Dynasty: commissioner of up to 5 dynasties | Lets one person run up to five online dynasties |
 | FCS mod: jersey #0 | Lets players wear #0 |
+| FCS mod: Create-a-Player and Edit Player any jersey number | Lets you pick any number from 0 to 99 for a player, even one a teammate already wears |
 | FCS mod: 100-player rosters (and its capacity, player table and offseason parts) | 90-man rosters everywhere: the Rosters screen, new dynasties, games and the offseason |
 | FCS mod: long snapper recruiting fix | Stops the freeze at "generating recruits" |
 | FCS mod: generic opponents host | In Custom Schedules, games against the generic teams can be home or away |

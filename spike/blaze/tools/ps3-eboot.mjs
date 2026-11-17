@@ -63,6 +63,26 @@ export const GENERIC_HOST_WORDS = [
   [0x4a102c, 0x63230000, 0x4800000c, 'Add game: skip the swap, a generic opponent stays home (b 0x4a1038)'],
   [0x4a1310, 0x40820010, 0x48000010, 'Replace opponent: skip the CGID 17 swap (b 0x4a1320)'],
 ];
+// "FCS mod: Create-a-Player and Edit Player any jersey number" (NOTES 2026-11-08 and 2026-11-16, cap-any-number-patch.py
+// --edit): the Create A Player Manager lists 0..99 unfiltered for every kind, the player editor included.
+export const ANY_NUMBER_WORDS = [
+  [0x17a3c4, 0x607f0000, 0x607d0000, 'count: this straight to r29'],
+  [0x17a3cc, 0x3bc00000, 0x3bc00000, 'count: kind mask 0 (every kind lists 0..99)'],
+  [0x17a3d0, 0x2c030005, 0x7fde1c30, 'count: srw r30,r30,r3'],
+  [0x17a3d4, 0x4082000c, 0x73de0001, 'count: andi. r30,r30,1'],
+  [0x17a3d8, 0x3bc00063, 0x3bc00064, 'count: 100 entries'],
+  [0x17a3dc, 0x480000a4, 0x418200a4, 'count: beq -> return 100'],
+  [0x17a3e4, 0x63fd0000, 0x3bc00000, 'count: mask path starts from 0'],
+  [0x177ca0, 0x2c030005, 0x3b400000, 'fill: kind mask 0'],
+  [0x177cb8, 0x408200a4, 0x7f5a1c30, 'fill: srw r26,r26,r3'],
+  [0x177cbc, 0x3b402810, 0x735a0001, 'fill: andi. r26,r26,1'],
+  [0x177cc0, 0x3c60016e, 0x4082009c, 'fill: bne -> mask path'],
+  [0x177cc4, 0x63d90000, 0x3b200000, 'fill: first number 0'],
+  [0x177cc8, 0x7f43d0ae, 0x3b400000, 'fill: li r26,0'],
+  [0x177d2c, 0x3099ffff, 0x63240000, 'fill: number n at index n'],
+  [0x177d54, 0x9bc30078, 0x60000000, 'fill: keep the chosen number'],
+  [0x179520, 0x40820014, 0x48000014, 'value: look the number up by string'],
+];
 export const wordsFrom = u => JSON.parse(fs.readFileSync(u, 'utf8')).map(w => [Number(w.va), Number(w.old), Number(w.new)]);
 export function rosterStrideWords() { return wordsFrom(ROSTER_STRIDE_WORDS); }
 export function rosterCapacityWords() { return wordsFrom(ROSTER_CAPACITY_WORDS); }
@@ -71,7 +91,7 @@ export function lsGroupWords() { return wordsFrom(LS_GROUP_WORDS); }
 export function rosterOffseasonWords() { return wordsFrom(ROSTER_OFFSEASON_WORDS); }
 // extraWords: [{ name, words: [[va, old, new], ...] }] applied last, each word checked against the output as patched so far
 // (for entries kept outside the repo, e.g. a private words file passed with --extra-words FILE.json)
-export function patchBaseline(input, { commissioner = false, jerseyZero = false, rosterStride = false, rosterCapacity = false, rosterTable = false, lsGroup = false, rosterOffseason = false, genericHost = false, extraWords = [] } = {}) {
+export function patchBaseline(input, { commissioner = false, jerseyZero = false, rosterStride = false, rosterCapacity = false, rosterTable = false, lsGroup = false, rosterOffseason = false, genericHost = false, anyNumber = false, extraWords = [] } = {}) {
   if (sha256(input) !== INPUT_SHA256) throw new Error('Unsupported or already modified ELF: SHA-256 mismatch');
   const segments = elfSegments(input), output = Buffer.from(input), writes = [];
   const word = va => input.readUInt32BE(fileOffset(segments, va));
@@ -121,6 +141,7 @@ export function patchBaseline(input, { commissioner = false, jerseyZero = false,
   if (lsGroup) putCurrent(lsGroupWords(), 'Long snapper recruiting fix');
   if (rosterOffseason) { if (!rosterTable) throw new Error('--roster-offseason requires --roster-table'); putCurrent(rosterOffseasonWords(), 'Roster offseason 8,820 limits'); }
   if (genericHost) putCurrent(GENERIC_HOST_WORDS.map(([va, old, value]) => [va, old, value]), 'Generic opponents host');
+  if (anyNumber) putCurrent(ANY_NUMBER_WORDS.map(([va, old, value]) => [va, old, value]), 'Any jersey number in Create-a-Player and Edit Player');
   for (const { name, words } of extraWords) {
     if (!name || !Array.isArray(words) || !words.length) throw new Error('extraWords entries need a name and words');
     const seen = new Set();
@@ -133,7 +154,7 @@ export function patchBaseline(input, { commissioner = false, jerseyZero = false,
     inputSha256: INPUT_SHA256, outputSha256: sha256(output), segments, writes } };
 }
 export const FLAGS = { '--commissioner': 'commissioner', '--jersey-zero': 'jerseyZero', '--roster-stride': 'rosterStride', '--roster-capacity': 'rosterCapacity',
-  '--roster-table': 'rosterTable', '--roster-offseason': 'rosterOffseason', '--ls-group': 'lsGroup', '--generic-host': 'genericHost' };
+  '--roster-table': 'rosterTable', '--roster-offseason': 'rosterOffseason', '--ls-group': 'lsGroup', '--generic-host': 'genericHost', '--any-number': 'anyNumber' };
 // a private words file: { "name": "...", "words": [{ "va": "0x...", "old": "0x...", "new": "0x..." }, ...] } or a bare array (named after the file)
 export function extraWordsFrom(file) {
   const j = JSON.parse(fs.readFileSync(file, 'utf8')), list = Array.isArray(j) ? j : j.words;

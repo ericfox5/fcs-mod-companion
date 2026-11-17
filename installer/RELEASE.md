@@ -62,6 +62,7 @@ matter). If they differ, don't run the file: download it again from this page.
 - **Game patches** (RPCS3 → Manage → Game Patches):
   - 90-man rosters
   - jersey #0
+  - any jersey number in Create-a-Player and Edit Player, even one a teammate already wears
   - a fix for the crash at "Generating All-Americans" when a season rolls over
   - a fix for the freeze at "generating recruits"
   - up to 5 online dynasties per commissioner

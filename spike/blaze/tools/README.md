@@ -12,6 +12,11 @@ All scripts take the decrypted `private/EBOOT.elf` as first argument and never m
 - `cmdtable.py` – lists the RpcJob response factories; `cmdswitch.py` – decodes cmpwi/beq switches (command names).
 - `ppcdis.py EBOOT.elf start end [...]` – disassembly with string annotations; `coderef.py` – who references a string/address;
   `vtdump.py` – dump a vtable around a function pointer; `dumptags.py` / `tagfind.py` / `elfstr.py` – raw helpers.
+- `cap-any-number-patch.py EBOOT.elf [--edit] [--entry]` – the Create A Player Manager's Jersey Number list (count
+  0x17a3b4, fill 0x177c84, current value 0x179518) offers 0..99 unfiltered. `--edit` is the shipped entry, "FCS mod:
+  Create-a-Player and Edit Player any jersey number" (every kind, the player editor included); without it only the
+  kinds that create a player change. Checks the 16 original words and the words it relies on, refuses addresses
+  another yml entry writes, prints the be32 lines (`--entry`: the whole yml entry).
 - `jersey-zero-patch.py EBOOT.elf` – checks the five original words of the "FCS mod: jersey #0" patch and prints the
   be32 lines with a before/after disassembly (word by word, so AltiVec opcodes do not stop capstone).
 - `ps3-eboot.mjs ORIGINAL.elf NEW.elf [--commissioner] [--jersey-zero]` (Node) – bakes the RPCS3 patch words into the

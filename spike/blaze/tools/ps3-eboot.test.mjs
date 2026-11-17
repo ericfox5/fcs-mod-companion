@@ -206,7 +206,7 @@ const adapterPath = new URL('../private/BLUS31159-1.02-no-psn-UNSIGNED-probe-a.e
 test('onto the adapter ELF: every entry, adapter bytes untouched, the rest equal to the stock-based build', { skip: !(strideAvailable && fs.existsSync(adapterPath)) }, () => {
   const stock = fs.readFileSync(originalPath), adapter = fs.readFileSync(adapterPath);
   const adapterManifest = JSON.parse(fs.readFileSync(new URL(adapterPath.href + '.manifest.json'), 'utf8'));
-  const opts = { commissioner: true, jerseyZero: true, rosterStride: true, rosterCapacity: true, rosterTable: true, lsGroup: true, rosterOffseason: true, genericHost: true };
+  const opts = { commissioner: true, jerseyZero: true, rosterStride: true, rosterCapacity: true, rosterTable: true, lsGroup: true, rosterOffseason: true, genericHost: true, anyNumber: true };
   const { output, manifest } = patchOntoAdapter(stock, adapter, adapterManifest, opts);
   const ref = patchBaseline(stock, opts).output, base = patchBaseline(stock, { commissioner: true }).output;
   let adapterBytes = 0;
