@@ -1,7 +1,7 @@
-// Plaintext Blaze 3 stub for the NCAA 14 spike: logs every packet (decoded TDF) and answers the Util / Authentication /
+// Blaze 3 stub (plaintext; SSLv3 with --blaze-tls on) for the NCAA 14 spike: logs every packet (decoded TDF) and answers the Util / Authentication /
 // UserSessions calls the client makes while logging in, so we can watch what it asks for next (the dynasty component).
 //   node blaze.mjs [--port 33152] [--service ncaa-2014-ps3] [--unknown empty|error] [--http-port 17503] [--settings minimal|full]
-//                  [--easw on|off] [--easw-port 17504] [--ticket-registry FILE] [--sync on|off]
+//                  [--easw on|off] [--easw-port 17504] [--ticket-registry FILE] [--sync on|off] [--blaze-tls on|off]
 // Every setting can also come from the environment (cloud-config.mjs; a flag wins). NCAA_CLOUD=1 is the public-server
 // profile: it refuses to start without a player registry, advertises NCAA_PUBLIC_HOST, syncs the registry from the
 // site (registry-sync.mjs) and turns on connection limits and quiet logging. See deploy/league-server/.
@@ -16,7 +16,9 @@ import { decode, Writer, T } from './tdf.mjs';
 import { parseXi5 } from './xi5.mjs';
 import { MAGIC, authorizeDod, mayPreviewDynasty } from './league-auth.mjs';
 import { log, captureFile, logBodies } from './log.mjs';
-import { cloudSettings, createAdvertiser, fixedAdvertiser, fatalConfig, flag, switchOpt, bindSettings, port, privateDir } from './cloud-config.mjs';
+import { cloudSettings, createAdvertiser, fixedAdvertiser, fatalConfig, flag, switchOpt, bindSettings, port, privateDir, certDir, blazeTls } from './cloud-config.mjs';
+import { Sslv3ServerSocket } from './sslv3-server.mjs';
+import { pemToDer } from './sslv3-crypto.mjs';
 import { RegistryStore, startRegistrySync } from './registry-sync.mjs';
 import { createConnectionGuard, createRateLimiter, createLogLimiter, hardenSocket, installProcessGuards, exitOnListenError, clientIp } from './net-guard.mjs';
 import { DOD, handleDod, configureDodLimits, releaseSessionLocks, dynastiesCreatedBy, store as dodStore, save as dodSave, loadTable as dodLoadTable } from './dod.mjs';
@@ -28,7 +30,7 @@ import { startEaswHttp, setLoginIdentity, configureEaswAuth } from './easw.mjs';
 import { startWireSync } from './wire.mjs';
 
 const arg = (name, dflt) => { const i = process.argv.indexOf(name); return i === -1 ? dflt : process.argv[i + 1]; };
-let cfg, PORT, QOS_PORT, HTTP_PORT, EASW_PORT, advQos, advHttp, BIND, LAN, EASW_ON, SUPERSIM_ON;
+let cfg, PORT, QOS_PORT, HTTP_PORT, EASW_PORT, advQos, advHttp, BIND, LAN, EASW_ON, SUPERSIM_ON, BLAZE_TLS;
 try {
   cfg = cloudSettings();
   // Where to listen. Without the member list the default is this PC only (127.0.0.1); another address needs --lan
@@ -40,6 +42,9 @@ try {
   // on/off only: any other value is a configuration error (firewall.sh opens the port for exactly "on").
   EASW_ON = switchOpt('--easw', 'NCAA_EASW', true);
   SUPERSIM_ON = switchOpt('--sync', 'NCAA_SUPERSIM', true);
+  // on: this port speaks the game's SSLv3 (sslv3-server.mjs, the redirector's certificate) and nothing else. The
+  // redirector reads the same setting and tells the game to encrypt (SECU 1). Off by default: not yet tried with the game.
+  BLAZE_TLS = blazeTls();
   PORT = port('--port', 'NCAA_BLAZE_PORT', 33152);
   QOS_PORT = port('--qos-port', 'NCAA_QOS_PORT', 17502);
   HTTP_PORT = port('--http-port', 'NCAA_LOCKER_PORT', 17503); // Locker upload/download endpoint (served by this process)
@@ -63,6 +68,13 @@ const REGISTRY = !!REGISTRY_PATH;
 if (CLOUD && !REGISTRY) fatalConfig('blaze', new Error('cloud mode without a registry'));
 const registry = REGISTRY ? new RegistryStore({ file: REGISTRY_PATH, watch: !cfg.registrySync, log: (m) => log('registry', m) }) : null;
 installProcessGuards((m) => log('blaze', m));
+// Encrypted game port: the same certificate and key the redirector serves, read once at start.
+let tlsOptions = null;
+if (BLAZE_TLS) {
+  const certs = certDir();
+  try { tlsOptions = { certDer: pemToDer(fs.readFileSync(path.join(certs, 'gosredirector_mod.crt'))), privateKeyPem: fs.readFileSync(path.join(certs, 'gosredirector.key.pem')) }; }
+  catch (e) { console.error(`[blaze] cannot start: NCAA_BLAZE_TLS is on but the certificate files are not readable in ${certs} (${e.code ?? e.message}): this service must be able to read gosredirector_mod.crt and gosredirector.key.pem there (NCAA_CERT_DIR), or set NCAA_BLAZE_TLS=off`); process.exit(78); }
+}
 // Storage limits (per table, per dynasty, per member, and one budget for all league data): on with the other limits
 // (cloud mode or NCAA_HARDEN=1), off on a local PC, where nothing is measured and nothing is refused.
 if (HARD) {
@@ -273,7 +285,7 @@ function consoleLogin(sock, p, body) {
   const session = { ...t, active: true, userId: t.userId ?? 1000, personaId: t.userId ?? 1000, onlineId: t.onlineId ?? 'Player', key: crypto.randomBytes(16).toString('hex'), loginAt: Math.floor(Date.now() / 1000) };
   sessions.set(sock, session);
   if (!REGISTRY) setLoginIdentity(session); // legacy Sports World identity; registry mode authenticates each sign-in itself
-  log('blaze', `ps3Login for ${session.onlineId} (user ${session.userId}, service ${t.serviceId ?? '?'})`);
+  log('blaze', `ps3Login for ${session.onlineId} (user ${session.userId}, service ${t.serviceId ?? '?'})${sock.encrypted ? ` over an encrypted connection (SSLv3 ${sock.encrypted})` : ''}`);
   reply(sock, p, (w) => {
     w.int('AGUP', 0); w.str('LDHT', ''); w.int('NTOS', 0); w.str('PRIV', '');
     w.struct('SESS', (s) => {
@@ -441,15 +453,35 @@ if (SUPERSIM_ON) startSupersimPoller({ store: dodStore, save: dodSave, loadTable
 if (EASW_ON) { startEaswHttp({ port: EASW_PORT, ...httpOptions }); startWireSync({ store: dodStore, loadTable: dodLoadTable }); }
 else log('blaze', 'Sports World disabled (--easw off): no in-game Dynasty Wire');
 const guard = HARD ? createConnectionGuard({ maxTotal: L.maxConns, maxPerIp: L.maxConnsPerIp, perMinutePerIp: L.connsPerMinutePerIp }) : null;
-const server = net.createServer((sock) => {
-  const ip = clientIp(sock.remoteAddress);
-  sock.on('error', (e) => noisy.write(ip, `socket error ${e.message}`));
-  if (guard && !guard.admit(sock)) { noisy.write(ip, `refused ${ip} (connection limit)`); sock.destroy(); return; }
-  noisy.write(ip, `connection from ${sock.remoteAddress}:${sock.remotePort}`);
+// One connection. `raw` is the TCP socket: the connection cap, the timeouts and 'close' are always on it. `sock` is
+// what the packet handling above writes to and keys the session on: the TCP socket itself (plaintext), or with
+// NCAA_BLAZE_TLS on a small stand-in that sends through the SSLv3 wrapper. Either way the same limits apply.
+const server = net.createServer((raw) => {
+  const ip = clientIp(raw.remoteAddress);
+  raw.on('error', (e) => noisy.write(ip, `socket error ${e.message}`));
+  if (guard && !guard.admit(raw)) { noisy.write(ip, `refused ${ip} (connection limit)`); raw.destroy(); return; }
+  noisy.write(ip, `connection from ${raw.remoteAddress}:${raw.remotePort}`);
+  let ssl = null, sock = raw, handshake = null;
+  if (tlsOptions) {
+    // strict: bytes that are not SSLv3 (a plaintext Blaze packet, a port scan), a failed check value or a broken
+    // handshake close this connection, and only this one (sslv3-server.mjs destroys the socket; nothing is thrown)
+    ssl = new Sslv3ServerSocket(raw, { ...tlsOptions, strict: true, log: (t, m) => { if (t !== 'alert' && (!CLOUD || t === 'error' || t === 'warn')) noisy.write(ip, `ssl ${t} (${ip}): ${m}`); } });
+    ssl.on('error', () => {}); // the socket error is already logged above
+    // what the game says when it will not go on: 42 / 48 mean it did not accept the certificate for this address
+    ssl.on('alert', (level, desc) => noisy.write(ip, `ssl alert from ${ip}: level ${level} description ${desc}${desc === 42 ? ' (bad_certificate)' : desc === 48 ? ' (unknown_ca)' : desc === 40 ? ' (handshake_failure)' : desc === 0 ? ' (close_notify)' : ''}`));
+    sock = {
+      write: (pkt) => ssl.write(pkt), end: () => ssl.end(), destroy: () => raw.destroy(),
+      get destroyed() { return raw.destroyed; }, get writableLength() { return raw.writableLength; },
+      remoteAddress: raw.remoteAddress, remotePort: raw.remotePort, encrypted: '',
+    };
+    // a connection that does not finish the handshake is not a console (with or without the other limits)
+    handshake = setTimeout(() => { if (!ssl.secure) { noisy.write(ip, `closing ${ip}: no SSL handshake within ${L.tlsHandshakeSeconds}s`); raw.destroy(); } }, L.tlsHandshakeSeconds * 1000);
+    ssl.on('secure', (suite) => { clearTimeout(handshake); sock.encrypted = suite; noisy.write(ip, `encrypted connection from ${ip} (SSLv3 ${suite})`); });
+  }
   liveSockets.add(sock);
   let preauth = null, windowStart = Date.now(), inWindow = 0, early = 0;
   if (HARD) {
-    hardenSocket(sock, { idleMs: L.idleSeconds * 1000 }); // the console pings every 30 s; silence this long is a dead peer
+    hardenSocket(raw, { idleMs: L.idleSeconds * 1000 }); // the console pings every 30 s; silence this long is a dead peer
     // a connection that never logs in is not a console
     preauth = setTimeout(() => { if (!sessions.get(sock)) { noisy.write(ip, `closing ${ip}: no login within ${L.preauthSeconds}s`); sock.destroy(); } }, L.preauthSeconds * 1000);
   }
@@ -457,7 +489,7 @@ const server = net.createServer((sock) => {
   const drop = (why) => { const who = sessions.get(sock); if (who) log('blaze', `dropping ${ip} (user ${who.userId}): ${why}`); else noisy.write(ip, `dropping ${ip}: ${why}`); sock.destroy(); };
   // the size limit is asked per packet, when its header arrives: a few KB until this connection has signed in
   const stream = new PacketStream({ limitFor: (head) => packetLimit(sock, head) });
-  sock.on('data', (chunk) => {
+  (ssl ?? raw).on('data', (chunk) => { // plaintext: bytes off the wire. Encrypted: the decrypted bytes of one record
     stream.push(chunk);
     for (;;) {
       if (sock.destroyed) return;
@@ -488,7 +520,7 @@ const server = net.createServer((sock) => {
       try { handle(sock, p, body); } catch (e) { log('blaze', `handler error ${e.stack ?? e.message}`); }
     }
   });
-  sock.on('close', () => { clearTimeout(preauth); endSession(sock); liveSockets.delete(sock); noisy.write(ip, 'connection closed'); });
+  raw.on('close', () => { clearTimeout(preauth); clearTimeout(handshake); endSession(sock); liveSockets.delete(sock); noisy.write(ip, 'connection closed'); });
 });
 exitOnListenError(server, (m) => log('blaze', m), `listen on ${BIND}:${PORT}`);
-server.listen(PORT, BIND, () => log('blaze', `blaze stub listening on ${BIND}:${server.address().port} (plaintext), unknown commands -> ${UNKNOWN}${REGISTRY ? '; registry mode' : ''}${CLOUD ? '; cloud mode' : ''}`));
+server.listen(PORT, BIND, () => log('blaze', `blaze stub listening on ${BIND}:${server.address().port} (${BLAZE_TLS ? 'encrypted: SSLv3, NCAA_BLAZE_TLS on' : 'plaintext'}), unknown commands -> ${UNKNOWN}${REGISTRY ? '; registry mode' : ''}${CLOUD ? '; cloud mode' : ''}`));

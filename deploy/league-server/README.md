@@ -454,7 +454,104 @@ Two more run once a day: `fcs-league-backup`, then `fcs-league-offsite` (it does
 - **The services come back by themselves** after a crash or when one runs out of memory. See "If a service stops".
 - **The in-game Dynasty Wire** (when it is on) shows a story or photo in a dynasty only if the member who uploaded it belongs to that dynasty.
 - **The firewall** blocks everything except SSH and the game ports.
-- **What it does not do:** the game's own protocol is not encrypted (the 2013 game cannot do modern encryption). A member's credential travels as the game sends it. Someone who can watch a member's network traffic could copy it. If that happens, disable the member on the site and issue a new credential.
+- **What it does not do:** the game port is not encrypted unless you turn that on (see "Encrypting the game port", off by default and not yet tried with the game). The 2013 game cannot do modern encryption either way. With it off, a member's credential travels as the game sends it. Someone who can watch a member's network traffic could copy it. If that happens, disable the member on the site and issue a new credential.
+
+## Encrypting the game port (optional, off by default)
+
+**What it is.** A console makes two connections. The first, to the redirector (port 42127), has always been encrypted. The second, to the game port (33152), is where the member signs in, and it is not encrypted. So the member's credential crosses the internet as readable text.
+
+`NCAA_BLAZE_TLS=on` changes two things at once:
+
+- the redirector tells the console to encrypt the second connection too;
+- the game port accepts only encrypted connections, using the same certificate as the redirector.
+
+**It is off until it has been tried with the game.** Nobody has yet seen the game sign in this way. The server side is tested. Whether the game accepts it is not known. The game may refuse the certificate on the second connection, because the certificate carries the redirector's name and not this server's. The check below settles it.
+
+**What it is worth.** This is the game's own encryption from 2013: SSLv3 with RC4. Both are long retired. It keeps a credential from being read off the wire by a casual observer, such as someone on the same Wi-Fi. It is not modern transport security. Someone with skill and a position between the member and the server could still get past it. Reissuing a credential on the site stays the remedy if one leaks.
+
+**While it is on, every member needs it to work.** There is no mixed mode. If the game does not accept it, nobody can sign in until you turn it off again.
+
+### The check, on your PC first (RPCS3)
+
+Do this on the PC league before touching the cloud server. No member is affected.
+
+1. Stop the league: run `stop-league.cmd`.
+2. Open a Command Prompt in `spike\blaze\server` and start it with the setting on:
+
+   ```
+   set NCAA_BLAZE_TLS=on
+   start-league.cmd
+   ```
+
+3. In the league window, look for these two lines:
+
+   ```
+   [ssl] SSLv3 redirector listening on ... and told to encrypt that connection (NCAA_BLAZE_TLS on, SECU 1)
+   [blaze] blaze stub listening on ... (encrypted: SSLv3, NCAA_BLAZE_TLS on), ...
+   ```
+
+4. Start the game in RPCS3 and go into Online Dynasty, as usual.
+5. Read the league window.
+
+**It works** if you see these, in this order, and the game reaches the dynasty menu:
+
+```
+[blaze] -> getServerInstance response: ...:33152 (encrypted Blaze, SECU 1)
+[blaze] encrypted connection from ... (SSLv3 RC4-SHA)
+[blaze] ps3Login for YourName (user ..., service ...) over an encrypted connection (SSLv3 RC4-SHA)
+```
+
+Then open a dynasty and save once, to see that a long session works too.
+
+**It does not work** if the game says the EA servers are unavailable. The league window says why:
+
+| Line in the league window | What it means |
+|---|---|
+| `ssl alert from ...: level 2 description 42 (bad_certificate)` or `48 (unknown_ca)` | The game refused the certificate on the game port. |
+| `ssl error (...): record processing failed: not an SSLv3 record` | The game ignored the instruction and sent unencrypted data. |
+| `ssl error (...): record processing failed: client MAC mismatch ...` or `client Finished does not verify` | The game's encryption and the server's do not agree. |
+| `closing ...: no SSL handshake within 30s` | The game connected and then said nothing. |
+| No `connection from` line after the `getServerInstance response` line | The game never tried the game port. |
+
+Whatever the result, copy those lines into the project notes. To go back: `stop-league.cmd`, close that Command Prompt, and start the league the normal way.
+
+### Turning it on, on the cloud server
+
+Only after the check above worked on the PC.
+
+1. Let the game service read the certificate key. Today only the redirector may read it.
+
+   ```bash
+   sudo systemctl edit fcs-league-blaze
+   ```
+
+   Type these two lines in the editor, then save and close:
+
+   ```
+   [Service]
+   SupplementaryGroups=fcs-redirector
+   ```
+
+2. Turn the setting on:
+
+   ```bash
+   sudo nano /etc/fcs-league/league.env      # NCAA_BLAZE_TLS=on
+   sudo systemctl restart fcs-league-redirector fcs-league-blaze
+   ```
+
+   Both services must be restarted. Connected players are dropped and reconnect.
+
+3. Watch the log while a test account signs in:
+
+   ```bash
+   journalctl -u fcs-league-blaze -u fcs-league-redirector -f
+   ```
+
+   The lines to look for are the same as in the PC check. On the cloud server the log is quieter: you get the `encrypted connection from` and `ps3Login ... over an encrypted connection` lines, and the `ssl alert` or `ssl error` lines when it fails.
+
+If the log says `cannot start: NCAA_BLAZE_TLS is on but the certificate files are not readable`, step 1 is missing.
+
+To turn it off: set `NCAA_BLAZE_TLS=off` and run the same restart command. Members do not have to change anything on their side, either way.
 
 ## Things to decide (for Eric)
 

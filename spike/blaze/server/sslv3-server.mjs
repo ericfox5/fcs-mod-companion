@@ -9,9 +9,13 @@ export const HS = { CLIENT_HELLO: 1, SERVER_HELLO: 2, CERT: 11, SERVER_DONE: 14,
 export const u24 = (n) => Buffer.from([(n >> 16) & 255, (n >> 8) & 255, n & 255]);
 
 export class Sslv3ServerSocket extends EventEmitter {
-  constructor(socket, { certDer, privateKeyPem, log = () => {} }) {
+  // strict (the game port, blaze.mjs): anything that is not a clean SSLv3 exchange closes the connection, where the
+  // default (the redirector, as it was proven with the game) writes a warning and carries on. Strict refuses: bytes
+  // that are not an SSLv3 record, a record whose check value (MAC) is wrong, a Finished message that does not verify,
+  // and application data before the handshake is complete.
+  constructor(socket, { certDer, privateKeyPem, log = () => {}, strict = false }) {
     super();
-    this.socket = socket; this.certDer = certDer; this.key = privateKeyPem; this.log = log;
+    this.socket = socket; this.certDer = certDer; this.key = privateKeyPem; this.log = log; this.strict = strict;
     this.rx = Buffer.alloc(0); this.hsBuf = Buffer.alloc(0); this.transcript = [];
     this.clientRandom = null; this.serverRandom = null; this.suite = null; this.master = null;
     this.clientDec = null; this.serverEnc = null; this.clientSeq = 0; this.serverSeq = 0; this.clientMacSecret = null; this.serverMacSecret = null;
@@ -24,6 +28,7 @@ export class Sslv3ServerSocket extends EventEmitter {
   processRecords() {
     while (this.rx.length >= 5) {
       const type = this.rx[0], ver = this.rx.readUInt16BE(1), len = this.rx.readUInt16BE(3);
+      if (this.strict && (type < REC.CCS || type > REC.APP || ver >> 8 !== 3)) throw new Error('not an SSLv3 record');
       if (this.rx.length < 5 + len) break;
       let frag = Buffer.from(this.rx.subarray(5, 5 + len)); this.rx = this.rx.subarray(5 + len);
       if (this.clientSecure) frag = this.decrypt(type, frag);
@@ -34,7 +39,7 @@ export class Sslv3ServerSocket extends EventEmitter {
     const pt = this.clientDec.process(frag);
     const data = pt.subarray(0, pt.length - this.suite.macLen), mac = pt.subarray(pt.length - this.suite.macLen);
     const expect = sslMac(this.suite.mac, this.clientMacSecret, this.clientSeq++, type, data);
-    if (!mac.equals(expect)) this.log('warn', `client MAC mismatch on record type ${type} seq ${this.clientSeq - 1}`);
+    if (!mac.equals(expect)) { if (this.strict) throw new Error(`client MAC mismatch on record type ${type} seq ${this.clientSeq - 1}`); this.log('warn', `client MAC mismatch on record type ${type} seq ${this.clientSeq - 1}`); }
     return data;
   }
   onRecord(type, ver, frag) {
@@ -45,7 +50,7 @@ export class Sslv3ServerSocket extends EventEmitter {
     }
     else if (type === REC.CCS) { this.clientSecure = true; this.clientSeq = 0; this.log('hs', 'client ChangeCipherSpec'); }
     else if (type === REC.ALERT) { this.log('alert', `client alert level ${frag[0]} description ${frag[1]}`); this.emit('alert', frag[0], frag[1]); }
-    else if (type === REC.APP) this.emit('data', frag);
+    else if (type === REC.APP) { if (this.strict && !(this.secure && this.clientSecure)) throw new Error('application data before the handshake was complete'); this.emit('data', frag); }
     else this.log('warn', `unknown record type ${type} (version 0x${ver.toString(16)})`);
   }
   processHandshake() {
@@ -93,7 +98,9 @@ export class Sslv3ServerSocket extends EventEmitter {
     this.clientDec = new RC4(kb.subarray(o, o += s.keyLen)); this.serverEnc = new RC4(kb.subarray(o, o += s.keyLen));
   }
   onClientFinished(body, raw) {
+    if (this.strict && !(this.master && this.clientSecure)) throw new Error('Finished before the key exchange');
     const expect = finishedHash(this.master, Buffer.concat(this.transcript), SENDER_CLIENT);
+    if (this.strict && (this.secure || !body.equals(expect))) throw new Error(this.secure ? 'second Finished' : 'client Finished does not verify');
     this.log('hs', `client Finished ${body.equals(expect) ? 'verified' : 'MISMATCH (continuing anyway)'}`);
     this.transcript.push(raw);
     this.sendRecord(REC.CCS, Buffer.from([1]));

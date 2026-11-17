@@ -44,6 +44,11 @@ export const opt = (flagName, envName, dflt, { env = process.env, argv = process
   if (f !== undefined) return f;
   return envName && present(env[envName]) ? String(env[envName]).trim() : dflt;
 };
+// Encrypt the game port (Blaze) with the game's own SSLv3, the way the redirector already is. Off by default. Read by
+// blaze.mjs (which then takes connections through sslv3-server.mjs) AND redirector.mjs (which then tells the game to
+// encrypt, SECU 1): both must see the same value, so it belongs in the environment both are started with.
+// --blaze-tls on|off wins over NCAA_BLAZE_TLS.
+export const blazeTls = (ctx) => switchOpt('--blaze-tls', 'NCAA_BLAZE_TLS', false, ctx);
 export const isCloud = (env = process.env) => envSwitch('NCAA_CLOUD', false, env);
 // Limits and timeouts apply in cloud mode, or anywhere with NCAA_HARDEN=1.
 export const isHardened = (env = process.env) => { const hard = envSwitch('NCAA_HARDEN', false, env); return isCloud(env) || hard; };
@@ -97,6 +102,8 @@ export function limits(env = process.env) {
     loginAttemptsPerMinute: g('NCAA_LOGIN_ATTEMPTS_PER_MIN', 10, 1, 10000),
     preauthSeconds: g('NCAA_PREAUTH_SECONDS', 120, 5, 3600),
     idleSeconds: g('NCAA_IDLE_SECONDS', 300, 30, 86400),
+    // encrypted game port (NCAA_BLAZE_TLS=on): how long a connection may take to finish the SSL handshake
+    tlsHandshakeSeconds: g('NCAA_BLAZE_TLS_HANDSHAKE_SECONDS', 30, 1, 3600),
     packetsPer10s: g('NCAA_PACKETS_PER_10S', 5000, 50, 1000000),
     // Packet sizes on the game port. Before sign-in: a few KB (the largest real one is 546 bytes). After sign-in: a
     // limit per command; megabytes only for the commands that upload table rows (largest real one: 191 KB).
@@ -131,6 +138,7 @@ export function cloudSettings({ env = process.env, argv = process.argv, needRegi
   const staticFlag = flag('--ticket-registry', argv);
   const syncWanted = parseSwitch('NCAA_REGISTRY_SYNC', env.NCAA_REGISTRY_SYNC, true) && staticFlag === undefined;
   parseSwitch('NCAA_LAN', env.NCAA_LAN, false); // a bad value is an error for every service, used or not
+  parseSwitch('NCAA_BLAZE_TLS', env.NCAA_BLAZE_TLS, false);
   const out = {
     cloud, hardened: isHardened(env), publicHost, advertise, site,
     registryFile: staticFlag ?? (present(env.NCAA_REGISTRY_FILE) ? path.resolve(env.NCAA_REGISTRY_FILE) : (cloud ? path.join(privateDir(env), 'league-registry.json') : '')),
