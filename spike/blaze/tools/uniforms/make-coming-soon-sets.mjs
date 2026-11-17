@@ -33,7 +33,7 @@ if (!DLC || !fs.existsSync(DLC)) throw new Error(`RPCS3 DLC folder not found (${
 // still dresses it in Delaware's art (the team it replaced). `chest` is the word set below the collar on both jerseys
 // (`chestStyle`: size, height, outline); `conf` the conference patch opposite the Under Armour logo (CONFERENCES).
 // Per-team design options (Eric's requests): `helmet` { shell colour, `stripes` from the centreline out (each `width` px
-// of shell per side), `logo` (an ESPN logo id instead of the save's), `logoScale`, `metallic`, `facemask` (0..1 RGB) };
+// of shell per side), `logo` (an ESPN logo id instead of the save's), `logoScale`, `metallic`, `facemask`, `chinstrap` (0..1 RGB) };
 // `brand` (the kit maker's mark replacing every UA logo, BRANDS) and `brandColour(background)`; `brandAt: 'collar'` (the
 // UA logo moved to the centre front of the collar); `collarLogo` (an ESPN logo there); `numbers` per jersey { fill (a
 // colour, or [top, bottom] for a vertical gradient), outline }; `pants` (colours instead of the save's); `jerseys(k)`
@@ -60,7 +60,18 @@ const SETS = [
   { slot: 'CMICHI', team: 'Sacred Heart', save: 'Sacred Heart', folder: 'FCS_DLC_NEC', chest: null, conf: 'CAA', brand: 'adidas', collarLogo: { espn: 2529 },
     numbers: { dark: { fill: [252, 252, 252], outline: [40, 40, 44] } }, helmet: { shell: [240, 240, 240], stripes: [{ colour: [192, 12, 36], width: 24 }], logo: { espn: 2529 } } },
   // Saint Francis is not in ESPN's 2026 FCS list (Division III from 2026): its last FCS conference, the NEC
-  { slot: 'WMICHI', team: 'Saint Francis', save: 'Saint Francis', folder: 'FCS_DLC_NEC', chest: 'RED FLASH', conf: 'NEC' },
+  // Eric's design (2026-11-17): black home jersey after the real one, white away, the red one kept as an alternate; the
+  // NEC patch and the UA logo in the accent colour (`confTint`), UA's chest bands (`chestBands`); two black helmets with
+  // black facemasks: the real helmet's bolt (`decal`: art tips laid on `from` rear / `to` front) and the wolf head logo.
+  // Numbers: William & Mary's set (`numberFont`), 10% smaller, outlined red (black on the red jersey).
+  { slot: 'WMICHI', team: 'Saint Francis', save: 'Saint Francis', folder: 'FCS_DLC_NEC', chest: 'ST FRANCIS', conf: 'NEC', confTint: true, chestBands: true, numberFont: { from: 'PITTSB_JERSEY_2010_BLUE', scale: 0.9 },
+    jerseys: (k) => { const red = k.dark.base, black = [16, 16, 16]; return [
+      { ...k.dark, base: black, num: WHITE, name: WHITE, trim: red, accent: red, sleeveArcs: false, numbers: { fill: WHITE, outline: red }, id: 'dark', shade: 'dark', officials: ['Home'] },
+      { ...k.light, accent: red, sleeveArcs: false, numbers: { fill: black, outline: red }, id: 'light', shade: 'light', officials: ['Away'] },
+      { ...k.dark, accent: black, sleeveArcs: false, numbers: { fill: WHITE, outline: black }, id: 'alt', shade: 'dark', officials: [] }]; },
+    helmets: [
+      { name: 'Black Bolt', token: 'BOLTX', shell: [16, 16, 16], facemask: [0, 0, 0], chinstrap: [0.06, 0.06, 0.06], decal: { file: 'saint-francis-bolt.png', tips: [[137, 500], [1293, 496]], from: [245, 620], to: [785, 505] } },
+      { name: 'Black Wolf', token: 'WOLFX', shell: [16, 16, 16], facemask: [0, 0, 0], chinstrap: [0.06, 0.06, 0.06], art: { file: 'saint-francis-wolf.png', faces: 'right' }, logoScale: 0.92 }] },
   // Presbyterian: a black main jersey after CFBR's 2019 Ball State black (its shoulder stripes, BALLST_SHOULDER, here white
   // with a blue outline), the blue one kept as Alt #1; adidas marks in blue or white, whichever reads on the colour
   { slot: 'HAWAII', team: 'Presbyterian', save: 'Presbyterian', folder: 'FCS_DLC_PIONEER', chest: 'BLUE HOSE', conf: 'Pioneer', brand: 'adidas',
@@ -581,6 +592,94 @@ function greyPng(raw, w, h, bpp) {
 }
 const preview = (img, file) => { const h = C.downsample(img.rgba, img.width, img.height); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, png(h.rgba, h.width, h.height)); };
 
+// `sleeveArcs: false` on a jersey: paints the donor's arc on each sleeve (the two sleeve pieces at the top of the layout)
+// in the body colour, leaving the UA logo, which shares the arcs' colour, alone. Done on the donor colours, before recolour.
+const SLEEVE_ARCS = [380, 180, 640, 640];
+function dropSleeveArcs(img, base, key) {
+  const d = key.map((v, c) => v - base[c]), dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2], [x0, y0, x1, y1] = SLEEVE_ARCS;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+    const o = (y * img.width + x) * 4; if (img.rgba[o + 3] === 0) continue;
+    const t = ((img.rgba[o] - base[0]) * d[0] + (img.rgba[o + 1] - base[1]) * d[1] + (img.rgba[o + 2] - base[2]) * d[2]) / dd; // 0 body .. 1 arc
+    if (t > 0.12) for (let c = 0; c < 3; c++) img.rgba[o + c] = base[c];
+  }
+}
+// `numberFont: { from, scale }` on a set: another team's number set instead of the donor's. `from` is a jersey bigfile
+// (DLC or archive) whose _NUMS_DECAL has the same layout (256 wide, a 256 px cell per digit, stacked) with a light fill
+// and one outline colour; each cell is redrawn `scale` times its size about its centre in the jersey's fill / outline.
+async function borrowNumbers(img, { from, scale = 1 }, { fill, outline }) {
+  const src = (await texture(await donorBig(from), '_NUMS_DECAL')).img;
+  if (src.width !== img.width || src.height !== img.height) throw new Error(`${from}: number layout ${src.width}x${src.height}, not ${img.width}x${img.height}`);
+  const W = img.width, cell = W, S = 3, sFill = keyColour(src.rgba, [236, 244, 236]), sOut = keyColour(src.rgba, [228, 180, 40]);
+  const d = sOut.map((v, c) => v - sFill[c]), dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+  // source sample inside one cell: [outline share * alpha, alpha]
+  const at = (x, y, cy0) => {
+    if (x < 0 || x >= W || y < cy0 || y >= cy0 + cell || y >= src.height) return [0, 0];
+    const o = (y * W + x) * 4, a = src.rgba[o + 3] / 255;
+    const t = Math.min(1, Math.max(0, ((src.rgba[o] - sFill[0]) * d[0] + (src.rgba[o + 1] - sFill[1]) * d[1] + (src.rgba[o + 2] - sFill[2]) * d[2]) / dd));
+    return [t * a, a];
+  };
+  const out = new Uint8ClampedArray(img.rgba.length);
+  for (let y = 0; y < img.height; y++) {
+    const cy0 = Math.floor(y / cell) * cell, mx = W / 2, my = cy0 + cell / 2;
+    for (let x = 0; x < W; x++) {
+      let ta = 0, a = 0;
+      for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
+        const sx = mx + (x + (i + 0.5) / S - mx) / scale - 0.5, sy = my + (y + (j + 0.5) / S - my) / scale - 0.5, fx = Math.floor(sx), fy = Math.floor(sy), wx = sx - fx, wy = sy - fy;
+        for (const [xx, yy, wt] of [[fx, fy, (1 - wx) * (1 - wy)], [fx + 1, fy, wx * (1 - wy)], [fx, fy + 1, (1 - wx) * wy], [fx + 1, fy + 1, wx * wy]]) { const v = at(xx, yy, cy0); ta += v[0] * wt; a += v[1] * wt; }
+      }
+      ta /= S * S; a /= S * S; const o = (y * W + x) * 4, t = a > 0 ? ta / a : 1; // transparent pixels carry the outline colour
+      for (let c = 0; c < 3; c++) out[o + c] = fill[c] * (1 - t) + outline[c] * t;
+      out[o + 3] = a * 255;
+    }
+  }
+  img.rgba.set(out);
+}
+// Art supplied for one team (archive/logos/teams/custom, not in git).
+const customArt = (file) => readPng(fs.readFileSync(path.join(LOGOS, 'custom', file)));
+function mirrored(art) {
+  const { width: w, height: h, rgba } = art, out = new Uint8ClampedArray(rgba.length);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const a = (y * w + x) * 4, b = (y * w + (w - 1 - x)) * 4; for (let j = 0; j < 4; j++) out[b + j] = rgba[a + j]; }
+  return { rgba: out, width: w, height: h };
+}
+// A large side decal (Saint Francis's bolt). In the helmet layout the two halves are the two sides of the shell with the
+// FRONT of the helmet at the middle of the texture and the back at its outer edges (the flag and warning stickers sit at
+// the outer edges; the middle gap is the face opening). The art's two lower `tips` (art px, rear then front) are laid on
+// `from` and `to` in the left half; the right half gets the mirror image about HELMET_FRONT_AXIS. 3x3 supersampled.
+const HELMET_FRONT_AXIS = 1030;
+function helmetDecal(img, art, { tips, from, to }) {
+  const [[ax, ay], [bx, by]] = tips, la = Math.hypot(bx - ax, by - ay), ld = Math.hypot(to[0] - from[0], to[1] - from[1]), k = la / ld; // art px per texture px
+  const ca = (bx - ax) / la, sa = (by - ay) / la, cd = (to[0] - from[0]) / ld, sd = (to[1] - from[1]) / ld, S = 3;
+  const px = (x, y) => { if (x < 0 || y < 0 || x >= art.width || y >= art.height) return null; const o = (y * art.width + x) * 4, a = art.rgba[o + 3] / 255; return [art.rgba[o] * a, art.rgba[o + 1] * a, art.rgba[o + 2] * a, a]; };
+  const toArt = (tx, ty) => { const dx = tx - from[0], dy = ty - from[1], u = (dx * cd + dy * sd) * k, v = (dy * cd - dx * sd) * k; return [ax + u * ca - v * sa, ay + u * sa + v * ca]; };
+  for (let y = 0; y < img.height; y++) for (let x = 0; x < img.width; x++) {
+    const mx = x + 0.5 > HELMET_FRONT_AXIS ? 2 * HELMET_FRONT_AXIS - (x + 0.5) : x + 0.5, [qx, qy] = toArt(mx, y + 0.5);
+    if (qx < -2 * k || qy < -2 * k || qx > art.width + 2 * k || qy > art.height + 2 * k) continue;
+    const p = [0, 0, 0, 0];
+    for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
+      let tx = x + (i + 0.5) / S; if (tx > HELMET_FRONT_AXIS) tx = 2 * HELMET_FRONT_AXIS - tx;
+      const [sx, sy] = toArt(tx, y + (j + 0.5) / S), fx = Math.floor(sx - 0.5), fy = Math.floor(sy - 0.5), wx = sx - 0.5 - fx, wy = sy - 0.5 - fy;
+      [[fx, fy, (1 - wx) * (1 - wy)], [fx + 1, fy, wx * (1 - wy)], [fx, fy + 1, (1 - wx) * wy], [fx + 1, fy + 1, wx * wy]].forEach(([xx, yy, wt]) => { const v = px(xx, yy); if (v) for (let c = 0; c < 4; c++) p[c] += v[c] * wt; });
+    }
+    if (!p[3]) continue;
+    const o = (y * img.width + x) * 4, a = p[3] / (S * S); for (let c = 0; c < 3; c++) img.rgba[o + c] = p[c] / (S * S) + img.rgba[o + c] * (1 - a);
+  }
+}
+// Under Armour's chest bands (Saint Francis's jersey): a tapered band each side of the front, from beside the conference
+// patch / UA logo out to the armhole seam and down along it. The centreline is a quadratic Bezier (p0 beside the patch,
+// p2 the tip), `width` px at p0 (cut square there) narrowing to `tip`, mirrored about CENTRE_X; 4x4 supersampled.
+const CHEST_BAND = { p0: [372, 1566], p1: [300, 1556], p2: [262, 1652], width: 19, tip: 4 };
+function chestBands(img, colour, B = CHEST_BAND) {
+  const S = 4, N = 160, pts = [];
+  for (let i = 0; i <= N; i++) { const t = i / N, a = (1 - t) ** 2, b = 2 * t * (1 - t), c = t * t; pts.push([a * B.p0[0] + b * B.p1[0] + c * B.p2[0], a * B.p0[1] + b * B.p1[1] + c * B.p2[1], (B.width + (B.tip - B.width) * t) / 2]); }
+  const m = B.width, x0 = Math.floor(Math.min(...pts.map((q) => q[0])) - m), x1 = Math.ceil(Math.max(...pts.map((q) => q[0])) + m), y0 = Math.floor(Math.min(...pts.map((q) => q[1])) - m), y1 = Math.ceil(Math.max(...pts.map((q) => q[1])) + m);
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+    let n = 0;
+    for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) { const sx = x + (i + 0.5) / S, sy = y + (j + 0.5) / S; if ((sx - B.p0[0]) * (B.p1[0] - B.p0[0]) + (sy - B.p0[1]) * (B.p1[1] - B.p0[1]) >= 0 && pts.some(([qx, qy, hw]) => (sx - qx) ** 2 + (sy - qy) ** 2 <= hw * hw)) n++; }
+    if (!n) continue; const a = n / (S * S);
+    for (const xx of [x, Math.round(2 * CENTRE_X) - x]) { const o = (y * img.width + xx) * 4; if (img.rgba[o + 3] === 0) continue; for (let c = 0; c < 3; c++) img.rgba[o + c] = colour[c] * a + img.rgba[o + c] * (1 - a); }
+  }
+}
+
 // installed.json (in dist) holds the SHA-1 of every file this script installed. An installed file whose hash no longer
 // matches was edited since (studio) and is kept unless --force, or unless the new bytes were built from the installed file
 // itself (`merged`: an XML with a part added). Files the script never wrote are replaced after a backup, as the studio does.
@@ -641,29 +740,37 @@ async function buildSet(s) {
   const markColour = (bg, fallback) => (s.brandColour ? s.brandColour(bg) : fallback);
 
   // helmet: shell recoloured, the two FCS logos replaced by the 128px Teambuilder logo; `helmet` options on top
-  const H = s.helmet || {}, shellColour = H.shell || k.helmet;
-  const [h5] = colourName(shellColour); const hName = `${s.slot}_HELMET_${year}_${h5}`; const hb = await cloneAs(DONOR.helmet, hName);
+  // `helmets` lists several ({ ...helmet options, token: 5 letters for the file name, name }); the first dresses Home / Away
+  const helmetDefs = s.helmets || [s.helmet || {}];
+  for (const [hi, H] of helmetDefs.entries()) {
+  const shellColour = H.shell || k.helmet;
+  const h5 = H.token || colourName(shellColour)[0]; const hName = `${s.slot}_HELMET_${year}_${h5}`; const hb = await cloneAs(DONOR.helmet, hName);
   const col = await texture(hb, '_HELMETBAKED_COL'); const shell = keyColour(col.img.rgba, [4, 44, 52]);
   const boxes = HELMET_LOGO_AREAS.map((a) => markBox(col.img, a, shell));
   fill(col.img, boxes.map(([x0, y0, x1, y1]) => [x0 - 4, y0 - 4, x1 + 4, y1 + 4]), shell);
   recolour(col.img, [{ src: shell, dst: shellColour }, { src: keyColour(col.img.rgba, [236, 236, 236]), dst: null }, { src: keyColour(col.img.rgba, [196, 196, 196]), dst: null }], HELMET_KEEP);
   const stripes = H.stripes ? await helmetStripes(col.img, H.stripes) : null;
-  const hLogo = H.logo ? cleanLogo(readPng(fs.readFileSync(path.join(LOGOS, `${H.logo.espn}.png`)))) : logo, unstamped = H.metallic ? new Uint8ClampedArray(col.img.rgba) : null;
-  for (const b of boxes) stamp(col.img, hLogo, H.logoScale ? scaleBox(b, H.logoScale) : b);
+  const hLogo = H.art ? cleanLogo(customArt(H.art.file)) : H.logo ? cleanLogo(readPng(fs.readFileSync(path.join(LOGOS, `${H.logo.espn}.png`)))) : logo, unstamped = H.metallic ? new Uint8ClampedArray(col.img.rgba) : null;
+  // a side decal instead of the two logos; or the logos, with art that `faces` right mirrored on the right half (whose
+  // front is its left edge) so it looks forward on both sides
+  if (H.decal) helmetDecal(col.img, customArt(H.decal.file), H.decal);
+  else boxes.forEach((b, i) => stamp(col.img, H.art?.faces === 'right' && i === 1 ? mirrored(hLogo) : hLogo, H.logoScale ? scaleBox(b, H.logoScale) : b));
   if (H.metallic) for (let i = 0, o = 0; o < col.img.rgba.length; i++, o += 4) { // the metal mask: stickers (stripes, logos) 0
     const logoHere = Math.abs(col.img.rgba[o] - unstamped[o]) + Math.abs(col.img.rgba[o + 1] - unstamped[o + 1]) + Math.abs(col.img.rgba[o + 2] - unstamped[o + 2]) > 12;
     col.img.rgba[o + 3] = logoHere || (stripes && stripes[i] > 0.5) ? 0 : 255;
   }
   const enc = put(col.e, col.t, col.img); const pride = entry(hb, '_PRIDE'); pride.data = enc.bytes; pride.dirty = true; // the mod's PRIDE layout is a copy of COL
-  if (H.metallic || H.facemask) { // the helmet scene's materials: shell finish, facemask colour (facemask_mat baseColor)
+  if (H.metallic || H.facemask || H.chinstrap) { // the helmet scene's materials: shell finish, facemask colour (facemask_mat baseColor)
     const sc = hb.entries.find((e) => e.name.toUpperCase() === hName.toUpperCase()), d = Buffer.from(await C.loadEntry(sc));
     if (H.metallic) for (const m of ['helmetRightShell_mat', 'helmetLeftShell_mat']) setParams(d, m, METALLIC);
     if (H.facemask) setParams(d, 'facemask_mat', { baseColor: H.facemask });
+    if (H.chinstrap) for (const m of ['chinStraps_mat', 'chinGuard_mat']) setParams(d, m, { modColor: H.chinstrap }); // straps and chin cup: a tint over their texture
     sc.data = new Uint8Array(d.buffer, d.byteOffset, d.length); sc.dirty = true;
   }
   write(s.folder, `${hName}_big.ast`, await C.buildBigfile(hb));
-  preview(H.metallic ? { ...col.img, rgba: col.img.rgba.map((v, i) => (i % 4 === 3 ? 255 : v)) } : col.img, pv('helmet')); // the metal mask is not transparency
-  parts.push(['helmet', title(shellColour), hName, ['Home', 'Away', ...extra]]);
+  preview(H.metallic ? { ...col.img, rgba: col.img.rgba.map((v, i) => (i % 4 === 3 ? 255 : v)) } : col.img, pv(helmetDefs.length > 1 ? `helmet-${h5.toLowerCase()}` : 'helmet')); // the metal mask is not transparency
+  parts.push(['helmet', H.name || title(shellColour), hName, hi === 0 ? ['Home', 'Away', ...extra] : []]);
+  }
 
   // jerseys from the one placeholder jersey
   for (const j of jerseys) {
@@ -672,19 +779,22 @@ async function buildSet(s) {
     const names = await texture(jb, '_NAME_DECAL'), kerning = await C.loadEntry(entry(jb, '_NAME'));
     const ua = s.brandAt ? maskArt(body.img, UA_LOGO, base, keyColour(body.img.rgba, [236, 244, 236])) : null; // the UA logo itself, to move it
     fill(body.img, s.brand || s.brandAt ? [...JERSEY_ERASE, scaleBox(UA_LOGO, 1.15)] : JERSEY_ERASE, base);
+    if (j.sleeveArcs === false) dropSleeveArcs(body.img, base, keyColour(body.img.rgba, [236, 244, 236]));
     recolour(body.img, [{ src: base, dst: j.base }, { src: keyColour(body.img.rgba, [236, 244, 236]), dst: j.arcs === 'base' ? j.base : j.accent }]);
     if (j.shoulders) shoulderStripes(body.img, j.shoulders);
     const letters = s.lettering?.[shade] === 'ua' ? uaColour(body.img, j.base) : j.num; // chest word and number fill
     if (s.lettering?.[shade]) console.log(`  ${shade} jersey lettering in the UA logo colour ${letters.join(',')}`);
     if (s.chest) chestText(body.img, { img: names.img, kerning }, s.chest, letters, s.chestStyle);
-    if (conf) confPatch(body.img, conf.logo, conf.mono ? j.accent : null); // j.accent: the recoloured UA logo
+    if (s.chestBands) chestBands(body.img, j.accent);
+    if (conf) confPatch(body.img, conf.logo, conf.mono || s.confTint ? j.accent : null); // j.accent: the recoloured UA logo
     const uaCx = (UA_LOGO[0] + UA_LOGO[2]) / 2, uaCy = (UA_LOGO[1] + UA_LOGO[3]) / 2, uaW = UA_LOGO[2] - UA_LOGO[0], uaH = UA_LOGO[3] - UA_LOGO[1];
     if (s.brand || s.brandAt) placeMark(body.img, s.brand ? brandArt(s.brand) : ua, markColour(j.base, j.accent), s.brandAt === 'collar' ? CENTRE_X : uaCx, uaCy, uaW, uaH);
     if (s.collarLogo) placeMark(body.img, cleanLogo(readPng(fs.readFileSync(path.join(LOGOS, `${s.collarLogo.espn}.png`)))), null, CENTRE_X, uaCy, PATCH.maxW, 30);
     put(body.e, body.t, body.img); preview(body.img, pv(`jersey-${j.id}`));
     // the numbers' colours are baked into this jersey's own NUMS_DECAL (the XML only names it): fill and trim
     const nums = await texture(jb, '_NUMS_DECAL'), N = j.numbers || s.numbers?.[j.id];
-    if (N) styleNumbers(nums.img, { fill: N.fill ?? letters, outline: N.outline }, j.trim);
+    if (s.numberFont) await borrowNumbers(nums.img, s.numberFont, { fill: N?.fill ?? letters, outline: N?.outline ?? j.trim });
+    else if (N) styleNumbers(nums.img, { fill: N.fill ?? letters, outline: N.outline }, j.trim);
     else recolour(nums.img, [{ src: keyColour(nums.img.rgba, [164, 156, 132]), dst: letters }, { src: keyColour(nums.img.rgba, [4, 44, 52]), dst: j.trim }]);
     put(nums.e, nums.t, nums.img); preview(nums.img, pv(`numbers-${j.id}`));
     for (let o = 0; o < names.img.rgba.length; o += 4) { names.img.rgba[o] = j.name[0]; names.img.rgba[o + 1] = j.name[1]; names.img.rgba[o + 2] = j.name[2]; }

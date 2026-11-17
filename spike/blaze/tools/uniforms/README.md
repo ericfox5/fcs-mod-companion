@@ -87,11 +87,16 @@ dresses it in Delaware's art), a real set to start from:
 | Slot | Team | What it gets |
 | --- | --- | --- |
 | NILLIN, BALLST, EMICHI, CMICHI, WMICHI, HAWAII, NOTDAM | Central Connecticut, Duquesne, Merrimack, Sacred Heart, Saint Francis, Presbyterian, Robert Morris | placeholder set in the Teambuilder team's colours: helmet with its logo, home and away jersey with matching numbers, two pants |
+| WMICHI (on top of the row above) | Saint Francis | its own design: black home, white away and a red alternate jersey, each with ST FRANCIS on the chest, the NEC patch and UA logo in one colour, UA's chest bands, no sleeve arcs, and William & Mary's number font drawn 10% smaller (red outline; black on the red jersey); two black helmets with black facemasks and chinstraps, "Black Bolt" (the real helmet's bolt, front tips pointing forward on both sides; dresses Home / Away) and "Black Wolf" (the wolf head logo). The two art files sit in `archive/logos/teams/custom` (not in git) |
 | WYOMIN, BOISES, UNLVXX, CLEMSO | Davidson, Drake, St. Thomas, Stonehill | the same placeholder set from school colours and the team's ESPN logo in `archive/logos/teams` (Davidson and Drake are still encrypted in the Teambuilder library, St. Thomas and Stonehill are not in it) |
 | NMEXST | Richmond | XML for the mod's own RICHMO art (already in FCS_DLC_PATRIOT, nothing pointed at it) |
 | TOLEDO | Long Island | XML for the mod's own LIUXXX art; its blue jersey ships under a helmet name and is copied as `LIUXXX_JERSEY_2020_BLUEX` |
 | DUKEXX | Villanova | its own XML (copied from the archive) plus a navy helmet option, `DUKEXX_HELMET_2026_NAVYBL`: the white helmet with the shell turned V navy and the V left where it is |
 | D1AAEX, D1AAWX, D1AANW, D1AAMW, D1AASE | Mercyhurst, West Florida, Wagner, Tuskegee, Delta State (the generic opponent slots) | placeholder sets; Wagner from its Teambuilder save, the other four (Division II, no logo on hand) in the mod's colours with a lettermark helmet (M, UWF, T, DSU) in the jersey's name font. They replace the Wagner and Tuskegee stop-gaps |
+
+Saint Francis in game (white away with the Black Bolt helmet, black home with the Black Wolf helmet):
+
+![Saint Francis's away and home uniforms in game](../../../../docs/img/saint-francis-uniforms.png)
 
 Teambuilder saves carry no uniform art, only a recipe (colours, stripe and font numbers) the game draws at run time and
 two logos. The script reads the colours and the 128px logo from the save and paints them onto the mod's FCSXXX
