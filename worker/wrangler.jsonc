@@ -43,7 +43,7 @@
     "SIGNUP_DAILY_CAP": "200",
     "SIGNUP_HARD_CAP": "2000",
     // "" leaves the "are you a person" check off (sign-up and invite links then rely on the limits above).
-    "TURNSTILE_SITE_KEY": ""
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAGEaftMbXTEUPhgE"
     // Secrets (never in this file):
     //   BRIDGE_TOKEN          wrangler secret put BRIDGE_TOKEN          the whole bridge API (imports, invites, member list ...)
     //   REGISTRY_TOKEN        wrangler secret put REGISTRY_TOKEN        optional; ONLY reads GET /api/bridge/league-registry (the
