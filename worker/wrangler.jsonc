@@ -27,7 +27,7 @@
     "BASE_YEAR": "2013",
     "SUPERSIM_ENABLED": "true",
     // Open sign-up + public league server. "false" keeps /signup closed (invite links keep working); set "true" to open it.
-    "OPEN_SIGNUP": "false",
+    "OPEN_SIGNUP": "true",
     "LEAGUE_SERVER_HOST": "play.fcs-mod.online",
     "SETUP_DOWNLOAD_URL": "https://github.com/ericfox5/fcs-mod-companion/releases/latest",
     // Who may turn league members off on /admin/members. Use ADMIN_ACCOUNT_IDS: sign in, open /account, read the

@@ -93,7 +93,15 @@ function signupPage(c: SiteCtx): Response {
         ${ts ? html`<div class="wide"><div class="cf-turnstile" data-sitekey="${c.env.TURNSTILE_SITE_KEY}"></div></div>` : ''}
       </div>
       <div class="actions"><button class="btn">Create my account</button><span class="muted">Already have one? <a href="/login">Sign in</a></span></div>
-    </form>${ts ? html`<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>` : ''}`)}</div>`;
+    </form>${ts ? html`<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>` : ''}`)}
+    ${box('Before you join', html`<ul class="plain">
+      <li><b>This is a free fan project.</b> Nothing is for sale here. We will never ask you for money, and nobody is paid for running it.</li>
+      <li><b>It is not an official service.</b> It is not affiliated with, endorsed by, or sponsored by Electronic Arts, EA SPORTS, the NCAA, or any school or conference.</li>
+      <li><b>You need your own copy of the game.</b> This site and the league server do not give you the game or any part of it.</li>
+      <li><b>What we keep about you:</b> your username, a scrambled copy of your password (we cannot read it), the name you pick for the game, and the dynasties you play. We do not ask for your email or your real name, and there are no ads.</li>
+      <li><b>Technical logs.</b> Like any online service, the website and the league server record connections, including network addresses, to keep things running and to stop abuse.</li>
+      <li><b>House rules.</b> Play fair and be decent to other members. An account that spoils it for others can be switched off.</li>
+    </ul>`)}</div>`;
   return sitePage(c, 'Join', body);
 }
 

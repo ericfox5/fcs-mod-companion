@@ -2,8 +2,8 @@
 // this PC's private files, so GitHub's runners cannot build it), then `gh release create` with installer/RELEASE.md,
 // the player guide, as the release notes. The asset is always named FCS-online.exe, so
 // https://github.com/<owner>/<repo>/releases/latest/download/FCS-online.exe always gets the newest one.
-//   npm run release [-- --roster <save folder>] [--draft] [--no-build] [--allow-dirty]
-// The release is tagged v<yyyy.mm.dd> (v<yyyy.mm.dd>-2, -3 ... later the same day) on the current commit, which must be
+//   npm run release [-- --roster <save folder>] [--minor | --major | --version X.Y.Z] [--draft] [--no-build] [--allow-dirty]
+// The release is tagged v<major>.<minor>.<patch> (patch + 1 by default; --minor, --major or --version X.Y.Z) on the current commit, which must be
 // pushed: the tag lives on GitHub, so it has to point at code that is there.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -45,9 +45,19 @@ if (sum.sha256 !== sha || !verifyChecksum(exe).ok) throw new Error(`${sum.file} 
 const built = JSON.parse(fs.readFileSync(path.join(here, 'generated', 'payload.json'), 'utf8')).builtAt;
 
 // ---- tag, notes, release
-const d = new Date(), day = `v${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+// Versions are v<major>.<minor>.<patch>. By default the patch number of the newest published version goes up by one
+// (the first release is v1.0.0). --minor or --major bump those instead; --version 1.4.0 sets it outright.
 const taken = new Set(must('gh', ['release', 'list', '--limit', '200', '--json', 'tagName', '--jq', '.[].tagName']).split('\n').filter(Boolean));
-let tag = day; for (let n = 2; taken.has(tag); n++) tag = `${day}-${n}`;
+const parseVersion = (t) => { const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(t); return m && Number(m[1]) < 1000 ? [Number(m[1]), Number(m[2]), Number(m[3])] : null; };
+const newest = [...taken].map(parseVersion).filter(Boolean).sort((a, b) => b[0] - a[0] || b[1] - a[1] || b[2] - a[2])[0];
+let next;
+if (opt('version')) { next = parseVersion(opt('version')); if (!next) throw new Error(`--version must look like 1.2.3, got ${opt('version')}`); }
+else if (!newest) next = [1, 0, 0];
+else if (has('major')) next = [newest[0] + 1, 0, 0];
+else if (has('minor')) next = [newest[0], newest[1] + 1, 0];
+else next = [newest[0], newest[1], newest[2] + 1];
+const tag = `v${next.join('.')}`;
+if (taken.has(tag)) throw new Error(`release ${tag} already exists`);
 const notes = fs.readFileSync(path.join(here, 'RELEASE.md'), 'utf8').replaceAll('{{VERSION}}', tag).replaceAll('{{BUILT}}', built).replaceAll('{{SHA256}}', sha).replaceAll('{{SIZE}}', (bytes.length / 1048576).toFixed(0));
 const notesFile = path.join(here, 'dist', 'release-notes.md'); fs.writeFileSync(notesFile, notes);
 console.log(`release ${tag}: ${exe} (${(bytes.length / 1048576).toFixed(0)} MB, sha256 ${sha.slice(0, 16)}...), commit ${head.slice(0, 7)}`);

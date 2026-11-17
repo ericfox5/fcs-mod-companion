@@ -206,6 +206,8 @@ describe('sign-up, in-game name and join code', () => {
   it('requires Turnstile only when both keys are set', async () => {
     env.TURNSTILE_SITE_KEY = 'site-key'; // no secret: still off
     expect(await (await new Client().get('/signup')).text()).not.toContain('cf-turnstile');
+    const page = await (await new Client().get('/signup')).text();
+    expect(page).toContain('Before you join'); expect(page).toContain('<li><b>This is a free fan project.</b>'); expect(page).toContain('We will never ask you for money');
     env.TURNSTILE_SECRET_KEY = 'secret-key';
     const calls: string[] = [];
     vi.stubGlobal('fetch', async (url: string, init: { body: FormData }) => { calls.push(`${url} ${init.body.get('response')} ${init.body.get('secret')}`); return new Response(JSON.stringify({ success: init.body.get('response') === 'good' })); });
