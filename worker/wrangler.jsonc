@@ -35,7 +35,7 @@
     // good, so this can never point at somebody else. ADMIN_USERNAMES (comma-separated usernames) still works for
     // accounts that already exist, but leave it empty if you can: a name listed here can never be registered by
     // anyone (nor can look-alikes of it), so create the account BEFORE you list its name, never after.
-    "ADMIN_ACCOUNT_IDS": "",
+    "ADMIN_ACCOUNT_IDS": "1",
     "ADMIN_USERNAMES": "",
     // Sign-ups per day. Past SIGNUP_DAILY_CAP the site counts as busy and gets careful instead of closing: with
     // Turnstile on, that check does the work; with it off, each network (an IPv4 address, an IPv6 /48) may create
