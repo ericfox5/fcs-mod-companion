@@ -1,0 +1,8 @@
+[Unit]
+Description=FCS league server (redirector, Blaze, QoS, site sync)
+Documentation=file:///opt/fcs-league/app/deploy/league-server/README.md
+Wants=fcs-league-redirector.service fcs-league-blaze.service fcs-league-qos.service fcs-league-sync.service
+After=network-online.target
+
+[Install]
+WantedBy=multi-user.target

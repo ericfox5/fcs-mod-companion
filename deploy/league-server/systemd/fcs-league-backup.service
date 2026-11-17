@@ -1,0 +1,26 @@
+[Unit]
+Description=FCS league server: daily backup of the league data
+Documentation=file:///opt/fcs-league/app/deploy/league-server/README.md
+# After a good backup: the optional encrypted off-site copy. It is a separate unit because it needs the network and
+# this one has none. It does nothing unless /etc/fcs-league/offsite.env exists and says FCS_OFFSITE=on.
+OnSuccess=fcs-league-offsite.service
+
+[Service]
+Type=oneshot
+# root: reads the service user's files, writes /var/backups/fcs-league (mode 700). No network, no other writes.
+ExecStart=/opt/fcs-league/app/deploy/league-server/backup.sh --local-only
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/backups/fcs-league
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
