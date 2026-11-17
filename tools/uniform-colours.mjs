@@ -11,6 +11,7 @@
 // Needs the RPCS3 folder and faces folder from ~/.ncaa-bridge/config.json (rpcs3Root, facesDir).
 import fs from 'node:fs';
 import os from 'node:os';
+import zlib from 'node:zlib';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -43,8 +44,10 @@ async function archiveEntry(name) {
   if (!arc) return null;
   const e = arc.map.get(C.hex64(C.fnv1a64(name.toUpperCase()))); if (!e) return null;
   const buf = Buffer.alloc(e.csize); fs.readSync(arc.fd, buf, 0, e.csize, e.off); const u8 = new Uint8Array(buf.buffer, buf.byteOffset, buf.length);
-  return C.isZlib(u8) ? C.zlibInflate(u8) : u8;
+  return C.isZlib(u8) ? new Uint8Array(zlib.inflateSync(buf)) : u8; // inflateSync: some archive entries carry padding after the stream
 }
+// like the codec's loadEntry, but with Node's inflateSync, which accepts bytes after the end of the stream (archive padding)
+async function loadEntry(e) { if (!e.data) e.data = C.isZlib(e.raw) ? new Uint8Array(zlib.inflateSync(e.raw)) : e.raw.slice(); return e.data; }
 async function loadBig(name) {
   const p = fileIndex.get(`${name}.ast`.toLowerCase());
   if (p) return C.parseBigfile(new Uint8Array(fs.readFileSync(p)), name);
@@ -53,7 +56,7 @@ async function loadBig(name) {
 async function loadXml(slot) {
   const names = [`${slot}_Pack0_MixAndMatch.XML`];
   for (const n of names) { const p = fileIndex.get(n.toLowerCase()); if (p) return { text: fs.readFileSync(p, 'utf8'), from: 'dlc' }; }
-  for (const n of [`${slot}_Pack0_MixAndMatch.XML`, `${slot}_Pack0_MixAndMatch`]) { const a = await archiveEntry(n); if (a) return { text: Buffer.from(a).toString('utf8'), from: 'archive' }; }
+  for (const n of [`${slot}_MIXANDMATCH`, `${slot}_Pack0_MixAndMatch.XML`, `${slot}_Pack0_MixAndMatch`]) { const a = await archiveEntry(n); if (a) return { text: Buffer.from(a).toString('utf8'), from: 'archive' }; }
   return null;
 }
 
@@ -83,7 +86,7 @@ function palette(img, { minAlpha = 128, region = null } = {}) {
 async function colourOf(bigName, suffix = '_COL') {
   const big = await loadBig(bigName); if (!big) return null;
   const e = big.entries.find((x) => x.name.toUpperCase().endsWith(suffix)); if (!e) return null;
-  const t = C.parseTexture(await C.loadEntry(e), e.name); const level = Math.min(t.mips - 1, Math.max(0, Math.round(Math.log2(Math.max(t.width, t.height) / 512))));
+  const t = C.parseTexture(await loadEntry(e), e.name); const level = Math.min(t.mips - 1, Math.max(0, Math.round(Math.log2(Math.max(t.width, t.height) / 512))));
   return palette(C.decodeMip(t, level));
 }
 
@@ -108,7 +111,7 @@ async function uniform(parts, set) {
       if (c.trim) out.trim = c.trim;
       // the number colour: the number sheet's main opaque colour (its own bigfile entry)
       const big = await loadBig(p.bigfile); const e = big?.entries.find((x) => x.name.toUpperCase().endsWith('_NUMS_DECAL'));
-      if (e) { const t = C.parseTexture(await C.loadEntry(e), e.name); const n = palette(C.decodeMip(t, Math.min(t.mips - 1, 1)), { minAlpha: 200 }); if (n) out.number = n.main; }
+      if (e) { const t = C.parseTexture(await loadEntry(e), e.name); const n = palette(C.decodeMip(t, Math.min(t.mips - 1, 1)), { minAlpha: 200 }); if (n) out.number = n.main; }
     }
     if (type === 'helmet' && c.trim) out.helmetTrim = c.trim;
     if (type === 'pants' && c.trim) out.pantsTrim = c.trim;
@@ -136,7 +139,7 @@ async function guess(prefix) {
   const jHome = by(je, (x) => lumOf(x.c.main)), jAway = by(je, (x) => -lumOf(x.c.main));
   const pHome = pa.length ? by(pa, (x) => -lumOf(x.c.main)) : null, pAway = pa.length ? by(pa, (x) => lumOf(x.c.main)) : null;
   const helmet = he.length ? by(he, (x) => (x.colour.startsWith('WHIT') ? 1 : 0)) : null;
-  const numbers = async (x) => { const big = await loadBig(x.name); const e = big?.entries.find((y) => y.name.toUpperCase().endsWith('_NUMS_DECAL')); if (!e) return null; const t = C.parseTexture(await C.loadEntry(e), e.name); return palette(C.decodeMip(t, Math.min(t.mips - 1, 1)), { minAlpha: 200 })?.main ?? null; };
+  const numbers = async (x) => { const big = await loadBig(x.name); const e = big?.entries.find((y) => y.name.toUpperCase().endsWith('_NUMS_DECAL')); if (!e) return null; const t = C.parseTexture(await loadEntry(e), e.name); return palette(C.decodeMip(t, Math.min(t.mips - 1, 1)), { minAlpha: 200 })?.main ?? null; };
   const set = async (j, p) => { const o = { jersey: j.c.main }; if (j.c.trim) o.trim = j.c.trim; const n = await numbers(j); if (n) o.number = n; if (helmet) { o.helmet = helmet.c.main; if (helmet.c.trim) o.helmetTrim = helmet.c.trim; } if (p) { o.pants = p.c.main; if (p.c.trim) o.pantsTrim = p.c.trim; } return o; };
   return { home: await set(jHome, pHome), away: await set(jAway, pAway) };
 }
