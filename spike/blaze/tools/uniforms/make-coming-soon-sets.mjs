@@ -112,9 +112,11 @@ const HELMET_OPTIONS = [
 ];
 // Jerseys whose shade the game has wrong: the game lets the other team wear only the opposite shade, so a jersey marked
 // dark that is really light (New Hampshire's silver) leaves its opponents only their white jerseys (Eric, 2026-11-18).
-// The team's XML (installed one, else the archive's) is written to the DLC folder with that part's shade changed.
+// The team's XML (installed one, else the archive's) is written to the DLC folder with those parts' shades changed.
+// New Hampshire: Silver (body light grey, navy numbers) was dark; Blue (MARYLA_JERSEY_2013_WHITE: navy body, white
+// numbers) was light.
 const SHADE_FIXES = [
-  { slot: 'MARYLA', team: 'New Hampshire', folder: 'FCS_DLC_CAA', part: 'Silver', shade: 'light' },
+  { slot: 'MARYLA', team: 'New Hampshire', folder: 'FCS_DLC_CAA', parts: { Silver: 'light', Blue: 'dark' } },
 ];
 // Slots whose own art is already in a DLC folder. LIUXXX_HELMET_2020_BLUEX is a jersey (a TENNES jersey scene with number
 // and name decals) under a helmet name; it is copied as LIUXXX_JERSEY_2020_BLUEX. Jersey uvSet/decalUV are the values the
@@ -887,10 +889,12 @@ async function buildHelmetOption(o) {
 async function fixShade(f) {
   const xmlName = `${f.slot}_Pack0_MixAndMatch.XML`, installed = fileIndex.get(xmlName.toLowerCase());
   let x = installed ? fs.readFileSync(installed, 'latin1') : Buffer.from(await archiveEntry(`${f.slot}_MIXANDMATCH`)).toString('latin1');
-  const re = new RegExp(`<part name="${f.part}" shade="(dark|light)" type="jersey">`, 'g'), hits = [...x.matchAll(re)];
-  if (hits.length !== 1) throw new Error(`${f.team} (${f.slot}): expected one "${f.part}" jersey, found ${hits.length}`);
-  if (hits[0][1] !== f.shade) x = x.replace(re, `<part name="${f.part}" shade="${f.shade}" type="jersey">`);
-  console.log(`${f.team} (${f.slot}): "${f.part}" jersey is ${f.shade}${hits[0][1] === f.shade ? ' already' : ` (was ${hits[0][1]})`}`);
+  for (const [part, shade] of Object.entries(f.parts)) {
+    const re = new RegExp(`<part name="${part}" shade="(dark|light)" type="jersey">`, 'g'), hits = [...x.matchAll(re)];
+    if (hits.length !== 1) throw new Error(`${f.team} (${f.slot}): expected one "${part}" jersey, found ${hits.length}`);
+    if (hits[0][1] !== shade) x = x.replace(re, `<part name="${part}" shade="${shade}" type="jersey">`);
+    console.log(`${f.team} (${f.slot}): "${part}" jersey is ${shade}${hits[0][1] === shade ? ' already' : ` (was ${hits[0][1]})`}`);
+  }
   write(installed ? path.basename(path.dirname(installed)) : f.folder, xmlName, Buffer.from(x, 'latin1'), true);
 }
 
