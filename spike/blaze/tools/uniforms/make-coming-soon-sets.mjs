@@ -110,6 +110,12 @@ const HELMET_OPTIONS = [
     shell: [255, 255, 255], colour: [0, 36, 99], silhouette: { rect: [680, 610, 1370, 1024], colour: [239, 235, 239] },
     logoAreas: [[330, 320, 690, 650], [1390, 315, 1730, 645]], keep: [[1426, 914, 2048, 1024]] },
 ];
+// Jerseys whose shade the game has wrong: the game lets the other team wear only the opposite shade, so a jersey marked
+// dark that is really light (New Hampshire's silver) leaves its opponents only their white jerseys (Eric, 2026-11-18).
+// The team's XML (installed one, else the archive's) is written to the DLC folder with that part's shade changed.
+const SHADE_FIXES = [
+  { slot: 'MARYLA', team: 'New Hampshire', folder: 'FCS_DLC_CAA', part: 'Silver', shade: 'light' },
+];
 // Slots whose own art is already in a DLC folder. LIUXXX_HELMET_2020_BLUEX is a jersey (a TENNES jersey scene with number
 // and name decals) under a helmet name; it is copied as LIUXXX_JERSEY_2020_BLUEX. Jersey uvSet/decalUV are the values the
 // mod uses most for the same scene template (MARSHA: Alabama State, Cornell; TENNES: Samford).
@@ -878,7 +884,18 @@ async function buildHelmetOption(o) {
   write(installed ? path.basename(path.dirname(installed)) : o.folder, xmlName, Buffer.from(x, 'latin1'), true);
 }
 
+async function fixShade(f) {
+  const xmlName = `${f.slot}_Pack0_MixAndMatch.XML`, installed = fileIndex.get(xmlName.toLowerCase());
+  let x = installed ? fs.readFileSync(installed, 'latin1') : Buffer.from(await archiveEntry(`${f.slot}_MIXANDMATCH`)).toString('latin1');
+  const re = new RegExp(`<part name="${f.part}" shade="(dark|light)" type="jersey">`, 'g'), hits = [...x.matchAll(re)];
+  if (hits.length !== 1) throw new Error(`${f.team} (${f.slot}): expected one "${f.part}" jersey, found ${hits.length}`);
+  if (hits[0][1] !== f.shade) x = x.replace(re, `<part name="${f.part}" shade="${f.shade}" type="jersey">`);
+  console.log(`${f.team} (${f.slot}): "${f.part}" jersey is ${f.shade}${hits[0][1] === f.shade ? ' already' : ` (was ${hits[0][1]})`}`);
+  write(installed ? path.basename(path.dirname(installed)) : f.folder, xmlName, Buffer.from(x, 'latin1'), true);
+}
+
 for (const s of SETS) if (!only || only.includes(s.slot)) await buildSet(s);
 for (const s of EXISTING) if (!only || only.includes(s.slot)) await buildExisting(s);
 for (const o of HELMET_OPTIONS) if (!only || only.includes(o.slot)) await buildHelmetOption(o);
+for (const f of SHADE_FIXES) if (!only || only.includes(f.slot)) await fixShade(f);
 console.log(`done; copies and previews in ${DIST}${install ? '' : ' (--no-install: DLC folders untouched)'}`);
