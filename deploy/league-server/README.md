@@ -591,3 +591,35 @@ by hand, see `docs/online-member-setup.md`.
 
 Check it from any PC: `nslookup gosredirector.ea.com <this server's address>` must print this server's address.
 Open UDP 53 in the cloud provider's firewall as well. Not yet seen working from a console.
+
+## Start year and Fang's Recruit Overhaul
+
+Two things the site sync does for a brand-new dynasty at its first preseason, both switched on by hand because they
+are settings of the sync, not of the game services. Run the commands as the sync's user (see "Running the bridge by
+hand" below).
+
+**Start year.** `od year --default 2026` makes every new dynasty start in 2026 instead of the game's 2013. The
+console takes it the next time it loads the dynasty, and only while the dynasty is still in its first preseason.
+`od year --did N --year 2026` queues it for one dynasty that was created before the default was set.
+
+**Fang's Recruit Overhaul.** The tool (`RecruitOverhaul.exe`) is a Windows program, so the server runs it through
+Wine. One-time setup:
+
+1. `sudo apt-get install -y --no-install-recommends wine64`, and a 2 GB swap file (the tool and an import together
+   need more memory than a 2 GB server has to spare).
+2. Put `RecruitOverhaul.exe` and `recruit-overhaul.sh` (from this folder) in `/var/lib/fcs-league/sync/overhaul-tool/`,
+   owned by `fcs-sync`, mode 0700.
+3. Add `"overhaulExe": "/var/lib/fcs-league/sync/overhaul-tool/recruit-overhaul.sh"` to
+   `/var/lib/fcs-league/sync/.ncaa-bridge/config.json`. The running sync picks it up by itself.
+
+From then on the sync reshapes the recruiting class of every dynasty when its first preseason file arrives, and the
+"Re-generate" button on the site's recruiting page works during the preseason. A run takes about five minutes on a
+small server (under a minute on a PC). The script exists because the tool cannot print to a pipe under Wine: it
+sends the tool's output to a file and prints that. Wine keeps its files in `/var/lib/fcs-league/sync/wine` (about
+1.2 GB). `ncaa-bridge od overhaul` shows what has been reshaped and whether a console has taken it.
+
+**Running the bridge by hand** (one line):
+
+```
+sudo systemd-run --quiet --wait --pipe -p User=fcs-sync -p Group=fcs-sync -p SupplementaryGroups=fcsleague -p EnvironmentFile=/etc/fcs-league/league.env -p EnvironmentFile=/etc/fcs-league/bridge.env -p Environment=HOME=/var/lib/fcs-league/sync -p WorkingDirectory=/opt/fcs-league/app /usr/bin/node /opt/fcs-league/app/node_modules/tsx/dist/cli.mjs bridge/src/cli.ts od overhaul
+```
