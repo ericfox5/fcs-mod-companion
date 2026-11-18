@@ -19,7 +19,7 @@ import { parseTdb } from '@ncaa/tdb';
 import { runRecruitOverhaul, classTaken, installRcat, restoreRcat, installTool, OVERHAUL_DIR, RCAT_ARCHIVE, RCAT_ENTRY } from '../recruit-overhaul.js';
 import { saveConfigKey, refreshConfig } from '../config.js';
 import { postseasonRows, fieldFilled, weeksApplied, selectField, nextRoundGames, winnerOf, mergeSiteResults, consoleOutcome, playoffDiff, siteState, autoBids, overlayPlayoff, ROUND_WEEKS, PLAYOFF_ROWS, BOWL_SEASON_WEEK, SEASON_OVER_WEEK, type PlayoffMemo, type PlayoffPatch, type SiteGame } from '../playoff.js';
-import { roundName } from '@ncaa/ncaa14';
+import { roundName, positionName, classYear } from '@ncaa/ncaa14';
 import type { TdbFile } from '@ncaa/tdb';
 import { markBooksTaken, pendingBookPointers, type BookSide } from '../playbook-pack.js';
 
@@ -909,6 +909,34 @@ export interface OdImportOptions { did?: number; files?: boolean; note?: string;
 
 // Results the console uploaded since the dynasty file was saved: the current week's finals, shown before the next
 // advance writes them into the file. Team records and streaks are bumped to match.
+// Roster edits the console made since its dynasty file was saved. In-game Edit Player (name, number, position) and
+// redshirt changes reach the league server as a PLYZ roster push, and the dynasty file itself only comes at the next
+// advance: until then the site showed the old player (Eric, 2026-11-17: a renamed player "uploaded" in game and never
+// appeared). The push is applied to the export when it is newer than the file; a PGID may repeat in a push, the last
+// row wins; a row for a player who is not on that team in the file is left alone.
+export function overlayRosterPush(ex: DynastyExport, push: { rows: Record<string, number | string>[]; updatedAt: number } | null, fileSavedAt: number): number {
+  if (!push || !push.rows.length || push.updatedAt <= fileSavedAt) return 0;
+  const latest = new Map<number, Record<string, number | string>>();
+  for (const r of push.rows) latest.set(Number(r.PGID), r);
+  const byId = new Map(ex.players.map((pl) => [pl.pgid, pl]));
+  let changed = 0;
+  for (const [pgid, r] of latest) {
+    const pl = byId.get(pgid);
+    if (!pl || pl.tgid !== Number(r.TGID)) continue;
+    const before = JSON.stringify([pl.firstName, pl.lastName, pl.pos, pl.jersey, pl.redshirt, pl.overall, pl.leaveFlag, pl.leaveType, pl.ratings.PAWR, pl.ratings.PSTR, pl.ratings.PSPD, pl.ratings.PACC, pl.ratings.PTEN, pl.ratings.PLCR]);
+    const num = (k: string, cur: number) => (typeof r[k] === 'number' ? (r[k] as number) : cur);
+    if (typeof r.PFNA === 'string' && r.PFNA.trim()) pl.firstName = r.PFNA;
+    if (typeof r.PLNA === 'string' && r.PLNA.trim()) pl.lastName = r.PLNA;
+    pl.pos = num('PPOS', pl.pos); pl.position = positionName(pl.pos);
+    pl.jersey = num('PJEN', pl.jersey); pl.redshirt = num('PRSD', pl.redshirt); pl.classLabel = classYear(pl.year, pl.redshirt);
+    pl.overall = num('POVR', pl.overall); pl.leaveFlag = num('PLFL', pl.leaveFlag); pl.leaveType = num('PTYP', pl.leaveType);
+    for (const k of ['PAWR', 'PSTR', 'PSPD', 'PACC', 'PTEN', 'PLCR']) if (typeof r[k] === 'number') pl.ratings[k] = r[k] as number;
+    for (const k of ['PFNA', 'PLNA', 'PPOS', 'PJEN', 'PRSD', 'POVR', 'PLFL', 'PTYP', 'PAWR', 'PSTR', 'PSPD', 'PACC', 'PTEN', 'PLCR']) if (r[k] !== undefined && pl.raw) pl.raw[k] = r[k];
+    if (before !== JSON.stringify([pl.firstName, pl.lastName, pl.pos, pl.jersey, pl.redshirt, pl.overall, pl.leaveFlag, pl.leaveType, pl.ratings.PAWR, pl.ratings.PSTR, pl.ratings.PSPD, pl.ratings.PACC, pl.ratings.PTEN, pl.ratings.PLCR])) changed++;
+  }
+  return changed;
+}
+
 export function overlayResults(ex: DynastyExport, games: Record<string, OdGameResult[]>): number {
   const teams = new Map(ex.teams.map((t) => [t.tgid, t]));
   let applied = 0;
@@ -942,6 +970,8 @@ export async function odImportOne(cfg: BridgeConfig, d: OdDynasty, opts: OdImpor
   const opened = openDynastyFile(blob);
   const ex = exportDynasty(opened.file);
   const overlaid = overlayResults(ex, seasonGames(d));
+  // the file's own save time: the server writes PLAY.json from the dynasty file when it arrives
+  const rosterEdits = overlayRosterPush(ex, loadPush(dir, d.id, 'PLYZ'), loadPush(dir, d.id, 'PLAY')?.updatedAt ?? 0);
   const playoffLaid = overlayPlayoff(ex, state[sk(cfg, d)]?.playoff); // the bracket as the site plays it (bridge/src/playoff.ts)
   const photos = attachPhotoKeys(ex, loadPhotoIndex(photoDirsOf(cfg)));
   const logos = attachLogoKeys(ex);
@@ -967,7 +997,7 @@ export async function odImportOne(cfg: BridgeConfig, d: OdDynasty, opts: OdImpor
     tableCounts: Object.fromEntries(ex.tables.map((t) => [t.name, t.records])), note: opts.note ?? `online dynasty ${d.id}, file ${fileId}, ${overlaid} uploaded result(s)${playoffLaid ? `, ${playoffLaid} playoff game(s)` : ''}`,
   });
   const playedCount = ex.schedule.filter((g) => isPlayed(g.status)).length;
-  console.log(`${stamp()} DID ${d.id} "${name}" -> /d/${dynasty.slug}: import #${importId}, ${ex.season.year} week ${ex.season.week}, ${playedCount} games played (${overlaid} from uploads), ${photos} player photos`);
+  console.log(`${stamp()} DID ${d.id} "${name}" -> /d/${dynasty.slug}: import #${importId}, ${ex.season.year} week ${ex.season.week}, ${playedCount} games played (${overlaid} from uploads), ${photos} player photos${rosterEdits ? `, ${rosterEdits} roster edit(s) since the file` : ''}`);
   try {
     await pushExport(api, importId, ex, { quiet: opts.quiet });
     if (opts.files !== false) {
