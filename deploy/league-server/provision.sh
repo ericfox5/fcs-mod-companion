@@ -154,7 +154,17 @@ fix_ownership() {
   # the cached member list holds credential hashes: the game service only
   if [ -f "$STATE_DIR/private/league-registry.json" ]; then chmod 0600 "$STATE_DIR/private/league-registry.json"; fi
   chown -R "$U_SYNC:$U_SYNC" "$STATE_DIR/sync"; chmod -R u=rwX,go= "$STATE_DIR/sync"
-  rm -f "$STATE_DIR/sync/.ncaa-bridge/config.json" # a PC's bridge config (it holds the token) has no place here
+  # A PC's bridge config (it holds the token and PC paths) has no place here. The two settings the owner makes on the
+  # server stay: the start year of new dynasties and the recruit overhaul tool (README "Start year and Fang's Recruit
+  # Overhaul"). Until 2026-11-17 the whole file was deleted, which switched both off at every re-run of this script.
+  SYNC_CFG="$STATE_DIR/sync/.ncaa-bridge/config.json"
+  if [ -f "$SYNC_CFG" ]; then
+    if node -e 'const fs=require("fs"),f=process.argv[1];const c=JSON.parse(fs.readFileSync(f,"utf8"));const o={};if(typeof c.startYear==="number")o.startYear=c.startYear;if(typeof c.overhaulExe==="string"&&c.overhaulExe.startsWith("/var/lib/fcs-league/sync/"))o.overhaulExe=c.overhaulExe;if(Object.keys(o).length)fs.writeFileSync(f,JSON.stringify(o,null,2)+"\n");else fs.unlinkSync(f);' "$SYNC_CFG" 2>/dev/null; then
+      [ -f "$SYNC_CFG" ] && { chown "$U_SYNC:$U_SYNC" "$SYNC_CFG"; chmod 0600 "$SYNC_CFG"; }
+    else
+      rm -f "$SYNC_CFG"
+    fi
+  fi
 }
 fix_ownership
 
